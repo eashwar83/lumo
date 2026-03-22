@@ -1,0 +1,107 @@
+import { invoke } from "@tauri-apps/api/core";
+
+type UiStateObject = Record<string, unknown>;
+type LoggingSettingsState = {
+    logPath: string | null;
+    logLevel: string;
+};
+type YtdlSettingsState = {
+    ytdlPath: string | null;
+};
+
+let cachedUiState: UiStateObject | null = null;
+let hasCachedUiState = false;
+let pendingLoad: Promise<UiStateObject | null> | null = null;
+
+const cloneUiState = <T>(value: T): T => {
+    if (value === null || value === undefined) return value;
+    return JSON.parse(JSON.stringify(value)) as T;
+};
+
+const mergeUiState = (
+    existing: UiStateObject | null,
+    patch: UiStateObject,
+): UiStateObject => ({
+    ...(existing ?? {}),
+    ...patch,
+});
+
+export const loadUiState = async <T>(): Promise<T | null> => {
+    if (hasCachedUiState) {
+        return cloneUiState(cachedUiState) as T | null;
+    }
+
+    if (!pendingLoad) {
+        pendingLoad = invoke<UiStateObject>("load_ui_state")
+            .then((state) => state ?? null)
+            .catch(() => null)
+            .finally(() => {
+                pendingLoad = null;
+            });
+    }
+
+    const state = await pendingLoad;
+    cachedUiState = state;
+    hasCachedUiState = true;
+    return cloneUiState(state) as T | null;
+};
+
+export const saveUiState = async (state: UiStateObject): Promise<void> => {
+    const serializableState = cloneUiState(state);
+    await invoke("save_ui_state", { state: serializableState });
+    if (hasCachedUiState) {
+        cachedUiState = mergeUiState(cachedUiState, serializableState);
+    }
+};
+
+export const openLogDirectory = async (): Promise<void> => {
+    await invoke("open_log_directory");
+};
+
+export const applyLoggingSettings = async (
+    logLevel?: string,
+): Promise<LoggingSettingsState | null> => {
+    try {
+        return await invoke<LoggingSettingsState>("apply_logging_settings", {
+            logLevel,
+        });
+    } catch {
+        return null;
+    }
+};
+
+export const applyYtdlSettings = async (
+    ytdlPath?: string,
+): Promise<YtdlSettingsState | null> => {
+    try {
+        return await invoke<YtdlSettingsState>("apply_ytdl_settings", {
+            ytdlPath,
+        });
+    } catch {
+        return null;
+    }
+};
+
+export const createDebouncedUiStateSaver = (delayMs = 300) => {
+    let saveTimer: number | null = null;
+
+    const cancel = () => {
+        if (saveTimer) {
+            window.clearTimeout(saveTimer);
+            saveTimer = null;
+        }
+    };
+
+    const saveDebounced = (state: UiStateObject) => {
+        cancel();
+        saveTimer = window.setTimeout(() => {
+            void saveUiState(state);
+            saveTimer = null;
+        }, delayMs);
+    };
+
+    return {
+        saveDebounced,
+        cancel,
+    };
+};

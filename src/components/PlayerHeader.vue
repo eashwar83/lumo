@@ -1,0 +1,1002 @@
+<script setup lang="ts">
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { computed, onMounted, onUnmounted, ref } from "vue";
+import type { MediaInfo } from "../mock/mediaInfo";
+import type { MediaTrack } from "../types/media";
+import { getPlaybackDisplayPathWithHomePrefix } from "../utils/playbackSource";
+
+const props = defineProps<{
+    isMacOs: boolean;
+    url: string;
+    mediaTitle: string;
+    isUrlModified: boolean;
+    isFileLoaded: boolean;
+    isInfoOpen: boolean;
+    isPlaylistOpen: boolean;
+    isLoading: boolean;
+    allowUrlInputDuringPlayback: boolean;
+    compactModeEnabled: boolean;
+    isFullscreen: boolean;
+    info: MediaInfo | null;
+    currentTime: number;
+    duration: number;
+    isPlaying: boolean;
+    videoBitrate: number;
+    playbackSpeed: number;
+    videoTracks: MediaTrack[];
+    audioTracks: MediaTrack[];
+    subTracks: MediaTrack[];
+}>();
+
+const emit = defineEmits<{
+    (e: "update:url", value: string): void;
+    (e: "load-file"): void;
+    (e: "open-file-picker"): void;
+    (e: "toggle-info"): void;
+    (e: "toggle-playlist"): void;
+    (e: "url-input-mousedown", event: MouseEvent): void;
+}>();
+
+const isWindowsPlatform =
+    typeof navigator !== "undefined" && /\bwindows\b/i.test(navigator.userAgent);
+const isLinuxPlatform =
+    typeof navigator !== "undefined" && /\blinux\b/i.test(navigator.userAgent);
+const isDesktopCompactControlsPlatform = isWindowsPlatform || isLinuxPlatform;
+const isMacPlatform =
+    typeof navigator !== "undefined" && /mac|darwin/i.test(navigator.userAgent);
+const shouldReserveMacTrafficLightsSpace = computed(
+    () => (props.isMacOs || isMacPlatform) && props.compactModeEnabled,
+);
+const isWindowMaximized = ref(false);
+const showDesktopCompactControls = computed(
+    () =>
+        isDesktopCompactControlsPlatform &&
+        props.compactModeEnabled &&
+        !props.isFullscreen,
+);
+
+const refreshWindowMaximizedState = async () => {
+    if (!isDesktopCompactControlsPlatform) return;
+    try {
+        isWindowMaximized.value = await getCurrentWindow().isMaximized();
+    } catch {
+        // Ignore in non-Tauri environments.
+    }
+};
+
+const onWindowMinimize = async () => {
+    try {
+        await getCurrentWindow().minimize();
+    } catch {
+        // Ignore in non-Tauri environments.
+    }
+};
+
+const onWindowToggleMaximize = async () => {
+    try {
+        const currentWindow = getCurrentWindow();
+        if (isWindowMaximized.value) {
+            await currentWindow.unmaximize();
+            isWindowMaximized.value = false;
+        } else {
+            await currentWindow.maximize();
+            isWindowMaximized.value = true;
+        }
+    } catch {
+        // Ignore in non-Tauri environments.
+    }
+};
+
+const onWindowClose = async () => {
+    try {
+        await getCurrentWindow().close();
+    } catch {
+        // Ignore in non-Tauri environments.
+    }
+};
+
+let unlistenWindowResized: (() => void) | null = null;
+
+onMounted(async () => {
+    if (!isDesktopCompactControlsPlatform) return;
+    await refreshWindowMaximizedState();
+    try {
+        unlistenWindowResized = await getCurrentWindow().onResized(() => {
+            void refreshWindowMaximizedState();
+        });
+    } catch {
+        // Ignore in non-Tauri environments.
+    }
+});
+
+onUnmounted(() => {
+    unlistenWindowResized?.();
+    unlistenWindowResized = null;
+});
+
+const subtitleTracks = computed(() =>
+    props.subTracks.filter((track) => Number(track.id) !== 0),
+);
+const isUrlInputLocked = computed(
+    () => props.isFileLoaded && !props.allowUrlInputDuringPlayback,
+);
+const isUrlInputFocused = ref(false);
+
+const displayUrlInputValue = computed(() =>
+    isUrlInputFocused.value
+        ? props.url
+        : getPlaybackDisplayPathWithHomePrefix(props.url),
+);
+
+const displayInfoFilePath = computed(() =>
+    props.info ? getPlaybackDisplayPathWithHomePrefix(props.info.path) : "",
+);
+const displayInfoMediaTitle = computed(() => {
+    const title = props.mediaTitle?.trim();
+    if (title) return title;
+    return displayInfoFilePath.value || "—";
+});
+
+const onUrlInputFocus = () => {
+    isUrlInputFocused.value = true;
+};
+
+const onUrlInputBlur = () => {
+    isUrlInputFocused.value = false;
+};
+
+const onUrlInputMouseDown = (event: MouseEvent) => {
+    if (!isUrlInputLocked.value) return;
+    event.preventDefault();
+    emit("url-input-mousedown", event);
+};
+
+const selectedVideoTrack = computed(() =>
+    props.videoTracks.find((track) => track.selected),
+);
+const selectedAudioTrack = computed(() =>
+    props.audioTracks.find((track) => track.selected),
+);
+const selectedSubTrack = computed(() =>
+    subtitleTracks.value.find((track) => track.selected),
+);
+const hasVideoSection = computed(() => props.videoTracks.length > 0);
+const hasAudioSection = computed(() => props.audioTracks.length > 0);
+const hasSubtitleSection = computed(() => subtitleTracks.value.length > 0);
+
+const clamp = (value: number, min: number, max: number) =>
+    Math.min(max, Math.max(min, value));
+
+const formatPlaybackTime = (seconds: number) => {
+    if (!Number.isFinite(seconds) || seconds < 0) {
+        return "00:00:00";
+    }
+    const total = Math.floor(seconds);
+    const hours = Math.floor(total / 3600)
+        .toString()
+        .padStart(2, "0");
+    const minutes = Math.floor((total % 3600) / 60)
+        .toString()
+        .padStart(2, "0");
+    const secs = Math.floor(total % 60)
+        .toString()
+        .padStart(2, "0");
+    return `${hours}:${minutes}:${secs}`;
+};
+
+const formatPercent = (value: number) => `${(value * 100).toFixed(1)}%`;
+
+const formatFps = (fps?: number | null, fallback?: string) => {
+    if (typeof fps === "number" && Number.isFinite(fps) && fps > 0) {
+        return `${fps.toFixed(3).replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1")} fps`;
+    }
+    return fallback ?? "Unknown fps";
+};
+
+const formatBitrate = (bitrate?: number | null, fallback?: string) => {
+    if (typeof bitrate === "number" && Number.isFinite(bitrate) && bitrate > 0) {
+        if (bitrate >= 1_000_000) {
+            return `${(bitrate / 1_000_000).toFixed(1)} Mbps`;
+        }
+        if (bitrate >= 1_000) {
+            return `${Math.round(bitrate / 1_000)} kbps`;
+        }
+        return `${bitrate} bps`;
+    }
+    return fallback ?? "Unknown bitrate";
+};
+
+const formatSampleRate = (sampleRate?: number | null, fallback?: string) => {
+    if (
+        typeof sampleRate === "number" &&
+        Number.isFinite(sampleRate) &&
+        sampleRate > 0
+    ) {
+        return `${(sampleRate / 1000).toFixed(sampleRate % 1000 === 0 ? 0 : 1)} kHz`;
+    }
+    return fallback ?? "Unknown sample rate";
+};
+
+const formatResolution = (
+    track?: MediaTrack,
+    fallback = "Unknown resolution",
+) => {
+    const width = track?.w ?? track?.demux_w;
+    const height = track?.h ?? track?.demux_h;
+    if (
+        typeof width === "number" &&
+        width > 0 &&
+        typeof height === "number" &&
+        height > 0
+    ) {
+        return `${width}x${height}`;
+    }
+    return fallback;
+};
+
+const formatTrackName = (track: MediaTrack, kind: "aid" | "sid" | "vid") => {
+    const name = track.title?.trim() || track.lang?.trim() || `${kind} ${track.id}`;
+    return `[${kind}=${track.id}${track.selected ? "*" : ""}] ${name}`;
+};
+
+const playbackLine = computed(() => {
+    const duration = Math.max(0, props.duration || 0);
+    const currentTime = clamp(props.currentTime || 0, 0, duration || 0);
+    const progress = duration > 0 ? currentTime / duration : 0;
+    const state = props.isPlaying ? "Playing" : "Paused";
+    return `${state} | ${formatPlaybackTime(currentTime)} / ${formatPlaybackTime(duration)} (${formatPercent(progress)}) | ${props.playbackSpeed.toFixed(2)}x`;
+});
+
+const videoLine = computed(() => {
+    const track = selectedVideoTrack.value;
+    const codec = track?.codec || track?.codec_desc || props.info?.video.codec || "Unknown codec";
+    const resolution = formatResolution(track, props.info?.video.resolution || "Unknown resolution");
+    const fps = formatFps(track?.fps ?? track?.demux_fps, props.info?.video.fps);
+    const trackBitrate =
+        typeof track?.demux_bitrate === "number" && track.demux_bitrate > 0
+            ? formatBitrate(track.demux_bitrate)
+            : undefined;
+    const bitrate = formatBitrate(props.videoBitrate, trackBitrate);
+    const color = props.info?.video.color || "Unknown color";
+    const aspect = props.info?.video.aspect ? `AR ${props.info.video.aspect}` : null;
+    return [codec, resolution, fps, bitrate, color, aspect].filter(Boolean).join(" | ");
+});
+
+const audioLine = computed(() => {
+    const track = selectedAudioTrack.value;
+    const codec = track?.codec || track?.codec_desc || props.info?.audio.codec || "Unknown codec";
+    const channels = track?.demux_channels || props.info?.audio.channels || "Unknown channels";
+    const sampleRate = formatSampleRate(track?.demux_samplerate, props.info?.audio.sampleRate);
+    const bitrate = formatBitrate(track?.demux_bitrate);
+    const language = track?.lang || props.info?.audio.language || "Unknown language";
+    return [codec, channels, sampleRate, bitrate, language]
+        .filter((value, index) => value && (index !== 3 || value !== "Unknown bitrate"))
+        .join(" | ");
+});
+
+const subtitlesLine = computed(() => {
+    return selectedSubTrack.value
+        ? formatTrackName(selectedSubTrack.value, "sid")
+        : "Off";
+});
+
+const videoTrackLine = computed(() => {
+    const track = selectedVideoTrack.value;
+    if (!track) {
+        return "No video track selected";
+    }
+    const codec = track.codec || track.codec_desc;
+    const resolution = formatResolution(track, "");
+    const fps = formatFps(track.fps ?? track.demux_fps, "");
+    const details = [codec, resolution, fps].filter(Boolean).join(", ");
+    return `${formatTrackName(track, "vid")}${details ? ` (${details})` : ""}`;
+});
+
+const audioTrackLine = computed(() => {
+    const track = selectedAudioTrack.value;
+    if (!track) {
+        return "No audio track selected";
+    }
+    const codec = track.codec || track.codec_desc;
+    const channels = track.demux_channels;
+    const sampleRate = formatSampleRate(track.demux_samplerate, "");
+    const details = [codec, channels, sampleRate].filter(Boolean).join(", ");
+    return `${formatTrackName(track, "aid")}${details ? ` (${details})` : ""}`;
+});
+</script>
+
+<template>
+    <div
+        class="top-bar ui-surface"
+        :class="{
+            'top-bar--compact': props.compactModeEnabled,
+            'top-bar--compact-macos': shouldReserveMacTrafficLightsSpace,
+            'top-bar--compact-non-playback':
+                props.compactModeEnabled && !props.isFileLoaded,
+            'top-bar--fullscreen': props.isFullscreen,
+        }"
+    >
+        <form class="top-bar__row" @submit.prevent="emit('load-file')">
+            <div class="top-bar__content">
+                <button
+                    v-if="!props.compactModeEnabled || props.isFileLoaded"
+                    class="icon-button top-bar__info"
+                    :class="{ 'top-bar__info--active': props.isInfoOpen }"
+                    type="button"
+                    title="Info (I)"
+                    :disabled="!props.isFileLoaded"
+                    :aria-disabled="!props.isFileLoaded"
+                    :aria-pressed="props.isInfoOpen"
+                    @click="emit('toggle-info')"
+                >
+                    <svg
+                        class="icon-outline"
+                        xmlns="http://www.w3.org/2000/svg"
+                        height="24px"
+                        viewBox="0 -960 960 960"
+                        width="24px"
+                        fill="currentColor"
+                    >
+                        <path
+                            d="M440-280h80v-240h-80v240Zm68.5-331.5Q520-623 520-640t-11.5-28.5Q497-680 480-680t-28.5 11.5Q440-657 440-640t11.5 28.5Q463-600 480-600t28.5-11.5ZM480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm0-80q134 0 227-93t93-227q0-134-93-227t-227-93q-134 0-227 93t-93 227q0 134 93 227t227 93Zm0-320Z"
+                        />
+                    </svg>
+                </button>
+                <button
+                    class="icon-button top-bar__playlist"
+                    :class="{ 'top-bar__playlist--active': props.isPlaylistOpen }"
+                    type="button"
+                    title="Playlist"
+                    :aria-pressed="props.isPlaylistOpen"
+                    @click="emit('toggle-playlist')"
+                >
+                    <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                    >
+                        <path
+                            d="M4 6h12v2H4V6zm0 5h12v2H4v-2zm0 5h8v2H4v-2zm14-6h2v6.17l1.59-1.58L23 16l-4 4-4-4 1.41-1.41L18 16.17V10z"
+                        />
+                    </svg>
+                </button>
+                <input
+                    class="top-bar__input"
+                    :class="{
+                        'top-bar__input--loading': props.isLoading,
+                        'top-bar__input--readonly': isUrlInputLocked,
+                    }"
+                    :value="displayUrlInputValue"
+                    :readonly="isUrlInputLocked"
+                    placeholder="Enter a url or select a file..."
+                    @mousedown="onUrlInputMouseDown"
+                    @focus="onUrlInputFocus"
+                    @blur="onUrlInputBlur"
+                    @input="
+                        emit(
+                            'update:url',
+                            ($event.target as HTMLInputElement).value,
+                        )
+                    "
+                />
+
+                <button
+                    v-if="props.isUrlModified"
+                    class="icon-button top-bar__action"
+                    type="submit"
+                    title="Play"
+                    :disabled="props.isLoading"
+                    :aria-disabled="props.isLoading"
+                >
+                    <svg
+                        class="icon-outline icon-outline-play"
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <path d="M8 5v14l11-7z" />
+                    </svg>
+                </button>
+
+                <button
+                    v-else
+                    class="icon-button top-bar__action"
+                    type="button"
+                    @click="emit('open-file-picker')"
+                    title="Open File"
+                >
+                    <svg
+                        class="icon-outline"
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <path
+                            d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
+                        ></path>
+                    </svg>
+                </button>
+
+                <div
+                    v-if="showDesktopCompactControls"
+                    class="top-bar__window-controls"
+                    data-window-no-drag
+                >
+                    <button
+                        class="top-bar__window-control top-bar__window-control--minimize"
+                        type="button"
+                        title="Minimize"
+                        aria-label="Minimize window"
+                        @click.stop="onWindowMinimize"
+                    >
+                        <svg viewBox="0 0 10 10" aria-hidden="true">
+                            <line
+                                x1="1.6"
+                                y1="5.3"
+                                x2="8.4"
+                                y2="5.3"
+                                stroke="currentColor"
+                                stroke-width="1.2"
+                                stroke-linecap="round"
+                            />
+                        </svg>
+                    </button>
+                    <button
+                        class="top-bar__window-control top-bar__window-control--maximize"
+                        type="button"
+                        :title="isWindowMaximized ? 'Restore' : 'Maximize'"
+                        :aria-label="
+                            isWindowMaximized
+                                ? 'Restore window'
+                                : 'Maximize window'
+                        "
+                        @click.stop="onWindowToggleMaximize"
+                    >
+                        <svg
+                            v-if="!isWindowMaximized"
+                            viewBox="0 0 10 10"
+                            aria-hidden="true"
+                        >
+                            <rect
+                                x="1.6"
+                                y="1.6"
+                                width="6.8"
+                                height="6.8"
+                                rx="0.8"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="1.1"
+                                stroke-linejoin="round"
+                            />
+                        </svg>
+                        <svg v-else viewBox="0 0 10 10" aria-hidden="true">
+                            <rect
+                                x="3"
+                                y="1.6"
+                                width="5.4"
+                                height="5.4"
+                                rx="0.7"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="1"
+                                stroke-linejoin="round"
+                            />
+                            <rect
+                                x="1.6"
+                                y="3"
+                                width="5.4"
+                                height="5.4"
+                                rx="0.7"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="1"
+                                stroke-linejoin="round"
+                            />
+                        </svg>
+                    </button>
+                    <button
+                        class="top-bar__window-control top-bar__window-control--close"
+                        type="button"
+                        title="Close"
+                        aria-label="Close window"
+                        @click.stop="onWindowClose"
+                    >
+                        <svg viewBox="0 0 10 10" aria-hidden="true">
+                            <line
+                                x1="2.1"
+                                y1="2.1"
+                                x2="7.9"
+                                y2="7.9"
+                                stroke="currentColor"
+                                stroke-width="1.2"
+                                stroke-linecap="round"
+                            />
+                            <line
+                                x1="7.9"
+                                y1="2.1"
+                                x2="2.1"
+                                y2="7.9"
+                                stroke="currentColor"
+                                stroke-width="1.2"
+                                stroke-linecap="round"
+                            />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div
+                v-if="props.isInfoOpen && props.info"
+                class="top-bar__info-panel"
+            >
+                <div class="info-panel__title">Playback Info (I)</div>
+                <div class="info-panel__meta">{{ props.info.title }}</div>
+
+                <div class="info-panel__section">
+                    <div class="info-panel__label">Playback</div>
+                    <div class="info-panel__value">{{ playbackLine }}</div>
+                </div>
+
+                <div class="info-panel__section">
+                    <div class="info-panel__label">General</div>
+                    <div class="info-panel__kv">
+                        <div class="info-panel__kv-key">Path</div>
+                        <div class="info-panel__kv-value">{{ displayInfoFilePath }}</div>
+                        <div class="info-panel__kv-key">Title</div>
+                        <div class="info-panel__kv-value">{{ displayInfoMediaTitle }}</div>
+                        <div class="info-panel__kv-key">Container</div>
+                        <div class="info-panel__kv-value">
+                            {{ props.info.container }} | {{ props.info.size }} | {{ props.info.duration }}
+                        </div>
+                    </div>
+                </div>
+
+                <div v-if="hasVideoSection" class="info-panel__section">
+                    <div class="info-panel__label">Video</div>
+                    <div class="info-panel__value">{{ videoLine }}</div>
+                    <div class="info-panel__value info-panel__value--sub">
+                        {{ videoTrackLine }}
+                    </div>
+                </div>
+
+                <div v-if="hasAudioSection" class="info-panel__section">
+                    <div class="info-panel__label">Audio</div>
+                    <div class="info-panel__value">{{ audioLine }}</div>
+                    <div class="info-panel__value info-panel__value--sub">
+                        {{ audioTrackLine }}
+                    </div>
+                </div>
+
+                <div v-if="hasSubtitleSection" class="info-panel__section">
+                    <div class="info-panel__label">Subtitles</div>
+                    <div class="info-panel__value">{{ subtitlesLine }}</div>
+                </div>
+            </div>
+        </form>
+    </div>
+</template>
+
+<style scoped>
+.top-bar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    --top-bar-row-min-height: 0px;
+    --top-bar-row-gap: 8px;
+    --top-bar-row-padding-left: 8px;
+    --top-bar-input-padding: 6px 4px;
+    --top-bar-input-font-size: 1em;
+    --top-bar-input-line-height: normal;
+    --top-bar-input-margin-top: 0px;
+    --top-bar-action-size: 32px;
+    --top-bar-action-padding: 4px;
+    --top-bar-action-margin-top: 0px;
+    --top-bar-info-size: 32px;
+    --top-bar-info-margin-top: 6px;
+    --top-bar-info-margin-left: 0px;
+    --top-bar-info-svg-size: 80%;
+    --top-bar-info-icon-scale: 0.9;
+    --top-bar-playlist-size: 36px;
+    --top-bar-playlist-margin-top: 4px;
+    --top-bar-playlist-svg-size: 90%;
+    --top-bar-info-panel-top: 48px;
+    --top-bar-info-panel-left: 8px;
+    padding: 0 12px 8px 0;
+    transition: opacity 0.3s;
+    z-index: 100;
+    pointer-events: auto;
+}
+
+.top-bar--compact {
+    --top-bar-row-min-height: 28px;
+    --top-bar-row-gap: 6px;
+    --top-bar-row-padding-left: 8px;
+    --top-bar-input-padding: 3px 4px;
+    --top-bar-input-font-size: 0.88em;
+    --top-bar-input-line-height: 1.2;
+    --top-bar-input-margin-top: -2px;
+    --top-bar-action-size: 28px;
+    --top-bar-action-padding: 3px;
+    --top-bar-action-margin-top: -1px;
+    --top-bar-info-size: 30px;
+    --top-bar-info-margin-top: -1px;
+    --top-bar-info-margin-left: 0px;
+    --top-bar-info-svg-size: 86%;
+    --top-bar-info-icon-scale: 0.96;
+    --top-bar-playlist-size: 31px;
+    --top-bar-playlist-margin-top: -1px;
+    --top-bar-playlist-svg-size: 96%;
+    --top-bar-info-panel-top: 42px;
+    --top-bar-info-panel-left: 8px;
+}
+
+.top-bar--compact-macos {
+    --top-bar-row-padding-left: 66px;
+    --top-bar-info-panel-left: 68px;
+}
+
+.top-bar--compact.top-bar--compact-non-playback {
+    --top-bar-row-min-height: 0px;
+    --top-bar-input-padding: 6px 4px;
+    --top-bar-input-font-size: 1em;
+    --top-bar-input-line-height: normal;
+    --top-bar-input-margin-top: 0px;
+    --top-bar-action-size: 32px;
+    --top-bar-action-padding: 4px;
+    --top-bar-action-margin-top: 0px;
+    --top-bar-playlist-size: 36px;
+    --top-bar-playlist-margin-top: 4px;
+    --top-bar-playlist-svg-size: 90%;
+}
+
+.top-bar--compact-macos.top-bar--fullscreen {
+    --top-bar-row-padding-left: 8px;
+    --top-bar-info-margin-left: 0px;
+    --top-bar-info-panel-left: 8px;
+}
+
+.top-bar__row {
+    width: 100%;
+    min-height: var(--top-bar-row-min-height);
+}
+
+.top-bar__content {
+    display: flex;
+    width: 100%;
+    box-sizing: border-box;
+    gap: var(--top-bar-row-gap);
+    align-items: center;
+    padding-left: var(--top-bar-row-padding-left);
+    padding-top: 0;
+}
+
+.top-bar__input {
+    flex: 1;
+    background-color: transparent;
+    border: none;
+    border-bottom: 1px solid #aaa;
+    padding: var(--top-bar-input-padding);
+    font-size: var(--top-bar-input-font-size);
+    line-height: var(--top-bar-input-line-height);
+    margin-top: var(--top-bar-input-margin-top);
+    color: inherit;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.top-bar__info + .top-bar__input,
+.top-bar__playlist ~ .top-bar__input {
+    margin-left: -4px;
+}
+
+.top-bar__info + .top-bar__playlist {
+    margin-left: -12px;
+}
+
+.top-bar__input:focus {
+    border-bottom-color: var(--focus-color);
+}
+
+.top-bar__input--loading {
+    border-bottom-color: rgba(57, 108, 216, 0.45);
+    background-image:
+        linear-gradient(
+            90deg,
+            rgba(57, 108, 216, 0) 0%,
+            rgba(57, 108, 216, 1) 50%,
+            rgba(57, 108, 216, 0) 100%
+        );
+    background-size: 40% 2px;
+    background-repeat: no-repeat;
+    background-position: -40% 100%;
+    animation: input-loading 6s ease-in-out infinite alternate;
+}
+
+.top-bar__input--readonly {
+    border-bottom: none;
+    background-image: none;
+    animation: none;
+    user-select: none;
+    -webkit-user-select: none;
+    caret-color: transparent;
+    cursor: default;
+}
+
+@keyframes input-loading {
+    0% {
+        background-position: -40% 100%;
+    }
+    100% {
+        background-position: 140% 100%;
+    }
+}
+.top-bar__action {
+    padding: var(--top-bar-action-padding);
+    margin-top: var(--top-bar-action-margin-top);
+    color: white;
+    transition:
+        color 0.2s,
+        transform 0.1s;
+    width: var(--top-bar-action-size);
+    height: var(--top-bar-action-size);
+    position: relative;
+}
+.top-bar__action svg {
+    width: 100%;
+    height: 100%;
+}
+.top-bar__action .icon-outline {
+    stroke-width: 1.5;
+    transform: scale(0.9);
+    transform-origin: center;
+}
+.top-bar__action .icon-outline-play {
+    transform: scale(1.15);
+}
+.top-bar__action:hover {
+    color: #ccc;
+    transform: scale(1.1);
+}
+.top-bar__action:active {
+    transform: scale(0.95);
+}
+
+.top-bar__info {
+    margin-top: var(--top-bar-info-margin-top);
+    margin-left: var(--top-bar-info-margin-left);
+    color: white;
+    transition:
+        color 0.2s,
+        transform 0.1s;
+    width: var(--top-bar-info-size);
+    height: var(--top-bar-info-size);
+}
+.top-bar__info svg {
+    width: var(--top-bar-info-svg-size);
+    height: var(--top-bar-info-svg-size);
+}
+.top-bar__info .icon-outline {
+    stroke-width: 1.5;
+    transform: scale(var(--top-bar-info-icon-scale));
+    transform-origin: center;
+}
+.top-bar__info:hover {
+    color: #ccc;
+    transform: scale(1.1);
+}
+.top-bar__info:active {
+    transform: scale(0.95);
+}
+.top-bar__info--active {
+    color: #8fb3ff;
+}
+.top-bar__info:disabled,
+.top-bar__info[aria-disabled="true"] {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.top-bar__action:disabled,
+.top-bar__action[aria-disabled="true"] {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.top-bar__playlist {
+    margin-top: var(--top-bar-playlist-margin-top);
+    color: white;
+    transition:
+        color 0.2s,
+        transform 0.1s;
+    width: var(--top-bar-playlist-size);
+    height: var(--top-bar-playlist-size);
+}
+
+.top-bar__playlist svg {
+    width: var(--top-bar-playlist-svg-size);
+    height: var(--top-bar-playlist-svg-size);
+}
+
+.top-bar__playlist:hover {
+    color: #ccc;
+    transform: scale(1.1);
+}
+
+.top-bar__playlist:active {
+    transform: scale(0.95);
+}
+
+.top-bar__playlist--active {
+    color: #8fb3ff;
+}
+
+.top-bar__window-controls {
+    margin-left: 2px;
+    margin-right: -12px;
+    margin-top: -4px;
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: stretch;
+    border-radius: 6px;
+    overflow: hidden;
+    border: none;
+    background: rgba(22, 25, 31, 0.36);
+}
+
+.top-bar__window-control {
+    width: 34px;
+    height: 26px;
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.88);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: default;
+    transition:
+        background-color 0.12s ease,
+        color 0.12s ease;
+}
+
+.top-bar__window-control + .top-bar__window-control {
+    border-left: none;
+}
+
+.top-bar__window-control svg {
+    width: 10px;
+    height: 10px;
+    transform: translateY(1px);
+}
+
+.top-bar__window-control--minimize:hover,
+.top-bar__window-control--maximize:hover {
+    background: rgba(255, 255, 255, 0.16);
+    color: #ffffff;
+}
+
+.top-bar__window-control--close:hover {
+    background: #c42b1c;
+    color: #ffffff;
+}
+
+.top-bar__window-control:active {
+    filter: brightness(0.92);
+}
+
+.top-bar__info-panel {
+    position: absolute;
+    top: var(--top-bar-info-panel-top);
+    left: var(--top-bar-info-panel-left);
+    width: min(560px, 94vw);
+    max-height: min(72vh, 720px);
+    overflow: auto;
+    padding: 14px 16px;
+    border-radius: 14px;
+    background: rgba(18, 18, 18, 0.76);
+    color: #f8f8f8;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(10px);
+    z-index: 120;
+}
+
+.info-panel__title {
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.info-panel__meta {
+    margin-top: 4px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.7);
+    word-break: break-word;
+}
+
+.info-panel__section {
+    margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.info-panel__label {
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.info-panel__value {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.88);
+    line-height: 1.5;
+    word-break: break-word;
+}
+
+.info-panel__value--sub {
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.info-panel__kv {
+    display: grid;
+    grid-template-columns: 74px 1fr;
+    gap: 4px 8px;
+}
+
+.info-panel__kv-key {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.62);
+    text-transform: uppercase;
+}
+
+.info-panel__kv-value {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.85);
+    word-break: break-word;
+}
+
+:root[data-theme="light"] .top-bar__action,
+:root[data-theme="light"] .top-bar__info,
+:root[data-theme="light"] .top-bar__playlist {
+    color: rgba(28, 38, 52, 0.9);
+}
+
+:root[data-theme="light"] .top-bar__action:hover,
+:root[data-theme="light"] .top-bar__info:hover,
+:root[data-theme="light"] .top-bar__playlist:hover {
+    color: rgba(18, 28, 40, 1);
+}
+
+:root[data-theme="light"] .top-bar__info--active,
+:root[data-theme="light"] .top-bar__playlist--active {
+    color: #2f65c9;
+}
+
+:root[data-theme="light"] .top-bar__window-controls {
+    background: rgba(245, 247, 250, 0.8);
+}
+
+:root[data-theme="light"] .top-bar__window-control {
+    color: rgba(33, 44, 57, 0.88);
+}
+
+:root[data-theme="light"] .top-bar__window-control + .top-bar__window-control {
+    border-left: none;
+}
+
+:root[data-theme="light"] .top-bar__window-control--minimize:hover,
+:root[data-theme="light"] .top-bar__window-control--maximize:hover {
+    background: rgba(27, 44, 64, 0.12);
+    color: rgba(20, 32, 46, 0.95);
+}
+</style>

@@ -1,0 +1,62 @@
+{
+  "bundle": {
+    "fileAssociations": [
+      {
+        "name": "Soia Media",
+        "description": "Media file",
+        "role": "Viewer",
+        "ext": [
+          "mp4",
+          "mkv",
+          "mk3d",
+          "mov",
+          "avi",
+          "webm",
+          "flv",
+          "wmv",
+          "m4v",
+          "mpg",
+          "mpeg",
+          "3gp",
+          "3g2",
+          "ts",
+          "mts",
+          "m2ts",
+          "ogv",
+          "rm",
+          "rmvb",
+          "divx",
+          "asf",
+          "mp2",
+          "mpv",
+          "qt",
+          "mp3",
+          "m4a",
+          "aac",
+          "flac",
+          "wav",
+          "aiff",
+          "aif",
+          "alac",
+          "m4b",
+          "ogg",
+          "oga",
+          "opus",
+          "wma",
+          "amr",
+          "ac3",
+          "dts",
+          "caf"
+        ]
+      }
+    ],
+    "resources": {
+      "libs/mpv/*.dll": ""
+    },
+    "windows": {
+      "nsis": {
+        "installerHooks": "./windows/hooks.nsh"
+      }
+    }
+  }
+}

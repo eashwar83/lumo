@@ -1,0 +1,57 @@
+name: "Build Soia macOS Bundle"
+description: "Shared macOS build steps for CI and release workflows"
+
+inputs:
+  arch:
+    description: "Target architecture for runtime libs"
+    required: true
+  deployment_target:
+    description: "MACOSX_DEPLOYMENT_TARGET value"
+    required: true
+  github_token:
+    description: "GitHub token for release API requests"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Show active Xcode
+      shell: bash
+      run: xcodebuild -version
+
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: 10.30.3
+        run_install: false
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+        cache: pnpm
+
+    - name: Setup Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache Rust build
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: src-tauri -> target
+
+    - name: Install pnpm dependencies
+      shell: bash
+      run: pnpm install --frozen-lockfile --ignore-scripts
+
+    - name: Prepare runtime libs
+      shell: bash
+      env:
+        MPV_TARGET_ARCH: ${{ inputs.arch }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: pnpm setup:libs
+
+    - name: Build Soia App
+      shell: bash
+      env:
+        MACOSX_DEPLOYMENT_TARGET: ${{ inputs.deployment_target }}
+      run: pnpm bundle:mac:release

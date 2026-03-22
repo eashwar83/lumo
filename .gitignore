@@ -1,0 +1,40 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Dependencies / build output
+node_modules
+dist
+dist-ssr
+*.local
+
+# OS / editor files
+.DS_Store
+*.dylib
+.zed
+.idea
+.vscode/*
+!.vscode/extensions.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Vendor binaries
+*/vendor/mpv
+
+!src-tauri/libs/soia_utils/
+!src-tauri/libs/soia_utils/**/
+!src-tauri/libs/soia_utils/**/*.dylib
+!src-tauri/libs/soia_utils/**/*.so
+!src-tauri/libs/soia_utils/**/*.so.*
+!src-tauri/libs/soia_utils/**/*.dll
+!src-tauri/libs/soia_utils/**/*.lib
+!src-tauri/libs/soia_utils/**/*.dll.a
+
+# Generated runtime bundle config
+src-tauri/tauri.runtime.macos.json

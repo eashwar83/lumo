@@ -1,0 +1,45 @@
+[package]
+name = "soia"
+version = "0.1.0"
+description = "A Tauri App"
+license = "GPL-3.0-only"
+authors = ["FengZeng"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "soia_lib"
+crate-type = ["lib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api"] }
+tauri-plugin-opener = "2.5.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.31", features = ["bundled"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+roxmltree = "0.20"
+url = "2.5"
+percent-encoding = "2.3"
+libc = "0.2"
+cfg-if = "1.0"
+
+# For getting raw window handles (optional, but can be helpful)
+raw-window-handle = "0.6" # Ensure this is compatible with tao's version
+tauri-plugin-dialog = "2.6.0"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.1"
+objc2-app-kit = { version = "0.3.1", features = ["NSWindow", "NSView", "NSPanel", "NSResponder", "NSButton", "NSControl", "NSMenu", "NSMenuItem", "NSBitmapImageRep", "NSGraphics", "NSImageRep", "NSEvent", "NSScreen", "NSTrackingArea", "NSColor"] }
+objc2-core-foundation = { version = "0.3.1", features = ["CFCGTypes"] }
+objc2-foundation = { version = "0.3.1", features = ["NSString", "NSOperation"] }
+objc2-metal = "0.3.1"
+objc2-quartz-core = "0.3.1"
+block2 = "0.6.1"

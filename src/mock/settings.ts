@@ -1,0 +1,273 @@
+import {
+    THEME_GRAPHITE_OPTION,
+    THEME_OPTIONS,
+    THEME_SETTING_GROUP_TITLE,
+    THEME_SETTING_LABEL,
+} from "../constants/theme";
+
+export type SelectSettingItem = {
+    label: string;
+    displayLabel?: string;
+    value: string;
+    type: "select";
+    options: string[];
+};
+
+export type ToggleSettingItem = {
+    label: string;
+    displayLabel?: string;
+    value: string;
+    type: "toggle";
+    onValue: string;
+    offValue: string;
+};
+
+export type SliderSettingItem = {
+    label: string;
+    displayLabel?: string;
+    value: string;
+    type: "slider";
+    min: number;
+    max: number;
+    step: number;
+    unit: string;
+};
+
+export type PathSettingItem = {
+    label: string;
+    displayLabel?: string;
+    value: string;
+    type: "path";
+    placeholder?: string;
+    browseTitle?: string;
+};
+
+export type SettingItem =
+    | SelectSettingItem
+    | ToggleSettingItem
+    | SliderSettingItem
+    | PathSettingItem;
+export type SettingGroup = { title: string; items: SettingItem[] };
+
+export const YTDL_PATH_SETTING_LABEL = "SOIA_YTDL_PATH";
+export const LOG_PATH_SETTING_LABEL = "SOIA_LOG_PATH";
+export const LOG_LEVEL_SETTING_LABEL = "SOIA_LOG_LEVEL";
+export const SKIP_INTRO_SECONDS_SETTING_LABEL = "SKIP_INTRO_SECONDS";
+export const SEEK_STEP_SETTING_LABEL = "Skip Step";
+export const ENABLE_COMPACT_MODE_SETTING_LABEL = "ENABLE_COMPACT_MODE";
+export const AUTO_PLAY_ON_OPEN_SETTING_LABEL = "Auto‑Play";
+export const AUTO_PLAY_NEXT_IN_PLAYLIST_SETTING_LABEL =
+    "AUTO_PLAY_NEXT_IN_PLAYLIST";
+export const ALLOW_URL_INPUT_DURING_PLAYBACK_SETTING_LABEL =
+    "ALLOW_URL_INPUT_DURING_PLAYBACK";
+export const DEFAULT_SPEED_SETTING_LABEL = "Default Speed";
+export const SETTINGS_UPDATED_EVENT = "soia:settings-updated";
+
+export const defaultSettingGroups: SettingGroup[] = [
+    {
+        title: THEME_SETTING_GROUP_TITLE,
+        items: [
+            {
+                label: THEME_SETTING_LABEL,
+                value: THEME_GRAPHITE_OPTION,
+                type: "select",
+                options: [...THEME_OPTIONS],
+            },
+            {
+                label: ENABLE_COMPACT_MODE_SETTING_LABEL,
+                displayLabel: "Compact Mode",
+                value: "On",
+                type: "toggle",
+                onValue: "On",
+                offValue: "Off",
+            },
+        ],
+    },
+    {
+        title: "Playback",
+        items: [
+            {
+                label: AUTO_PLAY_ON_OPEN_SETTING_LABEL,
+                displayLabel: "Auto-Play on Open",
+                value: "On",
+                type: "toggle",
+                onValue: "On",
+                offValue: "Off",
+            },
+            {
+                label: AUTO_PLAY_NEXT_IN_PLAYLIST_SETTING_LABEL,
+                displayLabel: "Auto-Play Next in Playlist",
+                value: "On",
+                type: "toggle",
+                onValue: "On",
+                offValue: "Off",
+            },
+            {
+                label: ALLOW_URL_INPUT_DURING_PLAYBACK_SETTING_LABEL,
+                displayLabel: "Allow URL Input During Playback",
+                value: "On",
+                type: "toggle",
+                onValue: "On",
+                offValue: "Off",
+            },
+            {
+                label: DEFAULT_SPEED_SETTING_LABEL,
+                value: "1.0x",
+                type: "select",
+                options: ["0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "2.0x"],
+            },
+            {
+                label: SEEK_STEP_SETTING_LABEL,
+                displayLabel: "Seek Step",
+                value: "5",
+                type: "slider",
+                min: 5,
+                max: 100,
+                step: 1,
+                unit: "s",
+            },
+            {
+                label: SKIP_INTRO_SECONDS_SETTING_LABEL,
+                displayLabel: "Skip Intro For New Videos",
+                value: "0",
+                type: "slider",
+                min: 0,
+                max: 300,
+                step: 1,
+                unit: "s",
+            },
+            // v1: Loop setting is not supported yet. Keep this block for future rollout.
+            // {
+            //     label: "Loop",
+            //     value: "Off",
+            //     type: "toggle",
+            //     onValue: "On",
+            //     offValue: "Off",
+            // },
+        ],
+    },
+    // v1: Video settings are not supported yet. Keep this block for future rollout.
+    // {
+    //     title: "Video",
+    //     items: [
+    //         {
+    //             label: "Quality",
+    //             value: "Auto (1080p)",
+    //             type: "select",
+    //             options: [
+    //                 "Auto (1080p)",
+    //                 "2160p (4K)",
+    //                 "1440p",
+    //                 "1080p",
+    //                 "720p",
+    //             ],
+    //         },
+    //         {
+    //             label: "Hardware Decode",
+    //             value: "Auto",
+    //             type: "select",
+    //             options: ["Auto", "On", "Off"],
+    //         },
+    //         {
+    //             label: "Rendering",
+    //             value: "GPU",
+    //             type: "select",
+    //             options: ["GPU", "CPU"],
+    //         },
+    //         {
+    //             label: "HDR",
+    //             value: "Off",
+    //             type: "select",
+    //             options: ["Off", "On", "Auto"],
+    //         },
+    //     ],
+    // },
+    // v1: Subtitles settings are not supported yet. Keep this block for future rollout.
+    // {
+    //     title: "Subtitles",
+    //     items: [
+    //         {
+    //             label: "Default",
+    //             value: "Off",
+    //             type: "toggle",
+    //             onValue: "On",
+    //             offValue: "Off",
+    //         },
+    //         {
+    //             label: "Font Size",
+    //             value: "16px",
+    //             type: "select",
+    //             options: ["12px", "14px", "16px", "18px", "20px"],
+    //         },
+    //         {
+    //             label: "Background",
+    //             value: "On",
+    //             type: "toggle",
+    //             onValue: "On",
+    //             offValue: "Off",
+    //         },
+    //         {
+    //             label: "Delay",
+    //             value: "0 ms",
+    //             type: "select",
+    //             options: ["-250 ms", "0 ms", "250 ms", "500 ms"],
+    //         },
+    //     ],
+    // },
+    // v1: Storage settings are not supported yet. Keep this block for future rollout.
+    // {
+    //     title: "Storage",
+    //     items: [
+    //         {
+    //             label: "Cache",
+    //             value: "50",
+    //             type: "slider",
+    //             min: 5,
+    //             max: 100,
+    //             step: 1,
+    //             unit: "MB",
+    //         },
+    //         {
+    //             label: "Snapshots",
+    //             value: "Enabled",
+    //             type: "toggle",
+    //             onValue: "Enabled",
+    //             offValue: "Disabled",
+    //         },
+    //     ],
+    // },
+    {
+        title: "Tools",
+        items: [
+            {
+                label: YTDL_PATH_SETTING_LABEL,
+                displayLabel: "Video Download Tool (yt-dlp)",
+                value: "",
+                type: "path",
+                placeholder: "Select the yt-dlp executable...",
+                browseTitle: "Select yt-dlp executable",
+            },
+            {
+                label: LOG_LEVEL_SETTING_LABEL,
+                displayLabel: "Log Level",
+                value: "Info",
+                type: "select",
+                options: [
+                    "Error",
+                    "Warn",
+                    "Info",
+                    "Debug",
+                    "Trace",
+                ],
+            },
+            {
+                label: LOG_PATH_SETTING_LABEL,
+                displayLabel: "Log File",
+                value: "",
+                type: "path" as const,
+                placeholder: "Log path unavailable",
+                browseTitle: "Open log file folder",
+            },
+        ],
+    },
+];

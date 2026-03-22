@@ -1,0 +1,58 @@
+:root {
+    --app-bg: #f6f6f6;
+    --ui-bg: rgba(255, 255, 255, 0.9);
+    --text-color: #333;
+    --focus-color: #396cd8;
+    --progress-color: #007bff;
+    --top-bar-height: 48px;
+    --side-actions-space: 120px;
+    --controls-bar-height: 72px;
+    --playlist-peek-offset-y: calc(
+        (var(--controls-bar-height) - var(--top-bar-height)) / 2
+    );
+    --playlist-peek-reveal-width: 80px;
+}
+
+:root[data-theme="graphite"] {
+    --app-bg: #1e2227;
+    --ui-bg: rgba(30, 34, 39, 0.9);
+    --text-color: #edf1f7;
+    --focus-color: #8ab7ff;
+    --progress-color: #6aa8ff;
+}
+
+:root[data-theme="light"] {
+    --app-bg: #f6f6f6;
+    --ui-bg: rgba(255, 255, 255, 0.9);
+    --text-color: #333;
+    --focus-color: #396cd8;
+    --progress-color: #007bff;
+}
+
+:root[data-theme="dark"] {
+    --app-bg: #0f0f0f;
+    --ui-bg: #0f0f0f98;
+    --text-color: #f6f6f6;
+    --focus-color: #8ab7ff;
+    --progress-color: #58a6ff;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme]) {
+        --app-bg: #0f0f0f;
+        --ui-bg: #0f0f0f98;
+        --text-color: #f6f6f6;
+    }
+}
+
+html,
+body,
+#app {
+    background-color: transparent !important;
+    margin: 0;
+    padding: 0;
+    height: 100vh;
+    overflow: hidden;
+    font-family: Roboto, Arial, sans-serif;
+    color: var(--text-color);
+}

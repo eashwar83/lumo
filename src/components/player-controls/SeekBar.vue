@@ -1,0 +1,223 @@
+<script setup lang="ts">
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+
+const props = defineProps<{
+    duration: number;
+    progressPercent: number;
+    formatTime: (seconds: number) => string;
+    controlsVisible?: boolean;
+}>();
+
+const emit = defineEmits<{
+    (e: "seek", position: number): void;
+}>();
+
+const progressAreaRef = ref<HTMLElement | null>(null);
+const isDragging = ref(false);
+const activePointerId = ref<number | null>(null);
+const dragPercent = ref<number | null>(null);
+
+const showHoverTime = ref(false);
+const hoverTime = ref(0);
+const hoverPercent = ref(0);
+
+const clampRatio = (value: number) => Math.min(1, Math.max(0, value));
+
+const getRatioFromClientX = (clientX: number) => {
+    const container = progressAreaRef.value;
+    if (!container) return 0;
+    const rect = container.getBoundingClientRect();
+    if (rect.width <= 0) return 0;
+    return clampRatio((clientX - rect.left) / rect.width);
+};
+
+const updateHoverByClientX = (clientX: number) => {
+    if (props.duration <= 0) {
+        showHoverTime.value = false;
+        return;
+    }
+    const ratio = getRatioFromClientX(clientX);
+    hoverPercent.value = ratio * 100;
+    hoverTime.value = ratio * props.duration;
+    if (isDragging.value) {
+        dragPercent.value = hoverPercent.value;
+    }
+    showHoverTime.value = true;
+};
+
+const updateHoverTime = (event: MouseEvent) => {
+    if (isDragging.value) return;
+    updateHoverByClientX(event.clientX);
+};
+
+const hideHoverTime = () => {
+    if (isDragging.value) return;
+    showHoverTime.value = false;
+};
+
+const stopDragging = (event?: PointerEvent) => {
+    if (event && progressAreaRef.value?.hasPointerCapture(event.pointerId)) {
+        progressAreaRef.value.releasePointerCapture(event.pointerId);
+    }
+    activePointerId.value = null;
+    isDragging.value = false;
+    dragPercent.value = null;
+    window.removeEventListener("pointermove", onWindowPointerMove);
+    window.removeEventListener("pointerup", onWindowPointerUp);
+    window.removeEventListener("pointercancel", onWindowPointerCancel);
+};
+
+const onPointerDown = (event: PointerEvent) => {
+    if (event.button !== 0 || props.duration <= 0) return;
+    activePointerId.value = event.pointerId;
+    isDragging.value = true;
+    progressAreaRef.value?.setPointerCapture(event.pointerId);
+    updateHoverByClientX(event.clientX);
+    window.addEventListener("pointermove", onWindowPointerMove);
+    window.addEventListener("pointerup", onWindowPointerUp);
+    window.addEventListener("pointercancel", onWindowPointerCancel);
+};
+
+const onWindowPointerMove = (event: PointerEvent) => {
+    if (!isDragging.value || event.pointerId !== activePointerId.value) return;
+    updateHoverByClientX(event.clientX);
+};
+
+const onWindowPointerUp = (event: PointerEvent) => {
+    if (!isDragging.value || event.pointerId !== activePointerId.value) return;
+    updateHoverByClientX(event.clientX);
+    emit("seek", hoverTime.value);
+    stopDragging(event);
+};
+
+const onWindowPointerCancel = (event: PointerEvent) => {
+    if (event.pointerId !== activePointerId.value) return;
+    stopDragging(event);
+    showHoverTime.value = false;
+};
+
+const onKeydown = () => {
+    showHoverTime.value = false;
+};
+
+const displayProgressPercent = computed(() => {
+    const percent =
+        isDragging.value && dragPercent.value !== null
+            ? dragPercent.value
+            : props.progressPercent;
+    return Math.min(100, Math.max(0, percent));
+});
+
+watch(
+    () => props.controlsVisible,
+    (visible) => {
+        if (visible === false && !isDragging.value) {
+            hideHoverTime();
+        }
+    },
+);
+
+onMounted(() => {
+    window.addEventListener("keydown", onKeydown);
+});
+
+onUnmounted(() => {
+    stopDragging();
+    window.removeEventListener("keydown", onKeydown);
+});
+</script>
+
+<template>
+    <div
+        ref="progressAreaRef"
+        class="progress-area"
+        :class="{ 'is-dragging': isDragging }"
+        @pointerdown.prevent="onPointerDown"
+        @mousemove="updateHoverTime"
+        @mouseleave="hideHoverTime"
+    >
+        <div
+            v-if="showHoverTime"
+            class="time-tooltip"
+            :style="{ left: hoverPercent + '%' }"
+        >
+            {{ formatTime(hoverTime) }}
+        </div>
+        <div class="progress-bg">
+            <div class="progress-buffer"></div>
+            <div
+                class="progress-current"
+                :style="{ width: displayProgressPercent + '%' }"
+            >
+                <div class="scrubber-head"></div>
+            </div>
+        </div>
+    </div>
+</template>
+
+<style scoped>
+.progress-area {
+    height: 16px;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    position: relative;
+    touch-action: none;
+}
+
+.progress-bg {
+    height: 3px;
+    width: 100%;
+    background: rgba(230, 230, 230, 0.9);
+    position: relative;
+    transition: height 0.1s;
+}
+
+.progress-area:hover .progress-bg {
+    height: 5px;
+}
+
+.progress-area.is-dragging .progress-bg {
+    height: 5px;
+}
+
+.progress-current {
+    height: 100%;
+    background: var(--progress-color);
+    position: relative;
+}
+
+.scrubber-head {
+    position: absolute;
+    right: -6px;
+    top: 50%;
+    transform: translateY(-50%) scale(0);
+    width: 13px;
+    height: 13px;
+    background: var(--progress-color);
+    border-radius: 50%;
+    transition: transform 0.1s;
+}
+
+.progress-area:hover .scrubber-head {
+    transform: translateY(-50%) scale(1);
+}
+
+.progress-area.is-dragging .scrubber-head {
+    transform: translateY(-50%) scale(1);
+}
+
+.time-tooltip {
+    position: absolute;
+    bottom: 12px;
+    transform: translateX(-50%);
+    background: rgba(28, 28, 28, 0.85);
+    color: #fff;
+    font-size: 12px;
+    padding: 4px 6px;
+    border-radius: 6px;
+    pointer-events: none;
+    white-space: nowrap;
+    z-index: 5;
+}
+</style>

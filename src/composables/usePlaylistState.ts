@@ -1,0 +1,455 @@
+import { computed, ref } from "vue";
+import type {
+    Playlist,
+    PlaylistEntry,
+    PlaylistLoopMode,
+    PlaylistSortMode,
+} from "../types/playlist";
+import { getPathDisplayName } from "../utils/getPathDisplayName";
+
+type PersistedPlaylistState = {
+    playlists?: Playlist[];
+    playlistLoopMode?: PlaylistLoopMode;
+    playlistSortMode?: PlaylistSortMode;
+    activePlaylistId?: string | null;
+};
+
+type CreatePlaylistOptions = {
+    name?: string;
+    openInDrawer?: boolean;
+    setAsPlayback?: boolean;
+};
+
+const isValidSortMode = (value: unknown): value is PlaylistSortMode =>
+    value === "name" || value === "added";
+
+const createPlaylistId = () =>
+    `pl_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
+const stripExtension = (fileName: string) => {
+    const trimmed = fileName.trim();
+    if (!trimmed) return "";
+    const dotIndex = trimmed.lastIndexOf(".");
+    if (dotIndex <= 0) return trimmed;
+    return trimmed.slice(0, dotIndex);
+};
+
+const getParentDirectoryName = (path: string) => {
+    const parts = path.split(/[/\\]+/).filter(Boolean);
+    if (parts.length < 2) return "";
+    return parts[parts.length - 2] ?? "";
+};
+
+const isNumericName = (value: string) => /^\d+$/.test(value.trim());
+
+const getCommonPrefix = (values: string[]) => {
+    if (!values.length) return "";
+    let prefix = values[0] ?? "";
+    for (let index = 1; index < values.length; index += 1) {
+        const current = values[index] ?? "";
+        while (prefix && !current.startsWith(prefix)) {
+            prefix = prefix.slice(0, -1);
+        }
+        if (!prefix) return "";
+    }
+    return prefix.replace(/[\s._-]+$/, "").trim();
+};
+
+const derivePlaylistNameFromPaths = (paths: string[], fallback: string) => {
+    const fileNames = paths
+        .map((path) => getPathDisplayName(path).trim())
+        .filter(Boolean);
+    const itemNames = fileNames.map(stripExtension).filter(Boolean);
+    if (!itemNames.length) return fallback;
+
+    if (itemNames.every(isNumericName)) {
+        const folderNames = paths
+            .map((path) => getParentDirectoryName(path).trim())
+            .filter(Boolean);
+        const uniqueFolderNames = Array.from(new Set(folderNames));
+        if (uniqueFolderNames.length === 1) {
+            return uniqueFolderNames[0] ?? fallback;
+        }
+        if (uniqueFolderNames.length > 1) {
+            return uniqueFolderNames[0] ?? fallback;
+        }
+    }
+
+    if (itemNames.length === 1) return itemNames[0] ?? fallback;
+
+    const commonPrefix = getCommonPrefix(itemNames);
+    if (commonPrefix.length >= 2) return commonPrefix;
+
+    return itemNames[0] ?? fallback;
+};
+
+const normalizePlaylistEntries = (entries: PlaylistEntry[]): PlaylistEntry[] => {
+    const unique = new Map<string, PlaylistEntry>();
+    entries.forEach((entry) => {
+        const path = entry?.path?.trim();
+        if (!path) return;
+        unique.set(path, {
+            path,
+            addedAt:
+                typeof entry.addedAt === "number" ? entry.addedAt : Date.now(),
+        });
+    });
+    return Array.from(unique.values());
+};
+
+const normalizePlaylistName = (name: string | undefined, fallback: string) => {
+    const trimmed = name?.trim();
+    return trimmed || fallback;
+};
+
+const sortEntries = (
+    entries: PlaylistEntry[],
+    mode: PlaylistSortMode,
+): PlaylistEntry[] => {
+    const list = [...entries];
+    if (mode === "name") {
+        list.sort((a, b) =>
+            getPathDisplayName(a.path).localeCompare(
+                getPathDisplayName(b.path),
+                undefined,
+                { numeric: true, sensitivity: "base" },
+            ),
+        );
+    } else {
+        list.sort((a, b) => b.addedAt - a.addedAt);
+    }
+    return list;
+};
+
+export const usePlaylistState = () => {
+    const playlists = ref<Playlist[]>([]);
+    const activePlaylistId = ref<string | null>(null);
+    const playbackPlaylistId = ref<string | null>(null);
+    const loopMode = ref<PlaylistLoopMode>("list");
+    const sortMode = ref<PlaylistSortMode>("added");
+    const isLoopOne = ref(false);
+
+    const activePlaylist = computed<Playlist | null>(
+        () =>
+            playlists.value.find((item) => item.id === activePlaylistId.value) ??
+            null,
+    );
+    const playlist = computed<PlaylistEntry[]>(() => activePlaylist.value?.entries ?? []);
+    const orderedPlaylist = computed(() =>
+        sortEntries(playlist.value, sortMode.value),
+    );
+
+    const hasPlaylist = (playlistId: string | null) =>
+        !!playlistId && playlists.value.some((item) => item.id === playlistId);
+
+    const findPlaylistById = (playlistId: string | null): Playlist | null => {
+        if (!playlistId) return null;
+        return playlists.value.find((item) => item.id === playlistId) ?? null;
+    };
+
+    const getOrderedEntriesByPlaylistId = (playlistId: string | null) => {
+        const target = findPlaylistById(playlistId);
+        if (!target) return [];
+        return sortEntries(target.entries, sortMode.value);
+    };
+
+    const syncSelectionAfterMutation = () => {
+        if (!hasPlaylist(activePlaylistId.value)) {
+            activePlaylistId.value = null;
+        }
+        if (!hasPlaylist(playbackPlaylistId.value)) {
+            playbackPlaylistId.value = null;
+        }
+    };
+
+    const addManyToPlaylist = (playlistId: string, paths: string[]) => {
+        const playlistIndex = playlists.value.findIndex((item) => item.id === playlistId);
+        if (playlistIndex < 0) return;
+
+        const target = playlists.value[playlistIndex];
+        const existing = new Set(target.entries.map((item) => item.path));
+        const dedupedPaths = Array.from(
+            new Set(paths.map((item) => item.trim()).filter(Boolean)),
+        );
+        const timestamp = Date.now();
+        const additions = dedupedPaths
+            .filter((path) => !existing.has(path))
+            .map((path, index) => ({ path, addedAt: timestamp + index }));
+        if (!additions.length) return;
+
+        const nextPlaylists = [...playlists.value];
+        nextPlaylists[playlistIndex] = {
+            ...target,
+            entries: [...target.entries, ...additions],
+        };
+        playlists.value = nextPlaylists;
+    };
+
+    const createPlaylistWithPaths = (
+        paths: string[],
+        options: CreatePlaylistOptions = {},
+    ): string | null => {
+        const timestamp = Date.now();
+        const dedupedPaths = Array.from(
+            new Set(paths.map((item) => item.trim()).filter(Boolean)),
+        );
+        const entries = dedupedPaths.map((path, index) => ({
+            path,
+            addedAt: timestamp + index,
+        }));
+        const normalizedEntries = normalizePlaylistEntries(entries);
+        if (!normalizedEntries.length) return null;
+
+        const playlistId = createPlaylistId();
+        const fallbackName = `Playlist ${playlists.value.length + 1}`;
+        const derivedName = derivePlaylistNameFromPaths(dedupedPaths, fallbackName);
+        const newPlaylist: Playlist = {
+            id: playlistId,
+            name: normalizePlaylistName(options.name, derivedName),
+            entries: normalizedEntries,
+            createdAt: timestamp,
+        };
+
+        playlists.value = [...playlists.value, newPlaylist];
+        if (options.openInDrawer) {
+            activePlaylistId.value = playlistId;
+        }
+        if (options.setAsPlayback) {
+            playbackPlaylistId.value = playlistId;
+        }
+        return playlistId;
+    };
+
+    const applyPersistedState = (stored: PersistedPlaylistState) => {
+        if (stored.playlists) {
+            playlists.value = stored.playlists.map((item, index) => ({
+                id: item.id || createPlaylistId(),
+                name: normalizePlaylistName(item.name, `Playlist ${index + 1}`),
+                entries: normalizePlaylistEntries(item.entries ?? []),
+                createdAt:
+                    typeof item.createdAt === "number" ? item.createdAt : Date.now(),
+            }));
+        }
+        if (stored.playlistLoopMode) {
+            loopMode.value =
+                stored.playlistLoopMode === "shuffle" ? "shuffle" : "list";
+        }
+        if (stored.playlistSortMode && isValidSortMode(stored.playlistSortMode)) {
+            sortMode.value = stored.playlistSortMode;
+        }
+
+        activePlaylistId.value = hasPlaylist(stored.activePlaylistId ?? null)
+            ? stored.activePlaylistId ?? null
+            : null;
+        syncSelectionAfterMutation();
+    };
+
+    const toPersistedState = () => ({
+        playlists: playlists.value,
+        playlistLoopMode: loopMode.value,
+        playlistSortMode: sortMode.value,
+        activePlaylistId: activePlaylistId.value,
+    });
+
+    const addFromDrawerSelection = (paths: string[]) => {
+        if (activePlaylist.value) {
+            addManyToPlaylist(activePlaylist.value.id, paths);
+            return;
+        }
+        createPlaylistWithPaths(paths, { openInDrawer: true });
+    };
+
+    const clearActivePlaylist = () => {
+        if (!activePlaylist.value) return;
+        playlists.value = playlists.value.map((item) =>
+            item.id === activePlaylist.value?.id ? { ...item, entries: [] } : item,
+        );
+    };
+
+    const removeFromActivePlaylist = (entry: PlaylistEntry) => {
+        if (!activePlaylist.value) return;
+        playlists.value = playlists.value.map((item) =>
+            item.id === activePlaylist.value?.id
+                ? {
+                      ...item,
+                      entries: item.entries.filter(
+                          (candidate) => candidate.path !== entry.path,
+                      ),
+                  }
+                : item,
+        );
+    };
+
+    const renamePlaylist = (playlistId: string, name: string) => {
+        const normalizedName = name.trim();
+        if (!normalizedName) return;
+        playlists.value = playlists.value.map((item) =>
+            item.id === playlistId ? { ...item, name: normalizedName } : item,
+        );
+    };
+
+    const deletePlaylist = (playlistId: string) => {
+        if (!hasPlaylist(playlistId)) return;
+        playlists.value = playlists.value.filter((item) => item.id !== playlistId);
+        syncSelectionAfterMutation();
+    };
+
+    const movePlaylist = (fromPlaylistId: string, toPlaylistId: string) => {
+        if (fromPlaylistId === toPlaylistId) return;
+        const fromIndex = playlists.value.findIndex(
+            (item) => item.id === fromPlaylistId,
+        );
+        const toIndex = playlists.value.findIndex((item) => item.id === toPlaylistId);
+        if (fromIndex < 0 || toIndex < 0) return;
+        if (Math.abs(fromIndex - toIndex) !== 1) return;
+
+        const nextPlaylists = [...playlists.value];
+        const temp = nextPlaylists[fromIndex];
+        nextPlaylists[fromIndex] = nextPlaylists[toIndex];
+        nextPlaylists[toIndex] = temp;
+        playlists.value = nextPlaylists;
+    };
+
+    const enterPlaylist = (playlistId: string) => {
+        if (!hasPlaylist(playlistId)) return;
+        activePlaylistId.value = playlistId;
+    };
+
+    const backToPlaylistList = () => {
+        activePlaylistId.value = null;
+    };
+
+    const cycleSortMode = () => {
+        sortMode.value = sortMode.value === "name" ? "added" : "name";
+    };
+
+    const cycleLoopMode = () => {
+        loopMode.value = loopMode.value === "list" ? "shuffle" : "list";
+    };
+
+    const pickRandomIndex = (length: number, currentIndex: number): number => {
+        if (length <= 1) return 0;
+        let nextIndex = currentIndex;
+        do {
+            nextIndex = Math.floor(Math.random() * length);
+        } while (nextIndex === currentIndex);
+        return nextIndex;
+    };
+
+    const resolvePlaybackPlaylistId = (currentPath: string): string | null => {
+        const current = currentPath.trim();
+        if (!current) return null;
+
+        const playbackPlaylist = findPlaylistById(playbackPlaylistId.value);
+        if (playbackPlaylist?.entries.some((entry) => entry.path === current)) {
+            return playbackPlaylist.id;
+        }
+
+        const active = activePlaylist.value;
+        if (active?.entries.some((entry) => entry.path === current)) {
+            return active.id;
+        }
+
+        const matched = [...playlists.value]
+            .reverse()
+            .find((item) => item.entries.some((entry) => entry.path === current));
+        return matched?.id ?? null;
+    };
+
+    const getAdjacentPath = (
+        currentPath: string,
+        direction: 1 | -1,
+    ): string | null => {
+        const playlistId = resolvePlaybackPlaylistId(currentPath);
+        if (!playlistId) return null;
+        playbackPlaylistId.value = playlistId;
+
+        const list = getOrderedEntriesByPlaylistId(playlistId);
+        if (!list.length) return null;
+        const currentIndex = list.findIndex((item) => item.path === currentPath);
+
+        if (loopMode.value === "shuffle") {
+            return list[pickRandomIndex(list.length, currentIndex)]?.path ?? null;
+        }
+
+        if (currentIndex < 0) {
+            return direction === 1
+                ? list[0]?.path ?? null
+                : list[list.length - 1]?.path ?? null;
+        }
+
+        let nextIndex = currentIndex + direction;
+        if (nextIndex < 0) nextIndex = list.length - 1;
+        if (nextIndex >= list.length) nextIndex = 0;
+        return list[nextIndex]?.path ?? null;
+    };
+
+    const getPathForEnd = (currentPath: string): string | null => {
+        if (isLoopOne.value) return null;
+
+        const playlistId = resolvePlaybackPlaylistId(currentPath);
+        if (!playlistId) return null;
+        playbackPlaylistId.value = playlistId;
+
+        const list = getOrderedEntriesByPlaylistId(playlistId);
+        if (!list.length) return null;
+        const currentIndex = list.findIndex((item) => item.path === currentPath);
+        if (currentIndex < 0) return null;
+
+        if (loopMode.value === "shuffle") {
+            return list[pickRandomIndex(list.length, currentIndex)]?.path ?? null;
+        }
+
+        return list[(currentIndex + 1) % list.length]?.path ?? null;
+    };
+
+    const markActivePlaylistAsPlayback = () => {
+        if (!activePlaylist.value) return;
+        playbackPlaylistId.value = activePlaylist.value.id;
+    };
+
+    const toggleLoopOne = async (
+        setLoopFile: (enabled: boolean) => Promise<void>,
+    ) => {
+        isLoopOne.value = !isLoopOne.value;
+        await setLoopFile(isLoopOne.value);
+    };
+
+    const togglePlaylistLoop = async (
+        setLoopFile: (enabled: boolean) => Promise<void>,
+    ) => {
+        if (isLoopOne.value) {
+            isLoopOne.value = false;
+            await setLoopFile(false);
+        }
+        cycleLoopMode();
+    };
+
+    return {
+        playlists,
+        activePlaylistId,
+        activePlaylist,
+        playlist,
+        loopMode,
+        sortMode,
+        isLoopOne,
+        orderedPlaylist,
+        applyPersistedState,
+        toPersistedState,
+        createPlaylistWithPaths,
+        addFromDrawerSelection,
+        clearActivePlaylist,
+        removeFromActivePlaylist,
+        renamePlaylist,
+        deletePlaylist,
+        movePlaylist,
+        enterPlaylist,
+        backToPlaylistList,
+        markActivePlaylistAsPlayback,
+        cycleSortMode,
+        getAdjacentPath,
+        getPathForEnd,
+        toggleLoopOne,
+        togglePlaylistLoop,
+    };
+};

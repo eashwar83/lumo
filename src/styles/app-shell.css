@@ -1,0 +1,20 @@
+.soia-container {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: stretch;
+    background-color: var(--app-bg);
+    transition: background-color 0.5s;
+    cursor: default;
+}
+
+.video-mode {
+    background-color: transparent !important;
+}
+
+.cursor-hidden {
+    cursor: none;
+}

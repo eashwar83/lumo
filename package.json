@@ -1,0 +1,41 @@
+{
+  "name": "soia",
+  "private": true,
+  "version": "0.1.0",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "packageManager": "pnpm@10.30.3",
+  "scripts": {
+    "dev": "vite",
+    "media:sync": "node ./scripts/sync_media_extensions.mjs",
+    "setup:libs": "node ./scripts/setup_runtime_libs.mjs",
+    "postinstall": "pnpm setup:libs",
+    "build": "pnpm version:sync && tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "pnpm version:sync && pnpm media:sync && node ./scripts/run_tauri.mjs",
+    "version:sync": "node ./scripts/sync_version.mjs",
+    "version:check": "node ./scripts/sync_version.mjs --check",
+    "sync:runtime": "node ./scripts/sync_runtime_libs.mjs",
+    "sync:runtime:mac": "node ./scripts/sync_runtime_libs.mjs --platform darwin",
+    "sync:runtime:linux": "node ./scripts/sync_runtime_libs.mjs --platform linux",
+    "sync:runtime:win": "node ./scripts/sync_runtime_libs.mjs --platform win32",
+    "bundle:mac:debug": "pnpm tauri build --debug --bundles app && ./scripts/bundle_runtime_libs_macos.sh ./src-tauri/target/debug/bundle/macos/Soia.app",
+    "bundle:mac:release": "pnpm tauri build --bundles app && ./scripts/bundle_runtime_libs_macos.sh ./src-tauri/target/release/bundle/macos/Soia.app && ./scripts/bundle_dmg_macos.sh ./src-tauri/target/release/bundle/macos/Soia.app",
+    "bundle:linux:debug": "pnpm tauri build --debug --bundles deb && node ./scripts/bundle_runtime_libs_linux.mjs --profile debug",
+    "bundle:linux:release": "pnpm tauri build --bundles deb && node ./scripts/bundle_runtime_libs_linux.mjs --profile release",
+    "bundle:win:debug": "pnpm tauri build --debug --bundles nsis",
+    "bundle:win:release": "pnpm tauri build --bundles nsis"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "2.6.0",
+    "@tauri-apps/plugin-opener": "2.5.3",
+    "vue": "^3.5.27"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@vitejs/plugin-vue": "^6.0.3",
+    "typescript": "~5.6.2",
+    "vite": "^6.0.3"
+  }
+}
