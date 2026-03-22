@@ -327,8 +327,8 @@ impl MpvHandle {
     pub fn terminate(&self) {
         self.stop_event_listener();
         self.stop_render_loop();
-        release_mpv_context(&self.ctx, true);
         release_soia_utils(&self.soia_utils);
+        release_mpv_context(&self.ctx, true);
     }
 }
 
@@ -336,7 +336,7 @@ impl Drop for MpvHandle {
     fn drop(&mut self) {
         self.stop_event_listener();
         self.stop_render_loop();
-        release_mpv_context(&self.ctx, false);
         release_soia_utils(&self.soia_utils);
+        release_mpv_context(&self.ctx, false);
     }
 }

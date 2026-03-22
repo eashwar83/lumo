@@ -183,7 +183,7 @@ jobs:
           mkdir -p release
           TAG="${GITHUB_REF_NAME}"
           DEB_SOURCE="$(ls -1 src-tauri/target/release/bundle/deb/*.deb | head -n 1)"
-          DEB_TARGET="release/Soia-${TAG}-Linux-x64-Wayland.deb"
+          DEB_TARGET="release/Soia-${TAG}-Linux-x64-wayland.deb"
           cp "$DEB_SOURCE" "$DEB_TARGET"
           shasum -a 256 "$DEB_TARGET" > "${DEB_TARGET}.sha256"
 
