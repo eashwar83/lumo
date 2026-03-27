@@ -3,6 +3,7 @@ use super::ffi::{
     mpv_observe_property, mpv_wait_event, MpvEventEndFile, MpvEventProperty,
 };
 use crate::AppState;
+use log::{debug, error, info, trace, warn};
 use serde::Serialize;
 use std::ffi::{c_void, CStr, CString};
 use std::os::raw::c_int;
@@ -55,7 +56,7 @@ struct TracksPayload {
 
 fn emit_event<T: Serialize + Clone>(app_handle: &AppHandle, name: &str, payload: T) -> bool {
     if let Err(e) = app_handle.emit(name, payload) {
-        eprintln!("MPV Event Loop: Failed to emit {}: {:?}", name, e);
+        error!("MPV Event Loop: Failed to emit {}: {:?}", name, e);
         false
     } else {
         true
@@ -121,7 +122,7 @@ fn observe_property(client: *mut c_void, id: u64, name: &str, format: mpv_format
     let c_name = CString::new(name).expect("Property name contains null byte");
     let result = unsafe { mpv_observe_property(client, id, c_name.as_ptr(), format) };
     if result < 0 {
-        eprintln!("MPV: observe_property {} failed with {}", name, result);
+        warn!("MPV: observe_property {} failed with {}", name, result);
     }
 }
 
@@ -206,14 +207,14 @@ pub(super) fn mpv_event_loop(
         let mpv_player_guard = match app_state.mpv_player.lock() {
             Ok(guard) => guard,
             Err(err) => {
-                eprintln!("Failed to lock MPV player mutex: {}", err);
+                error!("Failed to lock MPV player mutex: {}", err);
                 return;
             }
         };
         event_client = match mpv_player_guard.create_client("event_loop_client") {
             Ok(ptr) => ptr,
             Err(e) => {
-                eprintln!("Failed to create MPV event client: {}", e);
+                error!("Failed to create MPV event client: {}", e);
                 return;
             }
         };
@@ -291,7 +292,7 @@ pub(super) fn mpv_event_loop(
             mpv_format::MPV_FORMAT_STRING,
         );
 
-        println!("MPV Event Loop: Started observing properties.");
+        info!("MPV Event Loop: Started observing properties.");
 
         loop {
             if stop_flag.load(Ordering::Relaxed) {
@@ -305,11 +306,11 @@ pub(super) fn mpv_event_loop(
             match (*event).event_id {
                 mpv_event_id::MPV_EVENT_START_FILE => {
                     #[cfg(debug_assertions)]
-                    println!("MPV Event Loop: MPV_EVENT_START_FILE received.");
+                    debug!("MPV Event Loop: MPV_EVENT_START_FILE received.");
                 }
                 mpv_event_id::MPV_EVENT_FILE_LOADED => {
                     #[cfg(debug_assertions)]
-                    println!("MPV Event Loop: MPV_EVENT_FILE_LOADED received.");
+                    debug!("MPV Event Loop: MPV_EVENT_FILE_LOADED received.");
                     notify_start = true;
                     width = 0;
                     height = 0;
@@ -325,7 +326,7 @@ pub(super) fn mpv_event_loop(
                 }
                 mpv_event_id::MPV_EVENT_PLAYBACK_RESTART => {
                     #[cfg(debug_assertions)]
-                    println!("MPV Event Loop: MPV_EVENT_PLAYBACK_RESTART received.");
+                    debug!("MPV Event Loop: MPV_EVENT_PLAYBACK_RESTART received.");
 
                     if notify_start {
                         notify_start = false;
@@ -334,7 +335,7 @@ pub(super) fn mpv_event_loop(
                 }
                 mpv_event_id::MPV_EVENT_SHUTDOWN => {
                     #[cfg(debug_assertions)]
-                    println!("MPV Event Loop: MPV_EVENT_SHUTDOWN received. Exiting.");
+                    debug!("MPV Event Loop: MPV_EVENT_SHUTDOWN received. Exiting.");
                     break;
                 }
                 mpv_event_id::MPV_EVENT_PROPERTY_CHANGE => {
@@ -349,6 +350,8 @@ pub(super) fn mpv_event_loop(
                                     && !value_ptr.is_null()
                                 {
                                     last_time_pos = *(value_ptr as *mut f64);
+                                    #[cfg(debug_assertions)]
+                                    trace!("MPV time-pos updated: {}", last_time_pos);
                                 }
                             }
                             DURATION_ID => {
@@ -400,7 +403,8 @@ pub(super) fn mpv_event_loop(
                                         media_title_name.as_ptr(),
                                     );
                                     if title_ptr.is_null() {
-                                        println!("mpv media title: <null>");
+                                        #[cfg(debug_assertions)]
+                                        debug!("mpv media title: <null>");
                                     } else {
                                         let c_str = CStr::from_ptr(title_ptr);
                                         let title = c_str.to_string_lossy().into_owned();
@@ -560,7 +564,7 @@ pub(super) fn mpv_event_loop(
                     };
                     let reason_label = end_file_reason_label(reason);
                     #[cfg(debug_assertions)]
-                    println!(
+                    debug!(
                         "MPV Event Loop: End of file reached. reason={} ({})",
                         reason, reason_label
                     );
@@ -581,5 +585,5 @@ pub(super) fn mpv_event_loop(
     unsafe {
         mpv_destroy(event_client);
     }
-    println!("MPV Event Loop: Thread exited cleanly.");
+    info!("MPV Event Loop: Thread exited cleanly.");
 }

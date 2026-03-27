@@ -1,3 +1,4 @@
+use log::warn;
 use std::ffi::c_void;
 use std::os::raw::{c_char, c_int};
 
@@ -89,7 +90,7 @@ impl From<i32> for mpv_event_id {
             24 => mpv_event_id::MPV_EVENT_QUEUE_OVERFLOW,
             25 => mpv_event_id::MPV_EVENT_HOOK,
             _ => {
-                eprintln!("Received unknown MPV event ID: {}", id);
+                warn!("Received unknown MPV event ID: {}", id);
                 mpv_event_id::MPV_EVENT_NONE
             }
         }
@@ -187,11 +188,7 @@ unsafe extern "C" {
         display: *const c_void,
         mode: i32,
     ) -> *mut SoiaUtils;
-    pub(super) fn soia_utils_render_target_resize(
-        utils: *mut SoiaUtils,
-        width: u32,
-        height: u32,
-    );
+    pub(super) fn soia_utils_render_target_resize(utils: *mut SoiaUtils, width: u32, height: u32);
     pub(super) fn soia_utils_render_context_update(utils: *mut SoiaUtils);
     pub(super) fn soia_utils_uses_render_context(utils: *mut SoiaUtils) -> c_int;
     pub(super) fn soia_utils_destroy(utils: *mut SoiaUtils);

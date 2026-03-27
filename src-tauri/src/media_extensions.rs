@@ -1,3 +1,4 @@
+use log::error;
 use std::sync::OnceLock;
 
 const MEDIA_EXTENSIONS_JSON: &str = include_str!("../../src/constants/mediaExtensions.json");
@@ -12,7 +13,7 @@ fn parse_media_extensions() -> Vec<String> {
             .filter(|value| !value.is_empty())
             .collect(),
         Err(error) => {
-            eprintln!("Failed to parse media extensions JSON: {error}");
+            error!("Failed to parse media extensions JSON: {error}");
             Vec::new()
         }
     }

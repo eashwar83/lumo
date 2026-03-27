@@ -1,3 +1,4 @@
+use log::warn;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::fs;
@@ -16,7 +17,7 @@ pub fn read_json_or_default<T: DeserializeOwned + Default>(path: &Path) -> Resul
     match serde_json::from_str(&content) {
         Ok(value) => Ok(value),
         Err(err) => {
-            eprintln!("Failed to parse {}: {}", path.display(), err);
+            warn!("Failed to parse {}: {}", path.display(), err);
             Ok(T::default())
         }
     }

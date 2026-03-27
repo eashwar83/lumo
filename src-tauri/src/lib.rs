@@ -34,6 +34,29 @@ struct NowPlayingState {
 
 type AppResult<T> = Result<T, String>;
 
+fn init_logging() {
+    let mut builder =
+        env_logger::Builder::from_env(env_logger::Env::default().filter_or("RUST_LOG", "info"));
+    builder.format(|buf, record| {
+        use std::io::Write;
+
+        let time = chrono::Utc::now()
+            .with_timezone(&chrono::FixedOffset::east_opt(8 * 3600).expect("valid UTC+08:00"))
+            .format("%H:%M:%S%.3f");
+
+        let level = match record.level() {
+            log::Level::Error => "e",
+            log::Level::Warn => "w",
+            log::Level::Info => "i",
+            log::Level::Debug => "d",
+            log::Level::Trace => "t",
+        };
+
+        writeln!(buf, "{} [{}] {}", time, level, record.args())
+    });
+    let _ = builder.try_init();
+}
+
 fn json_value_to_string(value: serde_json::Value) -> AppResult<String> {
     match value {
         serde_json::Value::String(s) => Ok(s),
@@ -204,6 +227,8 @@ fn handle_run_event(app_handle: &tauri::AppHandle, event: tauri::RunEvent) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    init_logging();
+
     let app = tauri::Builder::default()
         .manage(OpenFileState::default())
         .setup(|app| {

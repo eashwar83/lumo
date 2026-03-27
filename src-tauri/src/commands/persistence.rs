@@ -1,6 +1,7 @@
 use crate::store::play_history::PlayHistoryEntry;
 use crate::store::ui_state_store::UiState;
 use crate::{mpv_set_option_string_checked, with_mpv, AppState};
+use log::info;
 use std::path::{Path, PathBuf};
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 use std::process::Command;
@@ -336,7 +337,7 @@ fn apply_ytdl_path(mpv_guard: &crate::mpv::MpvHandle, ytdl_path: &str) -> Result
     mpv_set_option_string_checked(mpv_guard, "ytdl", "yes")?;
 
     #[cfg(debug_assertions)]
-    println!("Using yt-dlp search path(s): {}", ytdl_path);
+    info!("Using yt-dlp search path(s): {}", ytdl_path);
     let script_opts = format!("ytdl_hook-ytdl_path={ytdl_path}");
     let script_opts_result = mpv_guard.set_option_string("script-opts", &script_opts);
     if script_opts_result >= 0 {

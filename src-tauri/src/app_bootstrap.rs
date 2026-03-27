@@ -1,6 +1,7 @@
 use crate::mpv::MpvHandle;
 use crate::store::ui_state_store;
 use crate::AppState;
+use log::{info, warn};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
 use std::error::Error;
 use std::ffi::c_void;
@@ -195,7 +196,7 @@ fn configure_mpv_startup(app: &tauri::App) -> Result<(), Box<dyn Error>> {
     let ytdl_path = resolve_ytdl_path(app);
     if let Some(ytdl_path) = ytdl_path {
         #[cfg(debug_assertions)]
-        println!("Using yt-dlp search path(s): {}", ytdl_path);
+        info!("Using yt-dlp search path(s): {}", ytdl_path);
 
         let script_opts = format!("ytdl_hook-ytdl_path={ytdl_path}");
         let script_opts_result = mpv_guard.set_option_string("script-opts", &script_opts);
@@ -204,7 +205,7 @@ fn configure_mpv_startup(app: &tauri::App) -> Result<(), Box<dyn Error>> {
             if append_result < 0 {
                 let legacy_result = mpv_guard.set_option_string("ytdl-path", &ytdl_path);
                 if legacy_result < 0 {
-                    eprintln!(
+                    warn!(
                         "Failed to set ytdl path via script-opts ({script_opts_result}), \
                          script-opts-append ({append_result}), and legacy ytdl-path ({legacy_result})",
                     );
@@ -265,7 +266,7 @@ fn rotate_log_file(log_path: &PathBuf) {
     let backup_path = log_path.with_file_name("soia.prev.log");
     if backup_path.exists() {
         if let Err(err) = fs::remove_file(&backup_path) {
-            eprintln!(
+            warn!(
                 "Failed to remove old log backup {}: {}",
                 backup_path.display(),
                 err
@@ -275,7 +276,7 @@ fn rotate_log_file(log_path: &PathBuf) {
     }
 
     if let Err(err) = fs::rename(log_path, &backup_path) {
-        eprintln!("Failed to rotate log file {}: {}", log_path.display(), err);
+        warn!("Failed to rotate log file {}: {}", log_path.display(), err);
     }
 }
 

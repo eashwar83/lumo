@@ -5,9 +5,9 @@ use super::ffi::{
     mpv_command, mpv_create, mpv_create_client, mpv_destroy, mpv_format, mpv_free,
     mpv_get_property_string, mpv_initialize, mpv_set_option, mpv_set_option_string,
     mpv_terminate_destroy, soia_utils_create, soia_utils_destroy, soia_utils_render_context_update,
-    soia_utils_render_target_resize, soia_utils_uses_render_context,
-    SoiaUtils,
+    soia_utils_render_target_resize, soia_utils_uses_render_context, SoiaUtils,
 };
+use log::info;
 use std::ffi::{c_void, CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
@@ -35,7 +35,7 @@ fn release_mpv_context(ctx: &AtomicPtr<c_void>, terminate: bool) {
     if ctx.is_null() {
         return;
     }
-    println!("Freeing MPV player handle...");
+    info!("Freeing MPV player handle...");
     unsafe {
         if terminate {
             mpv_terminate_destroy(ctx);
@@ -120,7 +120,8 @@ impl MpvHandle {
         }
 
         let display_ptr = display.unwrap_or(std::ptr::null());
-        let soia_utils: *mut SoiaUtils = unsafe { soia_utils_create(ctx, window, display_ptr, mode) };
+        let soia_utils: *mut SoiaUtils =
+            unsafe { soia_utils_create(ctx, window, display_ptr, mode) };
         if soia_utils.is_null() {
             unsafe { mpv_destroy(ctx) };
             return Err("Failed to create SoiaUtils instance".to_string());

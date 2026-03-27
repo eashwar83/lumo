@@ -1,4 +1,5 @@
 use crate::store::{json_io, playback_db, storage_paths};
+use log::info;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -140,14 +141,14 @@ fn load_state_from_disk(path: &Path, legacy_path: &Path) -> Result<UiState, Stri
     }
 
     if path.exists() {
-        println!("Loading UI state from {}", path.display());
+        info!("Loading UI state from {}", path.display());
         let state: UiState = json_io::read_json_or_default(path)?;
         store_ui_state_cache(&state);
         return Ok(state);
     }
 
     if legacy_path.exists() {
-        println!("Loading UI state from {}", legacy_path.display());
+        info!("Loading UI state from {}", legacy_path.display());
         let legacy_state: UiState = json_io::read_json_or_default(legacy_path)?;
         json_io::write_json(path, &strip_playlist(&legacy_state))?;
         store_ui_state_cache(&legacy_state);
