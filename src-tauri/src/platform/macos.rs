@@ -207,9 +207,10 @@ mod imp {
     }
 
     fn unregister_pip_event_callback(app_handle: &tauri::AppHandle) {
-        let _ = with_soia_utils_on_main_thread_noop_if_missing(app_handle, move |soia_utils| unsafe {
-            soia_utils_set_pip_event_callback(soia_utils, std::ptr::null_mut(), None);
-        });
+        let _ =
+            with_soia_utils_on_main_thread_noop_if_missing(app_handle, move |soia_utils| unsafe {
+                soia_utils_set_pip_event_callback(soia_utils, std::ptr::null_mut(), None);
+            });
     }
 
     fn register_media_remote(app_handle: &tauri::AppHandle) {

@@ -19,6 +19,7 @@ use tauri::AppHandle;
 pub struct MpvHandle {
     ctx: AtomicPtr<c_void>,
     is_playing: Arc<AtomicBool>,
+    eof_reached: Arc<AtomicBool>,
     app_handle: AppHandle,
     event_loop_stop: Arc<AtomicBool>,
     event_loop_handle: Mutex<Option<JoinHandle<()>>>,
@@ -130,6 +131,7 @@ impl MpvHandle {
         let handle = MpvHandle {
             ctx: AtomicPtr::new(ctx),
             is_playing: Arc::new(AtomicBool::new(false)),
+            eof_reached: Arc::new(AtomicBool::new(false)),
             soia_utils: AtomicPtr::new(soia_utils),
             app_handle,
             event_loop_stop: Arc::new(AtomicBool::new(false)),
@@ -264,11 +266,14 @@ impl MpvHandle {
     pub fn start_event_listener(&self) {
         self.stop_event_listener();
         self.event_loop_stop.store(false, Ordering::SeqCst);
+        self.eof_reached.store(false, Ordering::SeqCst);
         let app_handle_clone = self.app_handle.clone();
         let stop_flag = self.event_loop_stop.clone();
         let is_playing = self.is_playing.clone();
-        let handle =
-            std::thread::spawn(move || mpv_event_loop(app_handle_clone, stop_flag, is_playing));
+        let eof_reached = self.eof_reached.clone();
+        let handle = std::thread::spawn(move || {
+            mpv_event_loop(app_handle_clone, stop_flag, is_playing, eof_reached)
+        });
         if let Ok(mut guard) = self.event_loop_handle.lock() {
             *guard = Some(handle);
         }
@@ -281,10 +286,15 @@ impl MpvHandle {
                 let _ = handle.join();
             }
         }
+        self.eof_reached.store(false, Ordering::SeqCst);
     }
 
     pub fn restart_event_listener(&self) {
         self.start_event_listener();
+    }
+
+    pub fn eof_reached(&self) -> bool {
+        self.eof_reached.load(Ordering::Acquire)
     }
 
     fn start_render_loop(&self) {

@@ -42,6 +42,15 @@ pub(crate) struct LoadFilePayload {
     auto_play: Option<bool>,
 }
 
+fn resume_playback(mpv_guard: &crate::mpv::MpvHandle) -> Result<(), String> {
+    mpv_command_checked(mpv_guard, &["set", "pause", "no"])
+}
+
+fn restart_from_beginning_after_eof(mpv_guard: &crate::mpv::MpvHandle) -> Result<(), String> {
+    mpv_command_checked(mpv_guard, &["seek", "0", "absolute", "exact"])?;
+    resume_playback(mpv_guard)
+}
+
 #[tauri::command]
 pub(crate) fn load_file(
     state: tauri::State<'_, AppState>,
@@ -65,6 +74,10 @@ pub(crate) fn load_file(
 #[tauri::command]
 pub(crate) fn cycle_pause(state: tauri::State<'_, AppState>) -> Result<(), String> {
     with_mpv(&state, |mpv_guard| {
+        if mpv_guard.eof_reached() {
+            return restart_from_beginning_after_eof(mpv_guard);
+        }
+
         mpv_command_checked(mpv_guard, &["cycle", "pause"])
     })?;
     Ok(())
@@ -74,7 +87,13 @@ pub(crate) fn cycle_pause(state: tauri::State<'_, AppState>) -> Result<(), Strin
 pub(crate) fn seek_video(state: tauri::State<'_, AppState>, position: f64) -> Result<(), String> {
     let position_str = position.to_string();
     with_mpv(&state, |mpv_guard| {
-        mpv_command_checked(mpv_guard, &["seek", &position_str, "absolute"])
+        mpv_command_checked(mpv_guard, &["seek", &position_str, "absolute"])?;
+
+        if mpv_guard.eof_reached() {
+            resume_playback(mpv_guard)?;
+        }
+
+        Ok(())
     })?;
     Ok(())
 }

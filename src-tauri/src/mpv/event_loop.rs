@@ -93,6 +93,42 @@ fn end_file_reason_label(reason: c_int) -> &'static str {
     }
 }
 
+fn emit_end_file_and_progress(
+    app_handle: &AppHandle,
+    reason: c_int,
+    last_time_pos: &mut f64,
+    last_duration: f64,
+    last_video_bitrate: &mut f64,
+) {
+    let reason_label = end_file_reason_label(reason);
+    let ended_time_pos = if reason == 0 {
+        if last_duration.is_finite() && last_duration > 0.0 {
+            // MPV may not emit the final `time-pos` at EOF; force UI to full duration.
+            last_duration
+        } else {
+            *last_time_pos
+        }
+    } else {
+        0.0
+    };
+    #[cfg(debug_assertions)]
+    info!(
+        "MPV Event Loop: End of file reached. reason={} ({})",
+        reason, reason_label
+    );
+    emit_event(
+        app_handle,
+        "mpv-end-file",
+        EndFilePayload {
+            reason: reason_label.to_string(),
+        },
+    );
+    *last_time_pos = ended_time_pos;
+    *last_video_bitrate = 0.0;
+    trace!("MPV time-pos updated: {}", ended_time_pos);
+    emit_progress(app_handle, ended_time_pos, last_duration, false, 0.0);
+}
+
 fn emit_resize_if_changed(
     app_handle: &AppHandle,
     width: i64,
@@ -200,7 +236,9 @@ pub(super) fn mpv_event_loop(
     app_handle: AppHandle,
     stop_flag: Arc<AtomicBool>,
     is_playing: Arc<AtomicBool>,
+    eof_reached: Arc<AtomicBool>,
 ) {
+    eof_reached.store(false, Ordering::SeqCst);
     let event_client: *mut c_void;
     {
         let app_state: tauri::State<'_, AppState> = app_handle.state::<AppState>();
@@ -228,6 +266,7 @@ pub(super) fn mpv_event_loop(
     const TRACK_ID: u64 = 6;
     const VIDEO_BITRATE_ID: u64 = 7;
     const MEDIA_TITLE_ID: u64 = 8;
+    const EOF_REACHED_ID: u64 = 9;
 
     let mut last_time_pos: f64 = 0.0;
     let mut last_duration: f64 = 0.0;
@@ -245,6 +284,7 @@ pub(super) fn mpv_event_loop(
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     let mut last_pip_paused: bool = false;
     let mut last_media_title: Option<String> = None;
+    let mut end_file_emitted_for_current_item: bool = false;
     let media_title_name = CString::new("media-title").expect("Property name contains null byte");
 
     unsafe {
@@ -291,8 +331,14 @@ pub(super) fn mpv_event_loop(
             "media-title",
             mpv_format::MPV_FORMAT_STRING,
         );
+        observe_property(
+            event_client,
+            EOF_REACHED_ID,
+            "eof-reached",
+            mpv_format::MPV_FORMAT_FLAG,
+        );
 
-        info!("MPV Event Loop: Started observing properties.");
+        debug!("MPV Event Loop: Started observing properties.");
 
         loop {
             if stop_flag.load(Ordering::Relaxed) {
@@ -307,10 +353,12 @@ pub(super) fn mpv_event_loop(
                 mpv_event_id::MPV_EVENT_START_FILE => {
                     #[cfg(debug_assertions)]
                     debug!("MPV Event Loop: MPV_EVENT_START_FILE received.");
+                    end_file_emitted_for_current_item = false;
+                    eof_reached.store(false, Ordering::SeqCst);
                 }
                 mpv_event_id::MPV_EVENT_FILE_LOADED => {
                     #[cfg(debug_assertions)]
-                    debug!("MPV Event Loop: MPV_EVENT_FILE_LOADED received.");
+                    info!("MPV Event Loop: MPV_EVENT_FILE_LOADED received.");
                     notify_start = true;
                     width = 0;
                     height = 0;
@@ -322,6 +370,8 @@ pub(super) fn mpv_event_loop(
                         last_pip_aspect_height = 0;
                     }
                     last_video_bitrate = 0.0;
+                    end_file_emitted_for_current_item = false;
+                    eof_reached.store(false, Ordering::SeqCst);
                     is_playing.store(true, Ordering::Relaxed);
                 }
                 mpv_event_id::MPV_EVENT_PLAYBACK_RESTART => {
@@ -343,6 +393,7 @@ pub(super) fn mpv_event_loop(
 
                     if !prop_event.is_null() {
                         let value_ptr = (*prop_event).data;
+                        let mut should_emit_progress = true;
 
                         match (*event).reply_usrdata {
                             TIME_POS_ID => {
@@ -418,6 +469,36 @@ pub(super) fn mpv_event_loop(
                                         }
                                         // println!("mpv media title: {}", title);
                                         mpv_free(title_ptr as *mut c_void);
+                                    }
+                                }
+                            }
+                            EOF_REACHED_ID => {
+                                if (*prop_event).format == mpv_format::MPV_FORMAT_FLAG
+                                    && !value_ptr.is_null()
+                                {
+                                    let eof_reached_value = *(value_ptr as *mut c_int) != 0;
+                                    if eof_reached_value {
+                                        eof_reached.store(true, Ordering::SeqCst);
+                                        is_playing.store(false, Ordering::Relaxed);
+                                        last_is_paused = true;
+                                        if !end_file_emitted_for_current_item {
+                                            #[cfg(debug_assertions)]
+                                            debug!(
+                                                "MPV Event Loop: eof-reached=true received; synthesizing EOF event."
+                                            );
+                                            emit_end_file_and_progress(
+                                                &app_handle,
+                                                0,
+                                                &mut last_time_pos,
+                                                last_duration,
+                                                &mut last_video_bitrate,
+                                            );
+                                            end_file_emitted_for_current_item = true;
+                                            should_emit_progress = false;
+                                        }
+                                    } else {
+                                        eof_reached.store(false, Ordering::SeqCst);
+                                        end_file_emitted_for_current_item = false;
                                     }
                                 }
                             }
@@ -545,13 +626,15 @@ pub(super) fn mpv_event_loop(
                             _ => {}
                         }
 
-                        emit_progress(
-                            &app_handle,
-                            last_time_pos,
-                            last_duration,
-                            !last_is_paused,
-                            last_video_bitrate,
-                        );
+                        if should_emit_progress {
+                            emit_progress(
+                                &app_handle,
+                                last_time_pos,
+                                last_duration,
+                                !last_is_paused,
+                                last_video_bitrate,
+                            );
+                        }
                     }
                 }
                 mpv_event_id::MPV_EVENT_END_FILE => {
@@ -562,20 +645,22 @@ pub(super) fn mpv_event_loop(
                     } else {
                         -1
                     };
-                    let reason_label = end_file_reason_label(reason);
-                    #[cfg(debug_assertions)]
-                    debug!(
-                        "MPV Event Loop: End of file reached. reason={} ({})",
-                        reason, reason_label
-                    );
-                    emit_event(
-                        &app_handle,
-                        "mpv-end-file",
-                        EndFilePayload {
-                            reason: reason_label.to_string(),
-                        },
-                    );
-                    emit_progress(&app_handle, 0.0, last_duration, false, 0.0);
+                    eof_reached.store(reason == 0, Ordering::SeqCst);
+                    if reason == 0 && end_file_emitted_for_current_item {
+                        #[cfg(debug_assertions)]
+                        debug!(
+                            "MPV Event Loop: Skipping duplicate EOF end event from MPV_EVENT_END_FILE."
+                        );
+                    } else {
+                        emit_end_file_and_progress(
+                            &app_handle,
+                            reason,
+                            &mut last_time_pos,
+                            last_duration,
+                            &mut last_video_bitrate,
+                        );
+                    }
+                    end_file_emitted_for_current_item = reason == 0;
                 }
                 _ => {}
             }
@@ -585,5 +670,6 @@ pub(super) fn mpv_event_loop(
     unsafe {
         mpv_destroy(event_client);
     }
+    eof_reached.store(false, Ordering::SeqCst);
     info!("MPV Event Loop: Thread exited cleanly.");
 }

@@ -227,6 +227,7 @@ fn configure_mpv_startup(app: &tauri::App) -> Result<(), Box<dyn Error>> {
 
     mpv_guard.set_option_string("cache", "auto");
     mpv_guard.set_option_string("cache-pause", "yes");
+    mpv_guard.set_option_string("keep-open", "yes");
     mpv_guard.set_option_string("demuxer-max-bytes", "100MiB");
     mpv_guard.set_option_string("demuxer-max-back-bytes", "20MiB");
 
