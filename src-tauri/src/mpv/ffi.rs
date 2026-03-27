@@ -157,8 +157,8 @@ unsafe extern "C" {
     ) -> c_int;
     pub(super) fn mpv_set_option_string(
         ctx: *mut c_void,
-        name: *const i8,
-        data: *const i8,
+        name: *const c_char,
+        data: *const c_char,
     ) -> c_int;
     pub(super) fn mpv_destroy(ctx: *mut c_void);
     pub(super) fn mpv_terminate_destroy(ctx: *mut c_void);
