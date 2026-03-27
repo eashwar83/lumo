@@ -10,6 +10,7 @@ const props = defineProps<{
     currentTime: number;
     duration: number;
     progressPercent: number;
+    bufferedPercent: number;
     formatTime: (seconds: number) => string;
     controlsVisible?: boolean;
     isHidden: boolean;
@@ -186,6 +187,7 @@ onUnmounted(() => {
             <SeekBar
                 :duration="duration"
                 :progress-percent="progressPercent"
+                :buffered-percent="bufferedPercent"
                 :format-time="formatTime"
                 :controls-visible="controlsVisible"
                 @seek="emit('seek', $event)"

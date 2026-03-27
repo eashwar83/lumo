@@ -98,6 +98,11 @@ export const useAppEventBindings = ({
             (event) => {
                 player.state.playback.currentTime = event.payload.time_pos;
                 player.state.playback.duration = event.payload.duration;
+                player.state.playback.bufferedTime =
+                    typeof event.payload.buffered_pos === "number" &&
+                    Number.isFinite(event.payload.buffered_pos)
+                        ? event.payload.buffered_pos
+                        : event.payload.time_pos;
                 player.state.playback.isPlaying = event.payload.is_playing;
                 player.state.playback.videoBitrate =
                     typeof event.payload.video_bitrate === "number" &&

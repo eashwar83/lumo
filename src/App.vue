@@ -578,6 +578,7 @@ function onWindowFocusDrainPendingFiles() {
             :current-time="player.state.playback.currentTime"
             :duration="player.state.playback.duration"
             :progress-percent="player.progressPercent.value"
+            :buffered-percent="player.bufferedPercent.value"
             :format-time="player.formatTime"
             :controls-visible="ui.showControls.value"
             :is-hidden="

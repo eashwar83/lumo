@@ -321,6 +321,7 @@ export const usePlaybackFlow = ({
         player.state.playback.isPlaying = false;
         player.state.playback.currentTime = 0;
         player.state.playback.duration = 0;
+        player.state.playback.bufferedTime = 0;
         player.state.playback.videoBitrate = 0;
         tracks.resetTracks();
         hideAllMenus();

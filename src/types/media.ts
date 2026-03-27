@@ -1,6 +1,7 @@
 export interface ProgressPayload {
     time_pos: number;
     duration: number;
+    buffered_pos?: number;
     is_playing: boolean;
     video_bitrate?: number;
 }

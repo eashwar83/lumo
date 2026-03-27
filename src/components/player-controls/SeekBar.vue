@@ -4,6 +4,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 const props = defineProps<{
     duration: number;
     progressPercent: number;
+    bufferedPercent: number;
     formatTime: (seconds: number) => string;
     controlsVisible?: boolean;
 }>();
@@ -108,6 +109,18 @@ const displayProgressPercent = computed(() => {
     return Math.min(100, Math.max(0, percent));
 });
 
+const displayBufferedPercent = computed(() => {
+    const raw = Number.isFinite(props.bufferedPercent)
+        ? props.bufferedPercent
+        : 0;
+    const buffered = Math.min(100, Math.max(0, raw));
+    return Math.max(buffered, displayProgressPercent.value);
+});
+
+const bufferedAheadPercent = computed(() =>
+    Math.max(0, displayBufferedPercent.value - displayProgressPercent.value),
+);
+
 watch(
     () => props.controlsVisible,
     (visible) => {
@@ -144,7 +157,14 @@ onUnmounted(() => {
             {{ formatTime(hoverTime) }}
         </div>
         <div class="progress-bg">
-            <div class="progress-buffer"></div>
+            <div
+                v-if="bufferedAheadPercent > 0.05"
+                class="progress-buffer-ahead"
+                :style="{
+                    left: displayProgressPercent + '%',
+                    width: bufferedAheadPercent + '%',
+                }"
+            ></div>
             <div
                 class="progress-current"
                 :style="{ width: displayProgressPercent + '%' }"
@@ -168,8 +188,9 @@ onUnmounted(() => {
 .progress-bg {
     height: 3px;
     width: 100%;
-    background: rgba(230, 230, 230, 0.9);
+    background: rgba(18, 20, 27, 0.72);
     position: relative;
+    overflow: hidden;
     transition: height 0.1s;
 }
 
@@ -185,6 +206,16 @@ onUnmounted(() => {
     height: 100%;
     background: var(--progress-color);
     position: relative;
+    z-index: 2;
+}
+
+.progress-buffer-ahead {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    background: rgba(214, 220, 230, 0.72);
+    z-index: 1;
+    pointer-events: none;
 }
 
 .scrubber-head {

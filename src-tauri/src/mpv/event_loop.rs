@@ -15,6 +15,7 @@ use tauri::{AppHandle, Emitter, Manager};
 struct ProgressPayload {
     time_pos: f64,
     duration: f64,
+    buffered_pos: f64,
     is_playing: bool,
     video_bitrate: f64,
 }
@@ -67,6 +68,7 @@ fn emit_progress(
     app_handle: &AppHandle,
     time_pos: f64,
     duration: f64,
+    buffered_pos: f64,
     is_playing: bool,
     video_bitrate: f64,
 ) {
@@ -76,6 +78,7 @@ fn emit_progress(
         ProgressPayload {
             time_pos,
             duration,
+            buffered_pos,
             is_playing,
             video_bitrate,
         },
@@ -93,11 +96,30 @@ fn end_file_reason_label(reason: c_int) -> &'static str {
     }
 }
 
+fn compute_buffered_pos(time_pos: f64, duration: f64, cache_ahead: f64) -> f64 {
+    let safe_time_pos = if time_pos.is_finite() {
+        time_pos.max(0.0)
+    } else {
+        0.0
+    };
+    let safe_cache_ahead = if cache_ahead.is_finite() {
+        cache_ahead.max(0.0)
+    } else {
+        0.0
+    };
+    let mut buffered_pos = safe_time_pos + safe_cache_ahead;
+    if duration.is_finite() && duration > 0.0 {
+        buffered_pos = buffered_pos.min(duration);
+    }
+    buffered_pos.max(safe_time_pos)
+}
+
 fn emit_end_file_and_progress(
     app_handle: &AppHandle,
     reason: c_int,
     last_time_pos: &mut f64,
     last_duration: f64,
+    last_buffered_pos: &mut f64,
     last_video_bitrate: &mut f64,
 ) {
     let reason_label = end_file_reason_label(reason);
@@ -124,9 +146,17 @@ fn emit_end_file_and_progress(
         },
     );
     *last_time_pos = ended_time_pos;
+    *last_buffered_pos = ended_time_pos;
     *last_video_bitrate = 0.0;
     trace!("MPV time-pos updated: {}", ended_time_pos);
-    emit_progress(app_handle, ended_time_pos, last_duration, false, 0.0);
+    emit_progress(
+        app_handle,
+        ended_time_pos,
+        last_duration,
+        ended_time_pos,
+        false,
+        0.0,
+    );
 }
 
 fn emit_resize_if_changed(
@@ -267,11 +297,14 @@ pub(super) fn mpv_event_loop(
     const VIDEO_BITRATE_ID: u64 = 7;
     const MEDIA_TITLE_ID: u64 = 8;
     const EOF_REACHED_ID: u64 = 9;
+    const DEMUXER_CACHE_TIME_ID: u64 = 10;
 
     let mut last_time_pos: f64 = 0.0;
     let mut last_duration: f64 = 0.0;
     let mut last_is_paused: bool = false;
     let mut last_video_bitrate: f64 = 0.0;
+    let mut last_demuxer_cache_time: f64 = 0.0;
+    let mut last_buffered_pos: f64 = 0.0;
     let mut notify_start: bool = false;
     let mut width: i64 = 0;
     let mut height: i64 = 0;
@@ -337,6 +370,12 @@ pub(super) fn mpv_event_loop(
             "eof-reached",
             mpv_format::MPV_FORMAT_FLAG,
         );
+        observe_property(
+            event_client,
+            DEMUXER_CACHE_TIME_ID,
+            "demuxer-cache-time",
+            mpv_format::MPV_FORMAT_DOUBLE,
+        );
 
         debug!("MPV Event Loop: Started observing properties.");
 
@@ -370,6 +409,8 @@ pub(super) fn mpv_event_loop(
                         last_pip_aspect_height = 0;
                     }
                     last_video_bitrate = 0.0;
+                    last_demuxer_cache_time = 0.0;
+                    last_buffered_pos = 0.0;
                     end_file_emitted_for_current_item = false;
                     eof_reached.store(false, Ordering::SeqCst);
                     is_playing.store(true, Ordering::Relaxed);
@@ -401,6 +442,11 @@ pub(super) fn mpv_event_loop(
                                     && !value_ptr.is_null()
                                 {
                                     last_time_pos = *(value_ptr as *mut f64);
+                                    last_buffered_pos = compute_buffered_pos(
+                                        last_time_pos,
+                                        last_duration,
+                                        last_demuxer_cache_time,
+                                    );
                                     #[cfg(debug_assertions)]
                                     trace!("MPV time-pos updated: {}", last_time_pos);
                                 }
@@ -410,6 +456,11 @@ pub(super) fn mpv_event_loop(
                                     && !value_ptr.is_null()
                                 {
                                     last_duration = *(value_ptr as *mut f64);
+                                    last_buffered_pos = compute_buffered_pos(
+                                        last_time_pos,
+                                        last_duration,
+                                        last_demuxer_cache_time,
+                                    );
                                 }
                             }
                             PAUSE_ID => {
@@ -491,6 +542,7 @@ pub(super) fn mpv_event_loop(
                                                 0,
                                                 &mut last_time_pos,
                                                 last_duration,
+                                                &mut last_buffered_pos,
                                                 &mut last_video_bitrate,
                                             );
                                             end_file_emitted_for_current_item = true;
@@ -500,6 +552,24 @@ pub(super) fn mpv_event_loop(
                                         eof_reached.store(false, Ordering::SeqCst);
                                         end_file_emitted_for_current_item = false;
                                     }
+                                }
+                            }
+                            DEMUXER_CACHE_TIME_ID => {
+                                if (*prop_event).format == mpv_format::MPV_FORMAT_DOUBLE
+                                    && !value_ptr.is_null()
+                                {
+                                    let cache_time = *(value_ptr as *mut f64);
+                                    last_demuxer_cache_time = if cache_time.is_finite() {
+                                        cache_time.max(0.0)
+                                    } else {
+                                        0.0
+                                    };
+                                    last_buffered_pos = compute_buffered_pos(
+                                        last_time_pos,
+                                        last_duration,
+                                        last_demuxer_cache_time,
+                                    );
+                                    trace!("last_buffered_pos: {}", last_buffered_pos);
                                 }
                             }
                             WIDTH_ID => {
@@ -631,6 +701,7 @@ pub(super) fn mpv_event_loop(
                                 &app_handle,
                                 last_time_pos,
                                 last_duration,
+                                last_buffered_pos,
                                 !last_is_paused,
                                 last_video_bitrate,
                             );
@@ -657,6 +728,7 @@ pub(super) fn mpv_event_loop(
                             reason,
                             &mut last_time_pos,
                             last_duration,
+                            &mut last_buffered_pos,
                             &mut last_video_bitrate,
                         );
                     }

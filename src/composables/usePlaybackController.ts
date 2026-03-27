@@ -14,6 +14,7 @@ type PlayerState = {
     isPlaying: boolean;
     currentTime: number;
     duration: number;
+    bufferedTime: number;
     videoBitrate: number;
   };
   window: {
@@ -24,6 +25,7 @@ type PlayerState = {
 export type PlayerApi = {
   state: PlayerState;
   progressPercent: { value: number };
+  bufferedPercent: { value: number };
   isUrlModified: { value: boolean };
   formatTime: (seconds: number) => string;
   loadFile: (resumePosition?: number, autoPlay?: boolean) => Promise<void>;
@@ -61,6 +63,7 @@ export const usePlaybackController = (): PlayerApi => {
       isPlaying: false,
       currentTime: 0,
       duration: 0,
+      bufferedTime: 0,
       videoBitrate: 0,
     },
     window: {
@@ -73,6 +76,11 @@ export const usePlaybackController = (): PlayerApi => {
     return (state.playback.currentTime / state.playback.duration) * 100;
   });
 
+  const bufferedPercent = computed(() => {
+    if (state.playback.duration <= 0) return 0;
+    return (state.playback.bufferedTime / state.playback.duration) * 100;
+  });
+
   const isUrlModified = computed(
     () => state.media.url !== state.media.lastLoadedUrl,
   );
@@ -82,6 +90,7 @@ export const usePlaybackController = (): PlayerApi => {
   return {
     state,
     progressPercent,
+    bufferedPercent,
     isUrlModified,
     formatTime,
     ...commands,
