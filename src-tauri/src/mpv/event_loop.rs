@@ -96,18 +96,68 @@ fn end_file_reason_label(reason: c_int) -> &'static str {
     }
 }
 
-fn compute_buffered_pos(time_pos: f64, duration: f64, cache_ahead: f64) -> f64 {
-    let safe_time_pos = if time_pos.is_finite() {
-        time_pos.max(0.0)
+const CACHE_METRIC_ABSOLUTE_TOLERANCE_SECS: f64 = 5.0;
+
+fn sanitize_non_negative_f64(value: f64) -> f64 {
+    if value.is_finite() {
+        value.max(0.0)
     } else {
         0.0
+    }
+}
+
+fn is_cache_metric_absolute(time_pos: f64, cache_time_metric: f64) -> bool {
+    let safe_time_pos = sanitize_non_negative_f64(time_pos);
+    let safe_cache_metric = sanitize_non_negative_f64(cache_time_metric);
+    safe_cache_metric + CACHE_METRIC_ABSOLUTE_TOLERANCE_SECS >= safe_time_pos
+}
+
+fn parse_seekable_ranges(cache_state: &serde_json::Value) -> Vec<(f64, f64)> {
+    let mut ranges = Vec::new();
+    let Some(raw_ranges) = cache_state
+        .get("seekable-ranges")
+        .and_then(|value| value.as_array())
+    else {
+        return ranges;
     };
-    let safe_cache_ahead = if cache_ahead.is_finite() {
-        cache_ahead.max(0.0)
+
+    for range in raw_ranges {
+        let Some(start) = range.get("start").and_then(|value| value.as_f64()) else {
+            continue;
+        };
+        let Some(end) = range.get("end").and_then(|value| value.as_f64()) else {
+            continue;
+        };
+        let safe_start = sanitize_non_negative_f64(start);
+        let safe_end = sanitize_non_negative_f64(end);
+        if safe_start <= safe_end {
+            ranges.push((safe_start, safe_end));
+        } else {
+            ranges.push((safe_end, safe_start));
+        }
+    }
+
+    ranges
+}
+
+fn is_time_in_ranges(time_pos: f64, ranges: &[(f64, f64)]) -> bool {
+    let safe_time_pos = sanitize_non_negative_f64(time_pos);
+    ranges
+        .iter()
+        .any(|(start, end)| safe_time_pos >= *start && safe_time_pos <= *end)
+}
+
+fn compute_buffered_pos(time_pos: f64, duration: f64, cache_time_metric: f64) -> f64 {
+    let safe_time_pos = sanitize_non_negative_f64(time_pos);
+    let safe_cache_metric = sanitize_non_negative_f64(cache_time_metric);
+    // Some MPV builds/sources report this metric as absolute cache-end timestamp,
+    // others as "seconds ahead". Handle both forms with tolerance to avoid seek jitter.
+    let treat_as_absolute = is_cache_metric_absolute(safe_time_pos, safe_cache_metric);
+    let mut buffered_pos = if treat_as_absolute {
+        safe_cache_metric
     } else {
-        0.0
+        safe_time_pos + safe_cache_metric
     };
-    let mut buffered_pos = safe_time_pos + safe_cache_ahead;
     if duration.is_finite() && duration > 0.0 {
         buffered_pos = buffered_pos.min(duration);
     }
@@ -298,6 +348,7 @@ pub(super) fn mpv_event_loop(
     const MEDIA_TITLE_ID: u64 = 8;
     const EOF_REACHED_ID: u64 = 9;
     const DEMUXER_CACHE_TIME_ID: u64 = 10;
+    const DEMUXER_CACHE_STATE_ID: u64 = 11;
 
     let mut last_time_pos: f64 = 0.0;
     let mut last_duration: f64 = 0.0;
@@ -318,6 +369,12 @@ pub(super) fn mpv_event_loop(
     let mut last_pip_paused: bool = false;
     let mut last_media_title: Option<String> = None;
     let mut end_file_emitted_for_current_item: bool = false;
+    let mut ignore_next_cache_update_after_seek: bool = false;
+    let mut freeze_buffered_pos_until_cache_refresh: bool = false;
+    let mut pending_seek_cache_range_check: bool = false;
+    let mut seek_from_time_pos: f64 = 0.0;
+    let mut seek_from_buffered_pos: f64 = 0.0;
+    let mut last_seekable_ranges: Vec<(f64, f64)> = Vec::new();
     let media_title_name = CString::new("media-title").expect("Property name contains null byte");
 
     unsafe {
@@ -376,6 +433,12 @@ pub(super) fn mpv_event_loop(
             "demuxer-cache-time",
             mpv_format::MPV_FORMAT_DOUBLE,
         );
+        observe_property(
+            event_client,
+            DEMUXER_CACHE_STATE_ID,
+            "demuxer-cache-state",
+            mpv_format::MPV_FORMAT_NODE,
+        );
 
         debug!("MPV Event Loop: Started observing properties.");
 
@@ -394,6 +457,9 @@ pub(super) fn mpv_event_loop(
                     debug!("MPV Event Loop: MPV_EVENT_START_FILE received.");
                     end_file_emitted_for_current_item = false;
                     eof_reached.store(false, Ordering::SeqCst);
+                    freeze_buffered_pos_until_cache_refresh = false;
+                    pending_seek_cache_range_check = false;
+                    last_seekable_ranges.clear();
                 }
                 mpv_event_id::MPV_EVENT_FILE_LOADED => {
                     #[cfg(debug_assertions)]
@@ -412,6 +478,10 @@ pub(super) fn mpv_event_loop(
                     last_demuxer_cache_time = 0.0;
                     last_buffered_pos = 0.0;
                     end_file_emitted_for_current_item = false;
+                    ignore_next_cache_update_after_seek = false;
+                    freeze_buffered_pos_until_cache_refresh = false;
+                    pending_seek_cache_range_check = false;
+                    last_seekable_ranges.clear();
                     eof_reached.store(false, Ordering::SeqCst);
                     is_playing.store(true, Ordering::Relaxed);
                 }
@@ -423,6 +493,21 @@ pub(super) fn mpv_event_loop(
                         notify_start = false;
                         emit_event(&app_handle, "file_loaded", ());
                     }
+                }
+                mpv_event_id::MPV_EVENT_SEEK => {
+                    #[cfg(debug_assertions)]
+                    debug!("MPV Event Loop: MPV_EVENT_SEEK received.");
+                    // demuxer-cache-time can briefly reflect the pre-seek segment.
+                    // Reset it so buffered progress won't jump to a wrong position.
+                    seek_from_time_pos = sanitize_non_negative_f64(last_time_pos);
+                    seek_from_buffered_pos =
+                        sanitize_non_negative_f64(last_buffered_pos).max(seek_from_time_pos);
+                    last_demuxer_cache_time = 0.0;
+                    ignore_next_cache_update_after_seek = true;
+                    freeze_buffered_pos_until_cache_refresh = true;
+                    pending_seek_cache_range_check = true;
+                    end_file_emitted_for_current_item = false;
+                    eof_reached.store(false, Ordering::SeqCst);
                 }
                 mpv_event_id::MPV_EVENT_SHUTDOWN => {
                     #[cfg(debug_assertions)]
@@ -442,11 +527,55 @@ pub(super) fn mpv_event_loop(
                                     && !value_ptr.is_null()
                                 {
                                     last_time_pos = *(value_ptr as *mut f64);
-                                    last_buffered_pos = compute_buffered_pos(
-                                        last_time_pos,
-                                        last_duration,
-                                        last_demuxer_cache_time,
-                                    );
+                                    if freeze_buffered_pos_until_cache_refresh {
+                                        let safe_time_pos =
+                                            sanitize_non_negative_f64(last_time_pos);
+                                        if pending_seek_cache_range_check {
+                                            let has_seekable_ranges =
+                                                !last_seekable_ranges.is_empty();
+                                            let seek_inside_old_buffer_range =
+                                                if has_seekable_ranges {
+                                                    is_time_in_ranges(
+                                                        safe_time_pos,
+                                                        &last_seekable_ranges,
+                                                    )
+                                                } else {
+                                                    safe_time_pos >= seek_from_time_pos
+                                                        && safe_time_pos <= seek_from_buffered_pos
+                                                };
+                                            if seek_inside_old_buffer_range {
+                                                // Keep buffered marker stable if seek stays inside
+                                                // the already buffered segment.
+                                                last_buffered_pos =
+                                                    last_buffered_pos.max(safe_time_pos);
+                                            } else {
+                                                // Seek moved outside previous buffered segment.
+                                                // Show 0-ahead cache immediately.
+                                                last_buffered_pos = safe_time_pos;
+                                            }
+                                            #[cfg(debug_assertions)]
+                                            trace!(
+                                                "cache-seek-range-check: seek_time={:.3}, old_range=[{:.3},{:.3}], has_seekable_ranges={}, in_old_range={}",
+                                                safe_time_pos,
+                                                seek_from_time_pos,
+                                                seek_from_buffered_pos,
+                                                has_seekable_ranges,
+                                                seek_inside_old_buffer_range
+                                            );
+                                            pending_seek_cache_range_check = false;
+                                        } else {
+                                            // Keep buffered marker stable right after seek to avoid
+                                            // visual jump-then-bounce while cache metric settles.
+                                            last_buffered_pos =
+                                                last_buffered_pos.max(safe_time_pos);
+                                        }
+                                    } else {
+                                        last_buffered_pos = compute_buffered_pos(
+                                            last_time_pos,
+                                            last_duration,
+                                            last_demuxer_cache_time,
+                                        );
+                                    }
                                     #[cfg(debug_assertions)]
                                     trace!("MPV time-pos updated: {}", last_time_pos);
                                 }
@@ -456,11 +585,13 @@ pub(super) fn mpv_event_loop(
                                     && !value_ptr.is_null()
                                 {
                                     last_duration = *(value_ptr as *mut f64);
-                                    last_buffered_pos = compute_buffered_pos(
-                                        last_time_pos,
-                                        last_duration,
-                                        last_demuxer_cache_time,
-                                    );
+                                    if !freeze_buffered_pos_until_cache_refresh {
+                                        last_buffered_pos = compute_buffered_pos(
+                                            last_time_pos,
+                                            last_duration,
+                                            last_demuxer_cache_time,
+                                        );
+                                    }
                                 }
                             }
                             PAUSE_ID => {
@@ -559,17 +690,60 @@ pub(super) fn mpv_event_loop(
                                     && !value_ptr.is_null()
                                 {
                                     let cache_time = *(value_ptr as *mut f64);
-                                    last_demuxer_cache_time = if cache_time.is_finite() {
+                                    let normalized_cache_time = if cache_time.is_finite() {
                                         cache_time.max(0.0)
                                     } else {
                                         0.0
                                     };
-                                    last_buffered_pos = compute_buffered_pos(
-                                        last_time_pos,
-                                        last_duration,
-                                        last_demuxer_cache_time,
+
+                                    if ignore_next_cache_update_after_seek {
+                                        ignore_next_cache_update_after_seek = false;
+                                        #[cfg(debug_assertions)]
+                                        trace!(
+                                            "cache-skip-after-seek: time_pos={:.3}, cache_metric={:.3}",
+                                            last_time_pos,
+                                            normalized_cache_time
+                                        );
+                                    } else {
+                                        last_demuxer_cache_time = normalized_cache_time;
+                                        last_buffered_pos = compute_buffered_pos(
+                                            last_time_pos,
+                                            last_duration,
+                                            last_demuxer_cache_time,
+                                        );
+                                        freeze_buffered_pos_until_cache_refresh = false;
+                                        pending_seek_cache_range_check = false;
+                                        let mode = if is_cache_metric_absolute(
+                                            last_time_pos,
+                                            last_demuxer_cache_time,
+                                        ) {
+                                            "absolute"
+                                        } else {
+                                            "ahead"
+                                        };
+                                        #[cfg(debug_assertions)]
+                                        trace!(
+                                            "cache-update: mode={}, time_pos={:.3}, cache_metric={:.3}, buffered_pos={:.3}",
+                                            mode,
+                                            last_time_pos,
+                                            last_demuxer_cache_time,
+                                            last_buffered_pos
+                                        );
+                                    }
+                                }
+                            }
+                            DEMUXER_CACHE_STATE_ID => {
+                                if (*prop_event).format == mpv_format::MPV_FORMAT_NODE
+                                    && !value_ptr.is_null()
+                                {
+                                    let node = value_ptr as *mut mpv_node;
+                                    let json_cache_state = parse_node(node);
+                                    last_seekable_ranges = parse_seekable_ranges(&json_cache_state);
+                                    #[cfg(debug_assertions)]
+                                    trace!(
+                                        "cache-state-ranges-updated: count={}",
+                                        last_seekable_ranges.len()
                                     );
-                                    trace!("last_buffered_pos: {}", last_buffered_pos);
                                 }
                             }
                             WIDTH_ID => {
