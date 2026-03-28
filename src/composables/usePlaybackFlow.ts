@@ -169,6 +169,7 @@ export const usePlaybackFlow = ({
         player.state.media.url = path;
         player.state.media.title = "";
         player.state.playback.isBuffering = false;
+        player.state.playback.downloadSpeedBps = 0;
         loadingUrl.value = path;
         isLoading.value = true;
         await ensurePlaybackPreferencesLoaded();
@@ -190,6 +191,7 @@ export const usePlaybackFlow = ({
         player.state.media.url = playbackKey;
         player.state.media.title = "";
         player.state.playback.isBuffering = false;
+        player.state.playback.downloadSpeedBps = 0;
         loadingUrl.value = playbackKey;
         isLoading.value = true;
         await ensurePlaybackPreferencesLoaded();
@@ -250,6 +252,7 @@ export const usePlaybackFlow = ({
         hideHistory.value = true;
         tracks.resetTracks();
         player.state.playback.isBuffering = false;
+        player.state.playback.downloadSpeedBps = 0;
         loadingUrl.value = player.state.media.url;
         isLoading.value = true;
         await ensurePlaybackPreferencesLoaded();
@@ -304,6 +307,7 @@ export const usePlaybackFlow = ({
         isLoading.value = false;
         loadingUrl.value = "";
         player.state.playback.isBuffering = false;
+        player.state.playback.downloadSpeedBps = 0;
         nowPlaying.clearArtwork();
     };
 
@@ -324,6 +328,7 @@ export const usePlaybackFlow = ({
         player.state.media.title = "";
         player.state.playback.isPlaying = false;
         player.state.playback.isBuffering = false;
+        player.state.playback.downloadSpeedBps = 0;
         player.state.playback.currentTime = 0;
         player.state.playback.duration = 0;
         player.state.playback.bufferedTime = 0;

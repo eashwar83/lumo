@@ -13,6 +13,7 @@ type PlayerState = {
   playback: {
     isPlaying: boolean;
     isBuffering: boolean;
+    downloadSpeedBps: number;
     currentTime: number;
     duration: number;
     bufferedTime: number;
@@ -63,6 +64,7 @@ export const usePlaybackController = (): PlayerApi => {
     playback: {
       isPlaying: false,
       isBuffering: false,
+      downloadSpeedBps: 0,
       currentTime: 0,
       duration: 0,
       bufferedTime: 0,

@@ -5,6 +5,7 @@ export interface ProgressPayload {
     is_playing: boolean;
     video_bitrate?: number;
     is_buffering?: boolean;
+    download_speed_bps?: number;
 }
 
 export interface MediaTrack {

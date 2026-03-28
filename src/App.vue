@@ -112,6 +112,11 @@ const shouldShowPlaybackLoadingOverlay = computed(
         isLoading.value ||
         (player.state.media.isFileLoaded && player.state.playback.isBuffering),
 );
+const loadingDownloadSpeedBps = computed(() => {
+    const speed = player.state.playback.downloadSpeedBps;
+    if (!Number.isFinite(speed) || speed <= 0) return null;
+    return speed;
+});
 const isLoadingOverlayVisible = ref(false);
 let loadingOverlayDelayTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -176,6 +181,7 @@ const onSideNavNavigate = async (
 const beginSeekLoading = () => {
     isLoading.value = true;
     loadingUrl.value = player.state.media.url;
+    player.state.playback.downloadSpeedBps = 0;
 };
 
 const onSeek = async (position: number) => {
@@ -599,6 +605,7 @@ function onWindowFocusDrainPendingFiles() {
 
         <PlaybackOverlays
             :is-loading="isLoadingOverlayVisible"
+            :loading-speed-bps="loadingDownloadSpeedBps"
             :show-status-overlay="
                 player.state.media.isFileLoaded &&
                 nowPlaying.showStatusOverlay.value

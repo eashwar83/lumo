@@ -19,6 +19,7 @@ struct ProgressPayload {
     is_playing: bool,
     video_bitrate: f64,
     is_buffering: bool,
+    download_speed_bps: f64,
 }
 
 #[derive(Serialize, Clone)]
@@ -73,6 +74,7 @@ fn emit_progress(
     is_playing: bool,
     video_bitrate: f64,
     is_buffering: bool,
+    download_speed_bps: f64,
 ) {
     emit_event(
         app_handle,
@@ -84,6 +86,7 @@ fn emit_progress(
             is_playing,
             video_bitrate,
             is_buffering,
+            download_speed_bps,
         },
     );
 }
@@ -141,6 +144,38 @@ fn parse_seekable_ranges(cache_state: &serde_json::Value) -> Vec<(f64, f64)> {
     }
 
     ranges
+}
+
+fn extract_download_speed_bps(cache_state: &serde_json::Value) -> f64 {
+    let as_non_negative_f64 = |value: Option<&serde_json::Value>| {
+        value
+            .and_then(|entry| entry.as_f64())
+            .map(sanitize_non_negative_f64)
+            .unwrap_or(0.0)
+    };
+
+    let direct_candidates = [
+        "raw-input-rate",
+        "download-speed",
+        "bytes-per-second",
+        "cache-speed",
+        "fw-bytes-per-second",
+    ];
+
+    for key in direct_candidates {
+        let speed = as_non_negative_f64(cache_state.get(key));
+        if speed > 0.0 {
+            return speed;
+        }
+    }
+
+    let fw_bytes = as_non_negative_f64(cache_state.get("fw-bytes"));
+    let cache_duration = as_non_negative_f64(cache_state.get("cache-duration"));
+    if fw_bytes > 0.0 && cache_duration > 0.0 {
+        return fw_bytes / cache_duration;
+    }
+
+    0.0
 }
 
 fn is_time_in_ranges(time_pos: f64, ranges: &[(f64, f64)]) -> bool {
@@ -210,6 +245,7 @@ fn emit_end_file_and_progress(
         false,
         0.0,
         false,
+        0.0,
     );
 }
 
@@ -362,6 +398,7 @@ pub(super) fn mpv_event_loop(
     let mut last_demuxer_cache_time: f64 = 0.0;
     let mut last_buffered_pos: f64 = 0.0;
     let mut last_is_buffering: bool = false;
+    let mut last_download_speed_bps: f64 = 0.0;
     let mut notify_start: bool = false;
     let mut width: i64 = 0;
     let mut height: i64 = 0;
@@ -473,6 +510,7 @@ pub(super) fn mpv_event_loop(
                     pending_seek_cache_range_check = false;
                     last_seekable_ranges.clear();
                     last_is_buffering = false;
+                    last_download_speed_bps = 0.0;
                 }
                 mpv_event_id::MPV_EVENT_FILE_LOADED => {
                     #[cfg(debug_assertions)]
@@ -496,6 +534,7 @@ pub(super) fn mpv_event_loop(
                     pending_seek_cache_range_check = false;
                     last_seekable_ranges.clear();
                     last_is_buffering = false;
+                    last_download_speed_bps = 0.0;
                     eof_reached.store(false, Ordering::SeqCst);
                     is_playing.store(true, Ordering::Relaxed);
                 }
@@ -754,6 +793,8 @@ pub(super) fn mpv_event_loop(
                                     let node = value_ptr as *mut mpv_node;
                                     let json_cache_state = parse_node(node);
                                     last_seekable_ranges = parse_seekable_ranges(&json_cache_state);
+                                    last_download_speed_bps =
+                                        extract_download_speed_bps(&json_cache_state);
                                     #[cfg(debug_assertions)]
                                     trace!(
                                         "cache-state-ranges-updated: count={}",
@@ -901,6 +942,7 @@ pub(super) fn mpv_event_loop(
                                 !last_is_paused,
                                 last_video_bitrate,
                                 last_is_buffering,
+                                last_download_speed_bps,
                             );
                         }
                     }
@@ -908,6 +950,7 @@ pub(super) fn mpv_event_loop(
                 mpv_event_id::MPV_EVENT_END_FILE => {
                     is_playing.store(false, Ordering::Relaxed);
                     last_is_buffering = false;
+                    last_download_speed_bps = 0.0;
                     let reason = if !(*event).data.is_null() {
                         let end_file = &*((*event).data as *const MpvEventEndFile);
                         end_file.reason

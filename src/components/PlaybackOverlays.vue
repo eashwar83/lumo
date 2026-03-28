@@ -1,11 +1,26 @@
 <script setup lang="ts">
+import { computed } from "vue";
+
 type StatusOverlayMode = "play" | "pause";
 
-defineProps<{
+const props = defineProps<{
     isLoading: boolean;
+    loadingSpeedBps?: number | null;
     showStatusOverlay: boolean;
     statusOverlayMode: StatusOverlayMode;
 }>();
+
+const loadingSpeedText = computed(() => {
+    const speed = props.loadingSpeedBps ?? 0;
+    if (!Number.isFinite(speed) || speed <= 0) return "";
+    if (speed >= 1024 * 1024) {
+        return `${(speed / (1024 * 1024)).toFixed(2)} MB/s`;
+    }
+    if (speed >= 1024) {
+        return `${(speed / 1024).toFixed(1)} KB/s`;
+    }
+    return `${Math.round(speed)} B/s`;
+});
 </script>
 
 <template>
@@ -13,6 +28,9 @@ defineProps<{
         <div class="loading-card">
             <div class="loading-spinner"></div>
             <div class="loading-text">Loading...</div>
+            <div v-if="loadingSpeedText" class="loading-speed">
+                {{ loadingSpeedText }}
+            </div>
         </div>
     </div>
 
@@ -133,6 +151,12 @@ defineProps<{
     text-transform: uppercase;
 }
 
+.loading-speed {
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    color: rgba(255, 255, 255, 0.78);
+}
+
 :root[data-theme="light"] .loading-card {
     background: rgba(255, 255, 255, 0.9);
     color: rgba(28, 38, 52, 0.9);
@@ -151,6 +175,10 @@ defineProps<{
     color: rgba(31, 43, 59, 0.72);
 }
 
+:root[data-theme="light"] .loading-speed {
+    color: rgba(31, 43, 59, 0.66);
+}
+
 :root[data-theme="graphite"] .loading-card {
     background: rgba(37, 42, 48, 0.9);
     color: #edf1f6;
@@ -167,6 +195,10 @@ defineProps<{
 
 :root[data-theme="graphite"] .loading-text {
     color: rgba(221, 227, 236, 0.78);
+}
+
+:root[data-theme="graphite"] .loading-speed {
+    color: rgba(221, 227, 236, 0.72);
 }
 
 @keyframes loading-spin {

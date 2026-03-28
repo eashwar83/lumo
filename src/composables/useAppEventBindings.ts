@@ -109,6 +109,12 @@ export const useAppEventBindings = ({
                 player.state.playback.isPlaying = event.payload.is_playing;
                 player.state.playback.isBuffering =
                     event.payload.is_buffering === true;
+                player.state.playback.downloadSpeedBps =
+                    typeof event.payload.download_speed_bps === "number" &&
+                    Number.isFinite(event.payload.download_speed_bps) &&
+                    event.payload.download_speed_bps > 0
+                        ? event.payload.download_speed_bps
+                        : 0;
                 player.state.playback.videoBitrate =
                     typeof event.payload.video_bitrate === "number" &&
                     Number.isFinite(event.payload.video_bitrate) &&
