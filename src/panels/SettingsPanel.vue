@@ -1,5 +1,9 @@
 <script setup lang="ts">
 import { useSettingsPanel } from "../composables/useSettingsPanel";
+import {
+    ENABLE_COMPACT_MODE_SETTING_LABEL,
+    type SettingItem,
+} from "../mock/settings";
 
 const {
     settingGroups,
@@ -25,6 +29,12 @@ const {
     isFixedLogPathItem,
     isLoading,
 } = useSettingsPanel();
+
+const isLinuxPlatform =
+    typeof navigator !== "undefined" && /\blinux\b/i.test(navigator.userAgent);
+
+const shouldShowSettingItem = (item: SettingItem): boolean =>
+    !(isLinuxPlatform && item.label === ENABLE_COMPACT_MODE_SETTING_LABEL);
 </script>
 
 <template>
@@ -114,7 +124,7 @@ const {
                 </div>
                 <div class="panel__table panel__table--card">
                     <div
-                        v-for="item in group.items"
+                        v-for="item in group.items.filter(shouldShowSettingItem)"
                         :key="item.label"
                         class="panel__row panel__row--card"
                     >
