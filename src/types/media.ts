@@ -4,6 +4,7 @@ export interface ProgressPayload {
     buffered_pos?: number;
     is_playing: boolean;
     video_bitrate?: number;
+    is_buffering?: boolean;
 }
 
 export interface MediaTrack {

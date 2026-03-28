@@ -42,6 +42,7 @@ type AppEventBindingsOptions = {
     onDoubleClick: (event: MouseEvent) => void;
     setWindowControlsVisible: (visible: boolean) => Promise<void>;
     onFileLoaded?: () => void | Promise<void>;
+    onPlaybackRestart?: () => void | Promise<void>;
     onProgress?: (payload: ProgressPayload) => void;
     onEndFile?: (payload: EndFilePayload) => void | Promise<void>;
 };
@@ -60,12 +61,14 @@ export const useAppEventBindings = ({
     onDoubleClick,
     setWindowControlsVisible,
     onFileLoaded,
+    onPlaybackRestart,
     onProgress,
     onEndFile,
 }: AppEventBindingsOptions) => {
     // 事件监听器引用
     let unlistenProgress: UnlistenFn | null = null;
     let unlistenFileLoaded: UnlistenFn | null = null;
+    let unlistenPlaybackRestart: UnlistenFn | null = null;
     let unlistenResize: UnlistenFn | null = null;
     let unlistenTracksUpdate: UnlistenFn | null = null;
     let unlistenWindowResized: UnlistenFn | null = null;
@@ -104,6 +107,8 @@ export const useAppEventBindings = ({
                         ? event.payload.buffered_pos
                         : event.payload.time_pos;
                 player.state.playback.isPlaying = event.payload.is_playing;
+                player.state.playback.isBuffering =
+                    event.payload.is_buffering === true;
                 player.state.playback.videoBitrate =
                     typeof event.payload.video_bitrate === "number" &&
                     Number.isFinite(event.payload.video_bitrate) &&
@@ -123,6 +128,12 @@ export const useAppEventBindings = ({
             ui.resetInactivityTimer();
             if (onFileLoaded) {
                 void onFileLoaded();
+            }
+        });
+
+        unlistenPlaybackRestart = await listen("mpv-playback-restart", () => {
+            if (onPlaybackRestart) {
+                void onPlaybackRestart();
             }
         });
 
@@ -257,6 +268,7 @@ export const useAppEventBindings = ({
     onUnmounted(() => {
         unlistenProgress?.();
         unlistenFileLoaded?.();
+        unlistenPlaybackRestart?.();
         unlistenResize?.();
         unlistenTracksUpdate?.();
         unlistenWindowResized?.();

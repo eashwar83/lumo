@@ -12,6 +12,7 @@ type PlayerState = {
   };
   playback: {
     isPlaying: boolean;
+    isBuffering: boolean;
     currentTime: number;
     duration: number;
     bufferedTime: number;
@@ -61,6 +62,7 @@ export const usePlaybackController = (): PlayerApi => {
     },
     playback: {
       isPlaying: false,
+      isBuffering: false,
       currentTime: 0,
       duration: 0,
       bufferedTime: 0,

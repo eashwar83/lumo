@@ -148,8 +148,14 @@ export const useAppPlaybackEvents = ({
         void handleEndFile();
     };
 
+    const onPlaybackRestart = () => {
+        isLoading.value = false;
+        loadingUrl.value = "";
+    };
+
     return {
         onFileLoaded,
+        onPlaybackRestart,
         onProgress,
         onEndFile,
     };

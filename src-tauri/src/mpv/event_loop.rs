@@ -18,6 +18,7 @@ struct ProgressPayload {
     buffered_pos: f64,
     is_playing: bool,
     video_bitrate: f64,
+    is_buffering: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -71,6 +72,7 @@ fn emit_progress(
     buffered_pos: f64,
     is_playing: bool,
     video_bitrate: f64,
+    is_buffering: bool,
 ) {
     emit_event(
         app_handle,
@@ -81,6 +83,7 @@ fn emit_progress(
             buffered_pos,
             is_playing,
             video_bitrate,
+            is_buffering,
         },
     );
 }
@@ -206,6 +209,7 @@ fn emit_end_file_and_progress(
         ended_time_pos,
         false,
         0.0,
+        false,
     );
 }
 
@@ -349,6 +353,7 @@ pub(super) fn mpv_event_loop(
     const EOF_REACHED_ID: u64 = 9;
     const DEMUXER_CACHE_TIME_ID: u64 = 10;
     const DEMUXER_CACHE_STATE_ID: u64 = 11;
+    const PAUSED_FOR_CACHE_ID: u64 = 12;
 
     let mut last_time_pos: f64 = 0.0;
     let mut last_duration: f64 = 0.0;
@@ -356,6 +361,7 @@ pub(super) fn mpv_event_loop(
     let mut last_video_bitrate: f64 = 0.0;
     let mut last_demuxer_cache_time: f64 = 0.0;
     let mut last_buffered_pos: f64 = 0.0;
+    let mut last_is_buffering: bool = false;
     let mut notify_start: bool = false;
     let mut width: i64 = 0;
     let mut height: i64 = 0;
@@ -439,6 +445,12 @@ pub(super) fn mpv_event_loop(
             "demuxer-cache-state",
             mpv_format::MPV_FORMAT_NODE,
         );
+        observe_property(
+            event_client,
+            PAUSED_FOR_CACHE_ID,
+            "paused-for-cache",
+            mpv_format::MPV_FORMAT_FLAG,
+        );
 
         debug!("MPV Event Loop: Started observing properties.");
 
@@ -460,6 +472,7 @@ pub(super) fn mpv_event_loop(
                     freeze_buffered_pos_until_cache_refresh = false;
                     pending_seek_cache_range_check = false;
                     last_seekable_ranges.clear();
+                    last_is_buffering = false;
                 }
                 mpv_event_id::MPV_EVENT_FILE_LOADED => {
                     #[cfg(debug_assertions)]
@@ -482,6 +495,7 @@ pub(super) fn mpv_event_loop(
                     freeze_buffered_pos_until_cache_refresh = false;
                     pending_seek_cache_range_check = false;
                     last_seekable_ranges.clear();
+                    last_is_buffering = false;
                     eof_reached.store(false, Ordering::SeqCst);
                     is_playing.store(true, Ordering::Relaxed);
                 }
@@ -493,6 +507,7 @@ pub(super) fn mpv_event_loop(
                         notify_start = false;
                         emit_event(&app_handle, "file_loaded", ());
                     }
+                    emit_event(&app_handle, "mpv-playback-restart", ());
                 }
                 mpv_event_id::MPV_EVENT_SEEK => {
                     #[cfg(debug_assertions)]
@@ -746,6 +761,13 @@ pub(super) fn mpv_event_loop(
                                     );
                                 }
                             }
+                            PAUSED_FOR_CACHE_ID => {
+                                if (*prop_event).format == mpv_format::MPV_FORMAT_FLAG
+                                    && !value_ptr.is_null()
+                                {
+                                    last_is_buffering = *(value_ptr as *mut c_int) != 0;
+                                }
+                            }
                             WIDTH_ID => {
                                 if (*prop_event).format == mpv_format::MPV_FORMAT_INT64
                                     && !value_ptr.is_null()
@@ -878,12 +900,14 @@ pub(super) fn mpv_event_loop(
                                 last_buffered_pos,
                                 !last_is_paused,
                                 last_video_bitrate,
+                                last_is_buffering,
                             );
                         }
                     }
                 }
                 mpv_event_id::MPV_EVENT_END_FILE => {
                     is_playing.store(false, Ordering::Relaxed);
+                    last_is_buffering = false;
                     let reason = if !(*event).data.is_null() {
                         let end_file = &*((*event).data as *const MpvEventEndFile);
                         end_file.reason

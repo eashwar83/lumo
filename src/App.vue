@@ -101,6 +101,26 @@ const isWindowsPlatform =
 const playerHeaderCompactModeEnabled = computed(
     () => compactModeEnabled.value || (isWindowsPlatform && isPipEnabled.value),
 );
+const clearNavSelectionDuringLoad = ref(false);
+const sideNavActivePanel = computed(() =>
+    isLoading.value && clearNavSelectionDuringLoad.value
+        ? null
+        : navActivePanel.value,
+);
+const shouldShowPlaybackLoadingOverlay = computed(
+    () =>
+        isLoading.value ||
+        (player.state.media.isFileLoaded && player.state.playback.isBuffering),
+);
+const isLoadingOverlayVisible = ref(false);
+let loadingOverlayDelayTimer: ReturnType<typeof setTimeout> | null = null;
+
+const clearLoadingOverlayDelayTimer = () => {
+    if (loadingOverlayDelayTimer !== null) {
+        window.clearTimeout(loadingOverlayDelayTimer);
+        loadingOverlayDelayTimer = null;
+    }
+};
 
 const {
     isClearConfirmOpen,
@@ -146,8 +166,44 @@ const {
     playPath,
 });
 
+const onSideNavNavigate = async (
+    panel: "home" | "history" | "network" | "settings",
+) => {
+    clearNavSelectionDuringLoad.value = false;
+    await onNavAction(panel);
+};
+
+const beginSeekLoading = () => {
+    isLoading.value = true;
+    loadingUrl.value = player.state.media.url;
+};
+
+const onSeek = async (position: number) => {
+    beginSeekLoading();
+    try {
+        await player.seek(position);
+    } catch {
+        isLoading.value = false;
+        loadingUrl.value = "";
+    }
+};
+
+const onSeekRelative = async (position: number) => {
+    beginSeekLoading();
+    try {
+        await player.seekRelative(position);
+    } catch {
+        isLoading.value = false;
+        loadingUrl.value = "";
+    }
+};
+
 const { onKeydown, onDoubleClick } = usePlaybackShortcuts(
-    player,
+    {
+        state: player.state,
+        togglePlayPause: player.togglePlayPause,
+        seekRelative: onSeekRelative,
+    },
     onToggleFullscreen,
     toggleInfo,
 );
@@ -318,6 +374,26 @@ watch(
     { immediate: true },
 );
 
+watch(isLoading, (loading, wasLoading) => {
+    if (!wasLoading && loading) {
+        clearNavSelectionDuringLoad.value = true;
+    }
+});
+
+watch(shouldShowPlaybackLoadingOverlay, (shouldShow) => {
+    if (!shouldShow) {
+        clearLoadingOverlayDelayTimer();
+        isLoadingOverlayVisible.value = false;
+        return;
+    }
+    if (isLoadingOverlayVisible.value) return;
+    clearLoadingOverlayDelayTimer();
+    loadingOverlayDelayTimer = window.setTimeout(() => {
+        loadingOverlayDelayTimer = null;
+        isLoadingOverlayVisible.value = true;
+    }, 500);
+});
+
 const mediaInfo = computed(() => {
     if (!player.state.media.isFileLoaded) return null;
     return getMockMediaInfo(player.state.media.url, {
@@ -359,18 +435,19 @@ const { hasLoadedPanel, loadActivePanel } = useAppUiPersistence({
     normalizeStoredPanel,
 });
 
-const { onFileLoaded, onProgress, onEndFile } = useAppPlaybackEvents({
-    player,
-    tracks,
-    playlistState,
-    history,
-    nowPlaying,
-    pendingResume,
-    isLoopOne,
-    isLoading,
-    loadingUrl,
-    playPath,
-});
+const { onFileLoaded, onPlaybackRestart, onProgress, onEndFile } =
+    useAppPlaybackEvents({
+        player,
+        tracks,
+        playlistState,
+        history,
+        nowPlaying,
+        pendingResume,
+        isLoopOne,
+        isLoading,
+        loadingUrl,
+        playPath,
+    });
 
 useAppRuntimeBindings({
     player,
@@ -383,6 +460,7 @@ useAppRuntimeBindings({
     onDoubleClick,
     setWindowControlsVisible,
     onFileLoaded,
+    onPlaybackRestart,
     onProgress,
     onEndFile,
     nowPlaying,
@@ -446,6 +524,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+    clearLoadingOverlayDelayTimer();
     clearWindowDragCandidate();
     unlistenAppOpenFiles?.();
     unlistenAppOpenFiles = null;
@@ -483,8 +562,8 @@ function onWindowFocusDrainPendingFiles() {
             v-show="!player.state.media.isFileLoaded || isPointerNearLeft"
             :is-playback-active="isPlaybackActive"
             :active-panel="activePanel"
-            :nav-active-panel="navActivePanel"
-            @navigate="onNavAction"
+            :nav-active-panel="sideNavActivePanel"
+            @navigate="onSideNavNavigate"
         />
 
         <PlayerHeader
@@ -519,7 +598,7 @@ function onWindowFocusDrainPendingFiles() {
         />
 
         <PlaybackOverlays
-            :is-loading="isLoading"
+            :is-loading="isLoadingOverlayVisible"
             :show-status-overlay="
                 player.state.media.isFileLoaded &&
                 nowPlaying.showStatusOverlay.value
@@ -604,7 +683,7 @@ function onWindowFocusDrainPendingFiles() {
             :has-audio-tracks="hasAudioTracks"
             :has-sub-tracks="hasSubTracks"
             :is-fullscreen="player.state.window.isFullscreen"
-            @seek="player.seek"
+            @seek="onSeek"
             @prev-track="onPrevTrack"
             @toggle-play-pause="player.togglePlayPause"
             @stop-playback="onStopPlayback"

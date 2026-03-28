@@ -37,6 +37,7 @@ export const useAppRuntimeBindings = ({
     onDoubleClick,
     setWindowControlsVisible,
     onFileLoaded,
+    onPlaybackRestart,
     onProgress,
     onEndFile,
     nowPlaying,
@@ -59,6 +60,7 @@ export const useAppRuntimeBindings = ({
         onDoubleClick,
         setWindowControlsVisible,
         onFileLoaded,
+        onPlaybackRestart,
         onProgress,
         onEndFile,
     });
