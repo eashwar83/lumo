@@ -576,8 +576,8 @@ pub(super) fn mpv_event_loop(
                                             last_demuxer_cache_time,
                                         );
                                     }
-                                    #[cfg(debug_assertions)]
-                                    trace!("MPV time-pos updated: {}", last_time_pos);
+                                    // #[cfg(debug_assertions)]
+                                    // trace!("MPV time-pos updated: {}", last_time_pos);
                                 }
                             }
                             DURATION_ID => {

@@ -168,10 +168,12 @@ onUnmounted(() => {
             <div
                 class="progress-current"
                 :style="{ width: displayProgressPercent + '%' }"
-            >
-                <div class="scrubber-head"></div>
-            </div>
+            ></div>
         </div>
+        <div
+            class="scrubber-head"
+            :style="{ left: displayProgressPercent + '%' }"
+        ></div>
     </div>
 </template>
 
@@ -188,7 +190,7 @@ onUnmounted(() => {
 .progress-bg {
     height: 3px;
     width: 100%;
-    background: rgba(18, 20, 27, 0.72);
+    background: rgba(58, 58, 58, 0.92);
     position: relative;
     overflow: hidden;
     transition: height 0.1s;
@@ -213,29 +215,38 @@ onUnmounted(() => {
     position: absolute;
     top: 0;
     height: 100%;
-    background: rgba(214, 220, 230, 0.72);
+    background: rgba(141, 141, 141, 0.88);
     z-index: 1;
     pointer-events: none;
 }
 
 .scrubber-head {
     position: absolute;
-    right: -6px;
+    left: 0;
     top: 50%;
-    transform: translateY(-50%) scale(0);
-    width: 13px;
-    height: 13px;
+    transform: translate(-50%, -50%) scale(0.6);
+    width: 8px;
+    height: 8px;
     background: var(--progress-color);
+    border: 1px solid rgba(236, 243, 255, 0.95);
     border-radius: 50%;
-    transition: transform 0.1s;
+    box-shadow: 0 0 0 1px rgba(10, 22, 40, 0.2);
+    opacity: 0;
+    transition:
+        transform 0.1s,
+        opacity 0.1s;
+    z-index: 3;
+    pointer-events: none;
 }
 
 .progress-area:hover .scrubber-head {
-    transform: translateY(-50%) scale(1);
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.25);
 }
 
 .progress-area.is-dragging .scrubber-head {
-    transform: translateY(-50%) scale(1);
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.35);
 }
 
 .time-tooltip {
