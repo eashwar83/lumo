@@ -1,3 +1,4 @@
+use crate::store::installation_store::{DailyActionResult, InstallationState};
 use crate::store::play_history::PlayHistoryEntry;
 use crate::store::ui_state_store::UiState;
 use crate::{mpv_set_option_string_checked, with_mpv, AppState};
@@ -31,6 +32,29 @@ pub(crate) fn save_play_history_entry(
     entry: PlayHistoryEntry,
 ) -> Result<(), String> {
     crate::store::play_history::save_play_history_entry(&app, entry)
+}
+
+#[tauri::command]
+pub(crate) fn get_installation_state(app: tauri::AppHandle) -> Result<InstallationState, String> {
+    crate::store::installation_store::get_installation_state(&app)
+}
+
+#[tauri::command]
+pub(crate) fn update_uuid_update_data(
+    app: tauri::AppHandle,
+    data: serde_json::Value,
+) -> Result<(), String> {
+    crate::store::installation_store::update_uuid_update_data(&app, data)
+}
+
+#[tauri::command]
+pub(crate) fn mark_daily_active(app: tauri::AppHandle) -> Result<DailyActionResult, String> {
+    crate::store::installation_store::mark_daily_active(&app)
+}
+
+#[tauri::command]
+pub(crate) fn mark_daily_update_check(app: tauri::AppHandle) -> Result<DailyActionResult, String> {
+    crate::store::installation_store::mark_daily_update_check(&app)
 }
 
 #[tauri::command]

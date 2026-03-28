@@ -1,4 +1,4 @@
-use crate::store::{json_io, playback_db, storage_paths};
+use crate::store::{json_io, playback_store, storage_paths};
 use log::info;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -160,32 +160,13 @@ fn load_state_from_disk(path: &Path, legacy_path: &Path) -> Result<UiState, Stri
     Ok(default_state)
 }
 
-fn should_migrate_legacy_playlist(
-    db_exists: bool,
-    db_playlist: &[PlaylistEntry],
-    legacy_playlist: Option<&[PlaylistEntry]>,
-) -> bool {
-    !db_exists
-        && db_playlist.is_empty()
-        && legacy_playlist
-            .map(|entries| !entries.is_empty())
-            .unwrap_or(false)
-}
-
 pub fn load_ui_state(app: &tauri::AppHandle) -> Result<UiState, String> {
     let path = ui_state_file_path(app)?;
     let legacy_path = legacy_ui_state_file_path(app)?;
     let mut state = load_state_from_disk(&path, &legacy_path)?;
 
-    let db_exists = playback_db::media_db_exists(app)?;
-    let mut playlist = playback_db::load_playlist(app)?;
+    let playlist = playback_store::load_playlist(app)?;
     let legacy_playlist = state.playlist.take();
-    if should_migrate_legacy_playlist(db_exists, &playlist, legacy_playlist.as_deref()) {
-        if let Some(entries) = legacy_playlist.as_ref() {
-            playback_db::save_playlist(app, entries.clone())?;
-            playlist = entries.clone();
-        }
-    }
     if legacy_playlist.is_some() && path.exists() {
         json_io::write_json(&path, &state)?;
     }
@@ -220,7 +201,7 @@ pub fn save_ui_state(app: &tauri::AppHandle, state: UiState) -> Result<(), Strin
     let legacy_path = legacy_ui_state_file_path(app)?;
     let mut state = state;
     if let Some(playlist) = state.playlist.take() {
-        playback_db::save_playlist(app, playlist)?;
+        playback_store::save_playlist(app, playlist)?;
     }
     let existing = load_state_from_disk(&path, &legacy_path)?;
     let merged = existing.merge(state);

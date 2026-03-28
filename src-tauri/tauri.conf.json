@@ -38,5 +38,13 @@
     "macOS": {
       "minimumSystemVersion": "10.13"
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDMxQ0I1Mzg2Q0MwOUE4MkUKUldRdXFBbk1obFBMTVIxOFM5cnJ1bkNLU09ieGZZdDNyeUNRKzdDTUNieVVsK1g3TGNMVEJNNXEK",
+      "endpoints": [
+        "https://github.com/FengZeng/soia/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 mod app_bootstrap;
+mod check_update;
 mod commands;
 mod media_extensions;
 mod mpv;
@@ -37,6 +38,10 @@ type AppResult<T> = Result<T, String>;
 fn init_logging() {
     let mut builder =
         env_logger::Builder::from_env(env_logger::Env::default().filter_or("RUST_LOG", "info"));
+    builder
+        .filter_module("reqwest", log::LevelFilter::Warn)
+        .filter_module("hyper", log::LevelFilter::Warn)
+        .filter_module("hyper_util", log::LevelFilter::Warn);
     builder.format(|buf, record| {
         use std::io::Write;
 
@@ -232,6 +237,9 @@ pub fn run() {
     let app = tauri::Builder::default()
         .manage(OpenFileState::default())
         .setup(|app| {
+            #[cfg(desktop)]
+            app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
+
             let startup_paths = collect_open_media_paths_from_args();
             queue_open_media_paths(&app.handle(), startup_paths, false);
             app_bootstrap::setup(app)?;
@@ -265,6 +273,10 @@ pub fn run() {
             commands::persistence::load_play_history,
             commands::persistence::save_play_history,
             commands::persistence::save_play_history_entry,
+            commands::persistence::get_installation_state,
+            commands::persistence::update_uuid_update_data,
+            commands::persistence::mark_daily_active,
+            commands::persistence::mark_daily_update_check,
             commands::persistence::load_ui_state,
             commands::persistence::save_ui_state,
             commands::persistence::open_log_directory,

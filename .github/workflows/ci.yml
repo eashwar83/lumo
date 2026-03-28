@@ -19,6 +19,8 @@ jobs:
     name: Frontend Check
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      SOIA_API_URL: ${{ secrets.SOIA_API_URL }}
     steps:
       - uses: actions/checkout@v6
 
@@ -46,6 +48,7 @@ jobs:
     timeout-minutes: 20
     env:
       MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deployment_target }}
+      SOIA_API_URL: ${{ secrets.SOIA_API_URL }}
     strategy:
       fail-fast: false
       matrix:
@@ -89,6 +92,7 @@ jobs:
     timeout-minutes: 40
     env:
       MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deployment_target }}
+      SOIA_API_URL: ${{ secrets.SOIA_API_URL }}
     strategy:
       fail-fast: false
       matrix:
@@ -127,6 +131,8 @@ jobs:
       - frontend-check
     runs-on: ubuntu-latest
     timeout-minutes: 50
+    env:
+      SOIA_API_URL: ${{ secrets.SOIA_API_URL }}
     steps:
       - uses: actions/checkout@v6
 

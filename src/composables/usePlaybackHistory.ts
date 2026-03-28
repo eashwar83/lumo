@@ -28,6 +28,10 @@ const normalizeHistory = (entries: HistoryEntry[]): HistoryEntry[] => {
         const normalizedTitle =
             typeof entry.title === "string" ? entry.title.trim() : "";
         const normalized: HistoryEntry = {
+            id:
+                typeof entry.id === "string" && entry.id.trim()
+                    ? entry.id.trim()
+                    : undefined,
             path: normalizedPath,
             title: normalizedTitle,
             lastPosition: Number.isFinite(entry.lastPosition)
@@ -122,7 +126,9 @@ export const usePlaybackHistory = () => {
         externalAudioTracks: string[] = [],
         externalSubTracks: string[] = [],
         title = "",
+        id?: string,
     ): HistoryEntry => ({
+        id,
         path,
         title,
         lastPosition: Math.max(0, position),
@@ -178,6 +184,7 @@ export const usePlaybackHistory = () => {
                 normalizeTrackList(existing?.externalAudioTracks),
                 normalizeTrackList(existing?.externalSubTracks),
                 resolvedTitle,
+                existing?.id,
             ),
         );
     };
@@ -210,6 +217,7 @@ export const usePlaybackHistory = () => {
             normalizeTrackList(existing?.externalAudioTracks),
             normalizeTrackList(existing?.externalSubTracks),
             resolvedTitle,
+            existing?.id,
         );
         entry.lastPlayedAt = now;
         upsertEntry(entry);
@@ -238,6 +246,7 @@ export const usePlaybackHistory = () => {
                 normalizeTrackList(existing?.externalAudioTracks),
                 normalizeTrackList(existing?.externalSubTracks),
                 resolvedTitle,
+                existing?.id,
             ),
         );
     };

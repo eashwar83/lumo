@@ -74,6 +74,13 @@ fn soia_windows_link_name(dir: &Path) -> Option<String> {
 }
 
 fn main() {
+    println!("cargo:rerun-if-env-changed=SOIA_API_URL");
+    let soia_api_url = env::var("SOIA_API_URL")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .unwrap_or_default();
+    println!("cargo:rustc-env=SOIA_API_URL={}", soia_api_url);
+
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let target_triple = env::var("TARGET").unwrap_or_default();
