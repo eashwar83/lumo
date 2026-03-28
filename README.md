@@ -15,10 +15,14 @@ Soia is a cross-platform media player built with Tauri 2.0, Vue 3, TypeScript, R
 ## Features
 
 - Play local video files with mpv-backed playback.
-- Support HDR and Dolby Vision playback on compatible media and hardware.
+- Picture in Picture (PiP) support on macOS and Windows.
+- Borderless window mode on macOS, Windows, and Linux (Ubuntu Wayland).
+- Support HDR and Dolby Vision playback on compatible media and hardware (currently not supported on Linux).
 - Keep playback history with resume position and pin-to-top support.
-- Manage a playlist with sort modes and loop/shuffle behaviors.
+- Manage multiple playlists with sort modes and loop/shuffle behaviors.
 - Browse and stream media from WebDAV servers.
+- Show a buffering progress bar for network video playback.
+- Show current download speed when network video buffering is paused.
 - Configure playback preferences (seek step, default speed, auto-play, skip intro).
 - Platform integrations (currently macOS) for media keys, Now Playing metadata, and artwork capture.
 
@@ -27,7 +31,7 @@ Soia is a cross-platform media player built with Tauri 2.0, Vue 3, TypeScript, R
 Download from the [release page](https://github.com/FengZeng/soia/releases).
 
 Or you can build it yourself. Support macOS 10.15+.
-Current Linux builds are Wayland-only (`X11` is not supported at this time).
+Current Linux builds target Ubuntu Wayland sessions only (`X11` is not supported at this time).
 
 ## FAQ
 
@@ -156,8 +160,8 @@ Linux bundle post-processing expects runtime manifests:
 
 App data is stored in Tauri's local app data directory and includes:
 
-- `media.db`: playlist and playback history
-- `state.json`: UI state and settings
+- `media.db`: default playlist entries, playback history, and local installation/device/sync metadata
+- `state.json`: UI state and settings (for example active panel, multiple-playlist metadata, and preferences)
 - `network_connections.json`: saved network connections
 - `thumbnails/`: captured artwork for Now Playing
 
@@ -189,7 +193,7 @@ sudo apt install -y \
     libwebkit2gtk-4.1-dev
 ```
 
-- Linux runtime note: current bundle targets Wayland sessions only; launching under pure `X11` is not supported.
+- Linux runtime note: current bundle targets Ubuntu Wayland sessions only; launching under pure `X11` is not supported.
 
 - If build fails with `Cannot find libmpv`, run:
 
