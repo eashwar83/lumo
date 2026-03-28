@@ -52,6 +52,7 @@ type UsePlaybackFlowOptions = {
     nowPlaying: NowPlayingApi;
     hideAllMenus: () => void;
     isInfoOpen: Ref<boolean>;
+    onPlaybackIntent?: () => void;
 };
 
 type StoredSettingGroup = {
@@ -116,6 +117,7 @@ export const usePlaybackFlow = ({
     nowPlaying,
     hideAllMenus,
     isInfoOpen,
+    onPlaybackIntent,
 }: UsePlaybackFlowOptions) => {
     const isLoading = ref(false);
     const loadingUrl = ref("");
@@ -161,8 +163,13 @@ export const usePlaybackFlow = ({
         return skipIntroSeconds > 0 ? skipIntroSeconds : resumePosition;
     };
 
+    const triggerPlaybackIntent = () => {
+        onPlaybackIntent?.();
+    };
+
     const playPath = async (path: string) => {
         if (!path) return;
+        triggerPlaybackIntent();
         hideHistory.value = true;
         nowPlaying.clearArtwork();
         tracks.resetTracks();
@@ -186,6 +193,7 @@ export const usePlaybackFlow = ({
         filePath: string,
         playbackKey: string,
     ) => {
+        triggerPlaybackIntent();
         hideHistory.value = true;
         nowPlaying.clearArtwork();
         tracks.resetTracks();
@@ -251,6 +259,7 @@ export const usePlaybackFlow = ({
 
     const onLoadFile = async () => {
         if (!player.state.media.url) return;
+        triggerPlaybackIntent();
         hideHistory.value = true;
         tracks.resetTracks();
         player.state.playback.isBuffering = false;

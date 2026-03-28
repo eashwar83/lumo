@@ -67,6 +67,8 @@ const {
     normalizeStoredPanel,
 } = useAppBootstrap();
 
+const clearNavSelectionDuringLoad = ref(false);
+
 const playbackFlow = usePlaybackFlow({
     isMacOS,
     player,
@@ -76,6 +78,9 @@ const playbackFlow = usePlaybackFlow({
     nowPlaying,
     hideAllMenus,
     isInfoOpen,
+    onPlaybackIntent: () => {
+        clearNavSelectionDuringLoad.value = true;
+    },
 });
 
 const {
@@ -101,7 +106,6 @@ const isWindowsPlatform =
 const playerHeaderCompactModeEnabled = computed(
     () => compactModeEnabled.value || (isWindowsPlatform && isPipEnabled.value),
 );
-const clearNavSelectionDuringLoad = ref(false);
 const sideNavActivePanel = computed(() =>
     isLoading.value && clearNavSelectionDuringLoad.value
         ? null
@@ -379,12 +383,6 @@ watch(
     },
     { immediate: true },
 );
-
-watch(isLoading, (loading, wasLoading) => {
-    if (!wasLoading && loading) {
-        clearNavSelectionDuringLoad.value = true;
-    }
-});
 
 watch(shouldShowPlaybackLoadingOverlay, (shouldShow) => {
     if (!shouldShow) {
