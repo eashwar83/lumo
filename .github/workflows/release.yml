@@ -143,11 +143,19 @@ jobs:
           path: release/*
 
   linux-release:
-    name: Build Linux Wayland Bundles
-    runs-on: ubuntu-latest
+    name: Build Linux Wayland Bundles (${{ matrix.package_arch }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            package_arch: x64
+          - runner: ubuntu-24.04-arm
+            package_arch: arm64
     env:
       SOIA_API_URL: ${{ secrets.SOIA_API_URL }}
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -213,7 +221,7 @@ jobs:
           mkdir -p release
           TAG="${GITHUB_REF_NAME}"
           DEB_SOURCE="$(ls -1 src-tauri/target/release/bundle/deb/*.deb | head -n 1)"
-          DEB_TARGET="release/Soia-${TAG}-Linux-x64-wayland.deb"
+          DEB_TARGET="release/Soia-${TAG}-Linux-${{ matrix.package_arch }}-wayland.deb"
           cp "$DEB_SOURCE" "$DEB_TARGET"
           shasum -a 256 "$DEB_TARGET" > "${DEB_TARGET}.sha256"
           pnpm tauri signer sign "$DEB_TARGET"
@@ -221,7 +229,7 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: soia-release-${{ github.ref_name }}-linux-x64-wayland
+          name: soia-release-${{ github.ref_name }}-linux-${{ matrix.package_arch }}-wayland
           path: release/*
 
   publish-release:
@@ -258,12 +266,14 @@ jobs:
           MAC_X64_FILE="Soia-${TAG}-macOS-x64.app.tar.gz"
           WIN_X64_FILE="Soia-${TAG}-Windows-x64-setup.exe"
           LINUX_X64_FILE="Soia-${TAG}-Linux-x64-wayland.deb"
+          LINUX_ARM_FILE="Soia-${TAG}-Linux-arm64-wayland.deb"
 
           for sig in \
             "release/${MAC_ARM_FILE}.sig" \
             "release/${MAC_X64_FILE}.sig" \
             "release/${WIN_X64_FILE}.sig" \
-            "release/${LINUX_X64_FILE}.sig"; do
+            "release/${LINUX_X64_FILE}.sig" \
+            "release/${LINUX_ARM_FILE}.sig"; do
             if [ ! -f "$sig" ]; then
               echo "Missing signature file: $sig" >&2
               exit 1
@@ -278,10 +288,12 @@ jobs:
             --arg mac_x64_url "${BASE_URL}/${MAC_X64_FILE}" \
             --arg win_x64_url "${BASE_URL}/${WIN_X64_FILE}" \
             --arg linux_x64_url "${BASE_URL}/${LINUX_X64_FILE}" \
+            --arg linux_arm_url "${BASE_URL}/${LINUX_ARM_FILE}" \
             --rawfile mac_arm_sig "release/${MAC_ARM_FILE}.sig" \
             --rawfile mac_x64_sig "release/${MAC_X64_FILE}.sig" \
             --rawfile win_x64_sig "release/${WIN_X64_FILE}.sig" \
             --rawfile linux_x64_sig "release/${LINUX_X64_FILE}.sig" \
+            --rawfile linux_arm_sig "release/${LINUX_ARM_FILE}.sig" \
             '{
               version: $version,
               notes: $notes,
@@ -290,7 +302,8 @@ jobs:
                 "darwin-aarch64": { signature: $mac_arm_sig, url: $mac_arm_url },
                 "darwin-x86_64": { signature: $mac_x64_sig, url: $mac_x64_url },
                 "windows-x86_64": { signature: $win_x64_sig, url: $win_x64_url },
-                "linux-x86_64": { signature: $linux_x64_sig, url: $linux_x64_url }
+                "linux-x86_64": { signature: $linux_x64_sig, url: $linux_x64_url },
+                "linux-aarch64": { signature: $linux_arm_sig, url: $linux_arm_url }
               }
             }' > release/latest.json
 
