@@ -1,7 +1,9 @@
 use crate::mpv::MpvHandle;
 use crate::store::ui_state_store;
 use crate::AppState;
-use log::{info, warn};
+#[cfg(debug_assertions)]
+use log::info;
+use log::warn;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
 use std::error::Error;
 use std::ffi::c_void;

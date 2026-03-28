@@ -809,6 +809,7 @@ pub(super) fn mpv_event_loop(
                                         );
                                         freeze_buffered_pos_until_cache_refresh = false;
                                         pending_seek_cache_range_check = false;
+                                        #[cfg(debug_assertions)]
                                         let mode = if is_cache_metric_absolute(
                                             last_time_pos,
                                             last_demuxer_cache_time,

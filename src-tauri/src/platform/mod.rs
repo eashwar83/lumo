@@ -211,6 +211,7 @@ pub(crate) fn set_native_pip_enabled(
     }
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) fn update_native_pip_state(
     app_handle: &tauri::AppHandle,
     paused: bool,

@@ -2,6 +2,7 @@ use crate::store::installation_store::{DailyActionResult, InstallationState};
 use crate::store::play_history::PlayHistoryEntry;
 use crate::store::ui_state_store::UiState;
 use crate::{mpv_set_option_string_checked, with_mpv, AppState};
+#[cfg(debug_assertions)]
 use log::info;
 use std::path::{Path, PathBuf};
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
