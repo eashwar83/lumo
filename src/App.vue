@@ -591,6 +591,7 @@ function onWindowFocusDrainPendingFiles() {
             :duration="player.state.playback.duration"
             :is-playing="player.state.playback.isPlaying"
             :video-bitrate="player.state.playback.videoBitrate"
+            :hwdec-current="player.state.playback.hwdecCurrent"
             :playback-speed="speed.currentSpeed.value"
             :video-tracks="tracks.videoTracks.value"
             :audio-tracks="tracks.audioTracks.value"

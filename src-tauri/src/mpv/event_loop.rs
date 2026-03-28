@@ -390,6 +390,7 @@ pub(super) fn mpv_event_loop(
     const DEMUXER_CACHE_TIME_ID: u64 = 10;
     const DEMUXER_CACHE_STATE_ID: u64 = 11;
     const PAUSED_FOR_CACHE_ID: u64 = 12;
+    const HWDEC_CURRENT_ID: u64 = 13;
 
     let mut last_time_pos: f64 = 0.0;
     let mut last_duration: f64 = 0.0;
@@ -411,6 +412,7 @@ pub(super) fn mpv_event_loop(
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     let mut last_pip_paused: bool = false;
     let mut last_media_title: Option<String> = None;
+    let mut last_hwdec_current: Option<String> = None;
     let mut end_file_emitted_for_current_item: bool = false;
     let mut ignore_next_cache_update_after_seek: bool = false;
     let mut freeze_buffered_pos_until_cache_refresh: bool = false;
@@ -419,6 +421,8 @@ pub(super) fn mpv_event_loop(
     let mut seek_from_buffered_pos: f64 = 0.0;
     let mut last_seekable_ranges: Vec<(f64, f64)> = Vec::new();
     let media_title_name = CString::new("media-title").expect("Property name contains null byte");
+    let hwdec_current_name =
+        CString::new("hwdec-current").expect("Property name contains null byte");
 
     unsafe {
         observe_property(
@@ -488,6 +492,12 @@ pub(super) fn mpv_event_loop(
             "paused-for-cache",
             mpv_format::MPV_FORMAT_FLAG,
         );
+        observe_property(
+            event_client,
+            HWDEC_CURRENT_ID,
+            "hwdec-current",
+            mpv_format::MPV_FORMAT_STRING,
+        );
 
         debug!("MPV Event Loop: Started observing properties.");
 
@@ -511,6 +521,9 @@ pub(super) fn mpv_event_loop(
                     last_seekable_ranges.clear();
                     last_is_buffering = false;
                     last_download_speed_bps = 0.0;
+                    if last_hwdec_current.take().is_some() {
+                        emit_event(&app_handle, "mpv-hwdec-current", "");
+                    }
                 }
                 mpv_event_id::MPV_EVENT_FILE_LOADED => {
                     #[cfg(debug_assertions)]
@@ -708,6 +721,35 @@ pub(super) fn mpv_event_loop(
                                     }
                                 }
                             }
+                            HWDEC_CURRENT_ID => {
+                                if (*prop_event).format == mpv_format::MPV_FORMAT_NONE {
+                                    if last_hwdec_current.is_some() {
+                                        last_hwdec_current = None;
+                                        emit_event(&app_handle, "mpv-hwdec-current", "");
+                                    }
+                                } else {
+                                    let hwdec_ptr = mpv_get_property_string(
+                                        event_client,
+                                        hwdec_current_name.as_ptr(),
+                                    );
+                                    if hwdec_ptr.is_null() {
+                                        #[cfg(debug_assertions)]
+                                        debug!("mpv hwdec-current: <null>");
+                                    } else {
+                                        let c_str = CStr::from_ptr(hwdec_ptr);
+                                        let hwdec = c_str.to_string_lossy().trim().to_string();
+                                        if last_hwdec_current.as_deref() != Some(hwdec.as_str()) {
+                                            last_hwdec_current = Some(hwdec.clone());
+                                            emit_event(
+                                                &app_handle,
+                                                "mpv-hwdec-current",
+                                                hwdec.clone(),
+                                            );
+                                        }
+                                        mpv_free(hwdec_ptr as *mut c_void);
+                                    }
+                                }
+                            }
                             EOF_REACHED_ID => {
                                 if (*prop_event).format == mpv_format::MPV_FORMAT_FLAG
                                     && !value_ptr.is_null()
@@ -868,6 +910,23 @@ pub(super) fn mpv_event_loop(
                                 {
                                     let node = value_ptr as *mut mpv_node;
                                     let json_track_list = parse_node(node);
+                                    #[cfg(debug_assertions)]
+                                    {
+                                        if log::log_enabled!(log::Level::Trace) {
+                                            let pretty_track_list =
+                                                serde_json::to_string_pretty(&json_track_list)
+                                                    .unwrap_or_else(|err| {
+                                                        format!(
+                                                            "<failed to format TRACK_ID payload as pretty JSON: {}>",
+                                                            err
+                                                        )
+                                                    });
+                                            trace!(
+                                                "MPV Event Loop: TRACK_ID update payload:\n{}",
+                                                pretty_track_list
+                                            );
+                                        }
+                                    }
                                     let mut tracks = Vec::new();
                                     if let Some(list) = json_track_list.as_array() {
                                         for item in list {

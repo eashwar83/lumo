@@ -18,6 +18,7 @@ type PlayerState = {
     duration: number;
     bufferedTime: number;
     videoBitrate: number;
+    hwdecCurrent: string;
   };
   window: {
     isFullscreen: boolean;
@@ -69,6 +70,7 @@ export const usePlaybackController = (): PlayerApi => {
       duration: 0,
       bufferedTime: 0,
       videoBitrate: 0,
+      hwdecCurrent: "",
     },
     window: {
       isFullscreen: false,

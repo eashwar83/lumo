@@ -22,6 +22,7 @@ const props = defineProps<{
     duration: number;
     isPlaying: boolean;
     videoBitrate: number;
+    hwdecCurrent: string;
     playbackSpeed: number;
     videoTracks: MediaTrack[];
     audioTracks: MediaTrack[];
@@ -234,9 +235,34 @@ const formatResolution = (
     return fallback;
 };
 
-const formatTrackName = (track: MediaTrack, kind: "aid" | "sid" | "vid") => {
-    const name = track.title?.trim() || track.lang?.trim() || `${kind} ${track.id}`;
-    return `[${kind}=${track.id}${track.selected ? "*" : ""}] ${name}`;
+const getTrackDisplayName = (
+    track?: MediaTrack,
+    options?: { allowLangFallback?: boolean },
+) => {
+    if (!track) return "";
+    const title = track.title?.trim();
+    const hasUsefulTitle = Boolean(title) && !/^unknown$/i.test(title ?? "");
+    if (hasUsefulTitle) return title ?? "";
+    if (options?.allowLangFallback) {
+        return track.lang?.trim() || "";
+    }
+    return "";
+};
+
+const formatTrackIdTag = (track: MediaTrack, kind: "aid" | "vid" | "sid") =>
+    `[${kind}=${track.id}]`;
+
+const formatDecoder = (track?: MediaTrack) => {
+    const decoder = track?.decoder_desc?.trim();
+    return decoder ? `Decoder ${decoder}` : null;
+};
+
+const formatHwdecCurrent = (value?: string) => {
+    const normalized = value?.trim().toLowerCase() ?? "";
+    if (!normalized || normalized === "no") {
+        return "SW";
+    }
+    return `HW(${value?.trim() ?? ""})`;
 };
 
 const playbackLine = computed(() => {
@@ -244,12 +270,19 @@ const playbackLine = computed(() => {
     const currentTime = clamp(props.currentTime || 0, 0, duration || 0);
     const progress = duration > 0 ? currentTime / duration : 0;
     const state = props.isPlaying ? "Playing" : "Paused";
-    return `${state} | ${formatPlaybackTime(currentTime)} / ${formatPlaybackTime(duration)} (${formatPercent(progress)}) | ${props.playbackSpeed.toFixed(2)}x`;
+    const hwdec = formatHwdecCurrent(props.hwdecCurrent);
+    return `${state} | ${formatPlaybackTime(currentTime)} / ${formatPlaybackTime(duration)} (${formatPercent(progress)}) | ${props.playbackSpeed.toFixed(2)}x | ${hwdec}`;
 });
 
-const videoLine = computed(() => {
+const videoCodecLine = computed(() => {
     const track = selectedVideoTrack.value;
     const codec = track?.codec || track?.codec_desc || props.info?.video.codec || "Unknown codec";
+    const decoder = formatDecoder(track);
+    return [codec, decoder].filter(Boolean).join(" | ");
+});
+
+const videoDetailLine = computed(() => {
+    const track = selectedVideoTrack.value;
     const resolution = formatResolution(track, props.info?.video.resolution || "Unknown resolution");
     const fps = formatFps(track?.fps ?? track?.demux_fps, props.info?.video.fps);
     const trackBitrate =
@@ -259,50 +292,53 @@ const videoLine = computed(() => {
     const bitrate = formatBitrate(props.videoBitrate, trackBitrate);
     const color = props.info?.video.color || "Unknown color";
     const aspect = props.info?.video.aspect ? `AR ${props.info.video.aspect}` : null;
-    return [codec, resolution, fps, bitrate, color, aspect].filter(Boolean).join(" | ");
+    return [resolution, fps, bitrate, color, aspect].filter(Boolean).join(" | ");
 });
 
-const audioLine = computed(() => {
+const audioCodecLine = computed(() => {
     const track = selectedAudioTrack.value;
     const codec = track?.codec || track?.codec_desc || props.info?.audio.codec || "Unknown codec";
+    const decoder = formatDecoder(track);
+    return [codec, decoder].filter(Boolean).join(" | ");
+});
+
+const videoTrackTag = computed(() => {
+    const track = selectedVideoTrack.value;
+    return track ? formatTrackIdTag(track, "vid") : "[vid=?]";
+});
+
+const audioTrackTag = computed(() => {
+    const track = selectedAudioTrack.value;
+    return track ? formatTrackIdTag(track, "aid") : "[aid=?]";
+});
+
+const audioDetailLine = computed(() => {
+    const track = selectedAudioTrack.value;
     const channels = track?.demux_channels || props.info?.audio.channels || "Unknown channels";
     const sampleRate = formatSampleRate(track?.demux_samplerate, props.info?.audio.sampleRate);
     const bitrate = formatBitrate(track?.demux_bitrate);
-    const language = track?.lang || props.info?.audio.language || "Unknown language";
-    return [codec, channels, sampleRate, bitrate, language]
-        .filter((value, index) => value && (index !== 3 || value !== "Unknown bitrate"))
+    const language = track?.lang?.trim() || "";
+    const trackName = getTrackDisplayName(track, { allowLangFallback: false });
+    const shouldShowTrackName =
+        Boolean(trackName) &&
+        trackName.toLowerCase() !== language.trim().toLowerCase();
+    return [channels, sampleRate, bitrate, language, shouldShowTrackName ? trackName : ""]
+        .filter(
+            (value, index) =>
+                value && (index !== 2 || value !== "Unknown bitrate"),
+        )
         .join(" | ");
 });
 
-const subtitlesLine = computed(() => {
-    return selectedSubTrack.value
-        ? formatTrackName(selectedSubTrack.value, "sid")
-        : "Off";
+const subtitleTrackTag = computed(() => {
+    const track = selectedSubTrack.value;
+    return track ? formatTrackIdTag(track, "sid") : "";
 });
 
-const videoTrackLine = computed(() => {
-    const track = selectedVideoTrack.value;
-    if (!track) {
-        return "No video track selected";
-    }
-    const codec = track.codec || track.codec_desc;
-    const resolution = formatResolution(track, "");
-    const fps = formatFps(track.fps ?? track.demux_fps, "");
-    const details = [codec, resolution, fps].filter(Boolean).join(", ");
-    return `${formatTrackName(track, "vid")}${details ? ` (${details})` : ""}`;
-});
+const subtitleTrackName = computed(() =>
+    getTrackDisplayName(selectedSubTrack.value, { allowLangFallback: true }),
+);
 
-const audioTrackLine = computed(() => {
-    const track = selectedAudioTrack.value;
-    if (!track) {
-        return "No audio track selected";
-    }
-    const codec = track.codec || track.codec_desc;
-    const channels = track.demux_channels;
-    const sampleRate = formatSampleRate(track.demux_samplerate, "");
-    const details = [codec, channels, sampleRate].filter(Boolean).join(", ");
-    return `${formatTrackName(track, "aid")}${details ? ` (${details})` : ""}`;
-});
 </script>
 
 <template>
@@ -560,23 +596,36 @@ const audioTrackLine = computed(() => {
 
                 <div v-if="hasVideoSection" class="info-panel__section">
                     <div class="info-panel__label">Video</div>
-                    <div class="info-panel__value">{{ videoLine }}</div>
+                    <div class="info-panel__value">
+                        <span class="info-panel__track-tag">{{ videoTrackTag }}</span>{{ videoCodecLine }}
+                    </div>
                     <div class="info-panel__value info-panel__value--sub">
-                        {{ videoTrackLine }}
+                        <span class="info-panel__track-tag info-panel__track-tag--ghost">
+                            {{ videoTrackTag }}
+                        </span>{{ videoDetailLine }}
                     </div>
                 </div>
 
                 <div v-if="hasAudioSection" class="info-panel__section">
                     <div class="info-panel__label">Audio</div>
-                    <div class="info-panel__value">{{ audioLine }}</div>
+                    <div class="info-panel__value">
+                        <span class="info-panel__track-tag">{{ audioTrackTag }}</span>{{ audioCodecLine }}
+                    </div>
                     <div class="info-panel__value info-panel__value--sub">
-                        {{ audioTrackLine }}
+                        <span class="info-panel__track-tag info-panel__track-tag--ghost">
+                            {{ audioTrackTag }}
+                        </span>{{ audioDetailLine }}
                     </div>
                 </div>
 
                 <div v-if="hasSubtitleSection" class="info-panel__section">
-                    <div class="info-panel__label">Subtitles</div>
-                    <div class="info-panel__value">{{ subtitlesLine }}</div>
+                    <div class="info-panel__label">Subtitle</div>
+                    <div class="info-panel__value">
+                        <template v-if="subtitleTrackTag">
+                            <span class="info-panel__track-tag">{{ subtitleTrackTag }}</span>{{ subtitleTrackName }}
+                        </template>
+                        <template v-else>Off</template>
+                    </div>
                 </div>
             </div>
         </form>
@@ -945,6 +994,16 @@ const audioTrackLine = computed(() => {
 
 .info-panel__value--sub {
     color: rgba(255, 255, 255, 0.7);
+}
+
+.info-panel__track-tag {
+    display: inline-block;
+    margin-right: 8px;
+    font-variant-numeric: tabular-nums;
+}
+
+.info-panel__track-tag--ghost {
+    visibility: hidden;
 }
 
 .info-panel__kv {

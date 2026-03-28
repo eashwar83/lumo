@@ -75,6 +75,7 @@ export const useAppEventBindings = ({
     let unlistenFullscreenWill: UnlistenFn | null = null;
     let unlistenEndFile: UnlistenFn | null = null;
     let unlistenMediaTitle: UnlistenFn | null = null;
+    let unlistenHwdecCurrent: UnlistenFn | null = null;
 
     const windowEventHandlers: Array<[keyof WindowEventMap, EventListener]> = [
         ["mousemove", () => ui.onUserInteraction()],
@@ -153,6 +154,17 @@ export const useAppEventBindings = ({
             const title = typeof event.payload === "string" ? event.payload.trim() : "";
             player.state.media.title = title;
         });
+
+        unlistenHwdecCurrent = await listen<string>(
+            "mpv-hwdec-current",
+            (event) => {
+                const hwdec =
+                    typeof event.payload === "string"
+                        ? event.payload.trim()
+                        : "";
+                player.state.playback.hwdecCurrent = hwdec;
+            },
+        );
 
         // Listen for resize events
         unlistenResize = await listen<[number, number]>(
@@ -281,6 +293,7 @@ export const useAppEventBindings = ({
         unlistenFullscreenWill?.();
         unlistenEndFile?.();
         unlistenMediaTitle?.();
+        unlistenHwdecCurrent?.();
         ui.cleanup();
         windowEventHandlers.forEach(([eventName, handler]) => {
             window.removeEventListener(eventName, handler);
