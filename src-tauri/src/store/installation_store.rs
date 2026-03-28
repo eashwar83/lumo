@@ -53,7 +53,7 @@ pub fn update_uuid_update_data(
     Ok(())
 }
 
-pub fn mark_daily_active(app: &tauri::AppHandle) -> Result<DailyActionResult, String> {
+pub fn mark_daily_signal(app: &tauri::AppHandle) -> Result<DailyActionResult, String> {
     let mut result = check_daily_field(
         app,
         "SELECT last_dau_reported_date_utc FROM app_installation_state WHERE singleton = 1",
@@ -70,7 +70,7 @@ pub fn mark_daily_active(app: &tauri::AppHandle) -> Result<DailyActionResult, St
     Ok(result)
 }
 
-pub fn mark_daily_active_reported(app: &tauri::AppHandle) -> Result<(), String> {
+pub fn mark_daily_signal_reported(app: &tauri::AppHandle) -> Result<(), String> {
     write_daily_field(
         app,
         "UPDATE app_installation_state
@@ -81,9 +81,15 @@ pub fn mark_daily_active_reported(app: &tauri::AppHandle) -> Result<(), String> 
 }
 
 pub fn mark_daily_update_check(app: &tauri::AppHandle) -> Result<DailyActionResult, String> {
-    mark_daily_field(
+    check_daily_field(
         app,
         "SELECT last_update_checked_date_utc FROM app_installation_state WHERE singleton = 1",
+    )
+}
+
+pub fn mark_daily_update_check_success(app: &tauri::AppHandle) -> Result<(), String> {
+    write_daily_field(
+        app,
         "UPDATE app_installation_state
          SET last_update_checked_date_utc = ?1,
              updated_at = ?2
@@ -115,18 +121,6 @@ fn write_daily_field(app: &tauri::AppHandle, update_sql: &str) -> Result<(), Str
     conn.execute(update_sql, params![today, now])
         .map_err(|e| e.to_string())?;
     Ok(())
-}
-
-fn mark_daily_field(
-    app: &tauri::AppHandle,
-    select_sql: &str,
-    update_sql: &str,
-) -> Result<DailyActionResult, String> {
-    let result = check_daily_field(app, select_sql)?;
-    if result.should_run {
-        write_daily_field(app, update_sql)?;
-    }
-    Ok(result)
 }
 
 fn read_installation_state(conn: &rusqlite::Connection) -> Result<InstallationState, String> {

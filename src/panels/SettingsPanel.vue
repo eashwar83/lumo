@@ -8,8 +8,18 @@ const {
     isSetDefaultButtonDisabled,
     isSetDefaultButtonLoading,
     setDefaultButtonText,
+    isSetDefaultSuccess,
+    shouldShowUpdateButton,
+    isUpdateButtonDisabled,
+    updateButtonText,
+    isUpdateRetry,
+    shouldShowUpdateProgress,
+    isUpdateProgressIndeterminate,
+    updateProgressPercent,
+    updateProgressText,
     isApplyingMediaAssociation,
     setMediaAssociationToSoia,
+    installUpdate,
     resetAllSettings,
     browseForPath,
     isFixedLogPathItem,
@@ -22,13 +32,54 @@ const {
         <div class="panel__header">
             <div class="panel__title">Settings</div>
             <div class="panel__header-actions">
+                <div v-if="shouldShowUpdateProgress" class="panel__update-progress">
+                    <div class="panel__update-progress-text">{{ updateProgressText }}</div>
+                    <div class="panel__update-progress-track">
+                        <span
+                            v-if="isUpdateProgressIndeterminate"
+                            class="panel__update-progress-fill panel__update-progress-fill--indeterminate"
+                        ></span>
+                        <span
+                            v-else
+                            class="panel__update-progress-fill"
+                            :style="{ width: `${updateProgressPercent}%` }"
+                        ></span>
+                    </div>
+                </div>
+                <button
+                    v-if="shouldShowUpdateButton"
+                    class="panel__action panel__action--glow panel__header-action panel__header-action--compact"
+                    type="button"
+                    :disabled="isUpdateButtonDisabled"
+                    @click="installUpdate"
+                >
+                    <span
+                        v-if="isUpdateRetry"
+                        class="panel__status-icon panel__status-icon--failed"
+                        aria-hidden="true"
+                    >
+                        <svg class="panel__status-icon-svg" viewBox="0 0 20 20">
+                            <path d="M5.5 5.5l9 9M14.5 5.5l-9 9" />
+                        </svg>
+                    </span>
+                    <span>{{ updateButtonText }}</span>
+                </button>
                 <button
                     v-if="shouldShowSetDefaultMediaButton"
-                    class="panel__action panel__action--accent panel__header-action"
+                    class="panel__action panel__action--glow panel__header-action"
                     type="button"
                     :disabled="isSetDefaultButtonDisabled || isApplyingMediaAssociation"
                     @click="setMediaAssociationToSoia"
                 >
+                    <span
+                        v-if="isSetDefaultSuccess"
+                        class="panel__status-icon panel__status-icon--success"
+                        aria-hidden="true"
+                    >
+                        <svg class="panel__status-icon-svg" viewBox="0 0 20 20">
+                            <path d="M4.5 10.5l3.4 3.4 7.6-7.8" />
+                        </svg>
+                    </span>
                     <span>{{ setDefaultButtonText }}</span>
                     <span v-if="isSetDefaultButtonLoading" class="panel__loading-dots" aria-hidden="true">
                         <span class="panel__loading-dot"></span>

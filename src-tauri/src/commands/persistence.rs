@@ -49,8 +49,8 @@ pub(crate) fn update_uuid_update_data(
 }
 
 #[tauri::command]
-pub(crate) fn mark_daily_active(app: tauri::AppHandle) -> Result<DailyActionResult, String> {
-    crate::store::installation_store::mark_daily_active(&app)
+pub(crate) fn mark_daily_signal(app: tauri::AppHandle) -> Result<DailyActionResult, String> {
+    crate::store::installation_store::mark_daily_signal(&app)
 }
 
 #[tauri::command]

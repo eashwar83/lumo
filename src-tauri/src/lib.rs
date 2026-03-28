@@ -275,7 +275,7 @@ pub fn run() {
             commands::persistence::save_play_history_entry,
             commands::persistence::get_installation_state,
             commands::persistence::update_uuid_update_data,
-            commands::persistence::mark_daily_active,
+            commands::persistence::mark_daily_signal,
             commands::persistence::mark_daily_update_check,
             commands::persistence::load_ui_state,
             commands::persistence::save_ui_state,
@@ -283,7 +283,8 @@ pub fn run() {
             commands::persistence::apply_logging_settings,
             commands::persistence::apply_ytdl_settings,
             commands::persistence::get_media_association_status,
-            commands::persistence::set_media_association_to_soia
+            commands::persistence::set_media_association_to_soia,
+            check_update::has_available_update
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
