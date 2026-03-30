@@ -13,6 +13,16 @@ const tauriRuntimeMacConfigPath = resolve(projectRoot, "src-tauri", "tauri.runti
 const runtimeLibsDir = resolve(projectRoot, "src-tauri", "libs");
 const mpvRuntimeLibsDir = resolve(runtimeLibsDir, "mpv");
 const devFrameworksDir = resolve(projectRoot, "src-tauri", "target", "Frameworks");
+const devVulkanIcdPath = resolve(
+  projectRoot,
+  "src-tauri",
+  "target",
+  "Frameworks",
+  "vulkan",
+  "icd.d",
+  "MoltenVK_icd.json"
+);
+const libsVulkanIcdPath = resolve(projectRoot, "src-tauri", "libs", "mpv", "MoltenVK_icd.json");
 const tauriArgs = process.argv.slice(2);
 const tauriSubcommand = tauriArgs.find((arg) => arg === "dev" || arg === "build") ?? "";
 const isDevOrBuild = tauriSubcommand === "dev" || tauriSubcommand === "build";
@@ -133,6 +143,26 @@ if (isDev && existsSync(runtimeLibsDir)) {
       extra.push(devFrameworksDir);
     }
     prependEnvPath("DYLD_FALLBACK_LIBRARY_PATH", extra);
+
+    const vulkanIcdCandidates = [];
+    if (existsSync(devVulkanIcdPath)) {
+      vulkanIcdCandidates.push(devVulkanIcdPath);
+    }
+    if (existsSync(libsVulkanIcdPath)) {
+      vulkanIcdCandidates.push(libsVulkanIcdPath);
+    }
+
+    if (vulkanIcdCandidates.length > 0) {
+      const dedupedIcdList = [...new Set(vulkanIcdCandidates)].join(delimiter);
+      const vkDriverFiles = childEnv.VK_DRIVER_FILES;
+      const vkIcdFilenames = childEnv.VK_ICD_FILENAMES;
+      childEnv.VK_DRIVER_FILES = vkDriverFiles
+        ? `${dedupedIcdList}${delimiter}${vkDriverFiles}`
+        : dedupedIcdList;
+      childEnv.VK_ICD_FILENAMES = vkIcdFilenames
+        ? `${dedupedIcdList}${delimiter}${vkIcdFilenames}`
+        : dedupedIcdList;
+    }
   } else if (process.platform === "linux") {
     const extra = [runtimeLibsDir];
     if (existsSync(mpvRuntimeLibsDir)) {

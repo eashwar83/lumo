@@ -6,6 +6,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 RUNTIME_RELEASE_CONFIG_FILE="$SCRIPT_DIR/runtime_libs_release_config.env"
 
 LIBS_DIR="$PROJECT_ROOT/src-tauri/libs"
+VULKAN_ICD_MANIFEST_NAME="MoltenVK_icd.json"
 LOCAL_BUNDLE_ARG="${1:-}"
 
 if [[ $# -gt 1 ]]; then
@@ -350,9 +351,76 @@ copy_dylibs_to_dir() {
   rm -rf "$staging_dir" 2>/dev/null || true
 }
 
+copy_vulkan_icd_manifest_to_dir() {
+  local source_dir="$1"
+  local output_dir="$2"
+  local source_manifest=""
+
+  source_manifest="$(find "$source_dir" -type f -name "$VULKAN_ICD_MANIFEST_NAME" | head -n 1 || true)"
+  if [[ -z "$source_manifest" ]]; then
+    echo "[ERROR] Cannot find $VULKAN_ICD_MANIFEST_NAME in: $source_dir"
+    exit 1
+  fi
+
+  cp -f "$source_manifest" "$output_dir/$VULKAN_ICD_MANIFEST_NAME"
+  echo "🧩 Installed Vulkan ICD manifest: $output_dir/$VULKAN_ICD_MANIFEST_NAME"
+}
+
+rewrite_vulkan_icd_library_path() {
+  local manifest_path="$1"
+  local library_path="$2"
+  local tmp_manifest
+  local api_version
+
+  if [[ ! -f "$manifest_path" ]]; then
+    echo "[ERROR] Vulkan ICD manifest not found: $manifest_path"
+    exit 1
+  fi
+
+  api_version="$(awk -F\" '/"api_version"/ { print $4; exit }' "$manifest_path")"
+  if [[ -z "$api_version" ]]; then
+    api_version="1.0.0"
+  fi
+
+  tmp_manifest="$(mktemp "${TMPDIR:-/tmp}/soia-moltenvk-icd.XXXXXX")"
+  cat > "$tmp_manifest" <<EOF
+{
+    "file_format_version": "1.0.0",
+    "ICD": {
+        "library_path": "$library_path",
+        "api_version": "$api_version",
+        "is_portability_driver": true
+    }
+}
+EOF
+
+  cp -f "$tmp_manifest" "$manifest_path"
+  rm -f "$tmp_manifest"
+}
+
+validate_vulkan_runtime_files() {
+  local output_dir="$1"
+
+  if [[ ! -f "$output_dir/libvulkan.1.dylib" ]]; then
+    return
+  fi
+
+  if [[ ! -f "$output_dir/libMoltenVK.dylib" ]]; then
+    echo "[ERROR] Missing libMoltenVK.dylib in runtime libs: $output_dir"
+    exit 1
+  fi
+
+  if [[ ! -f "$output_dir/$VULKAN_ICD_MANIFEST_NAME" ]]; then
+    echo "[ERROR] Missing $VULKAN_ICD_MANIFEST_NAME in runtime libs: $output_dir"
+    exit 1
+  fi
+}
+
 sync_dev_frameworks() {
   local source_dir="$1"
   local dev_frameworks_dir="$PROJECT_ROOT/src-tauri/target/Frameworks"
+  local dev_icd_dir="$dev_frameworks_dir/vulkan/icd.d"
+  local source_manifest="$source_dir/$VULKAN_ICD_MANIFEST_NAME"
 
   mkdir -p "$dev_frameworks_dir"
   find "$dev_frameworks_dir" -maxdepth 1 -type f -name '*.dylib' -delete
@@ -366,7 +434,18 @@ sync_dev_frameworks() {
     ln -sf "libmpv.2.dylib" "$dev_frameworks_dir/libmpv.dylib"
   fi
 
+  mkdir -p "$dev_icd_dir"
+  if [[ ! -f "$source_manifest" ]]; then
+    echo "[ERROR] Missing Vulkan ICD manifest for dev runtime: $source_manifest"
+    exit 1
+  fi
+  cp -f "$source_manifest" "$dev_icd_dir/$VULKAN_ICD_MANIFEST_NAME"
+  rewrite_vulkan_icd_library_path \
+    "$dev_icd_dir/$VULKAN_ICD_MANIFEST_NAME" \
+    "../../../libMoltenVK.dylib"
+
   echo "🔄 Synced dylibs to dev frameworks: $dev_frameworks_dir"
+  echo "🔄 Synced Vulkan ICD manifest to dev frameworks: $dev_icd_dir/$VULKAN_ICD_MANIFEST_NAME"
 }
 
 ad_hoc_sign_dylibs_if_macos() {
@@ -463,6 +542,8 @@ install_mpv_from_local_bundle() {
 
   echo "📦 Using local mpv bundle: $local_bundle_dir"
   copy_dylibs_to_dir "$local_bundle_dir" "$output_dir" "libmpv.2.dylib" "libmpv.dylib"
+  copy_vulkan_icd_manifest_to_dir "$local_bundle_dir" "$output_dir"
+  validate_vulkan_runtime_files "$output_dir"
   validate_dylib_minos "$output_dir"
   echo "🔧 Normalizing dylib install names for dev runtime..."
   normalize_and_validate_dylibs "$output_dir"
@@ -526,6 +607,8 @@ download_mpv() {
 
   echo "🧩 Installing dylibs to $output_dir"
   copy_dylibs_to_dir "$extract_dir" "$output_dir" "libmpv.2.dylib" "libmpv.dylib"
+  copy_vulkan_icd_manifest_to_dir "$extract_dir" "$output_dir"
+  validate_vulkan_runtime_files "$output_dir"
   validate_dylib_minos "$output_dir"
   echo "🔧 Normalizing dylib install names for dev runtime..."
   normalize_and_validate_dylibs "$output_dir"

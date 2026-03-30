@@ -20,6 +20,7 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 INSTALLED_LIBS_DIR="$PROJECT_ROOT/src-tauri/libs/mpv"
+VULKAN_ICD_MANIFEST_NAME="MoltenVK_icd.json"
 
 APP_DIR="$1"
 shift
@@ -73,6 +74,8 @@ if [[ "$STRICT_UNRESOLVED" == "auto" ]]; then
 fi
 
 FRAMEWORKS_DIR="$APP_DIR/Contents/Frameworks"
+RESOURCES_DIR="$APP_DIR/Contents/Resources"
+VULKAN_ICD_DIR="$RESOURCES_DIR/vulkan/icd.d"
 if [[ ! -d "$FRAMEWORKS_DIR" ]]; then
   echo "[ERROR] Frameworks dir not found: $FRAMEWORKS_DIR"
   exit 1
@@ -106,6 +109,38 @@ is_system_dep() {
 deps_of() {
   local file="$1"
   otool -L "$file" | tail -n +2 | awk '{print $1}'
+}
+
+rewrite_vulkan_icd_library_path() {
+  local manifest_path="$1"
+  local library_path="$2"
+  local tmp_manifest
+  local api_version
+
+  if [[ ! -f "$manifest_path" ]]; then
+    echo "[ERROR] Vulkan ICD manifest not found: $manifest_path"
+    exit 1
+  fi
+
+  api_version="$(awk -F\" '/"api_version"/ { print $4; exit }' "$manifest_path")"
+  if [[ -z "$api_version" ]]; then
+    api_version="1.0.0"
+  fi
+
+  tmp_manifest="$(mktemp "${TMPDIR:-/tmp}/soia-moltenvk-icd.XXXXXX")"
+  cat > "$tmp_manifest" <<EOF
+{
+    "file_format_version": "1.0.0",
+    "ICD": {
+        "library_path": "$library_path",
+        "api_version": "$api_version",
+        "is_portability_driver": true
+    }
+}
+EOF
+
+  cp -f "$tmp_manifest" "$manifest_path"
+  rm -f "$tmp_manifest"
 }
 
 contains() {
@@ -268,6 +303,34 @@ while [[ ${#queue[@]} -gt 0 ]]; do
     fi
   done < <(deps_of "$current")
 done
+
+if [[ -f "$FRAMEWORKS_DIR/libvulkan.1.dylib" || -f "$FRAMEWORKS_DIR/libvulkan.dylib" ]]; then
+  if [[ ! -f "$FRAMEWORKS_DIR/libMoltenVK.dylib" ]]; then
+    if [[ "$STRICT_UNRESOLVED" -eq 1 ]]; then
+      echo "[ERROR] Missing libMoltenVK.dylib in app frameworks while Vulkan loader is present."
+      exit 1
+    else
+      echo "[WARN] Missing libMoltenVK.dylib in app frameworks while Vulkan loader is present."
+    fi
+  fi
+
+  icd_manifest_source="$INSTALLED_LIBS_DIR/$VULKAN_ICD_MANIFEST_NAME"
+  if [[ ! -f "$icd_manifest_source" ]]; then
+    if [[ "$STRICT_UNRESOLVED" -eq 1 ]]; then
+      echo "[ERROR] Missing Vulkan ICD manifest: $icd_manifest_source"
+      exit 1
+    else
+      echo "[WARN] Missing Vulkan ICD manifest: $icd_manifest_source"
+    fi
+  else
+    mkdir -p "$VULKAN_ICD_DIR"
+    cp -f "$icd_manifest_source" "$VULKAN_ICD_DIR/$VULKAN_ICD_MANIFEST_NAME"
+    rewrite_vulkan_icd_library_path \
+      "$VULKAN_ICD_DIR/$VULKAN_ICD_MANIFEST_NAME" \
+      "../../../Frameworks/libMoltenVK.dylib"
+    echo "[COPY] vulkan/icd.d/$VULKAN_ICD_MANIFEST_NAME"
+  fi
+fi
 
 if [[ $DO_SIGN -eq 1 ]]; then
   echo "[INFO] Ad-hoc signing dylibs and app bundle..."
