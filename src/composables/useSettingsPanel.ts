@@ -2,6 +2,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type DownloadEvent, type Update } from "@tauri-apps/plugin-updater";
 import {
     defaultSettingGroups,
@@ -85,6 +86,9 @@ const formatByteSize = (bytes: number): string => {
 
 const isUpdateBusyPhase = (phase: UpdateButtonPhase): boolean =>
     phase === "checking" || phase === "downloading" || phase === "installing";
+
+let cachedAvailableUpdateVersion: string | null = null;
+let cachedAvailableUpdateResource: Update | null = null;
 
 const cloneSettingGroups = () =>
     defaultSettingGroups.map((group) => ({
@@ -185,9 +189,13 @@ export const useSettingsPanel = () => {
     const mediaAssociationMessage = ref("");
     const setDefaultButtonPhase = ref<SetDefaultButtonPhase>("idle");
     const hasAvailableUpdate = ref(false);
+    const availableUpdateVersion = ref<string | null>(cachedAvailableUpdateVersion);
     const updateButtonPhase = ref<UpdateButtonPhase>("idle");
     const updateProgressTotalBytes = ref<number | null>(null);
     const updateProgressDownloadedBytes = ref(0);
+    const updateDownloadSpeedBytesPerSec = ref<number | null>(null);
+    const updateLastProgressAtMs = ref<number | null>(null);
+    const updateLastProgressBytes = ref(0);
     const isLoading = ref(true);
     const uiStateSaver = createDebouncedUiStateSaver(300);
     const LOGGING_APPLY_DELAY_MS = 250;
@@ -197,6 +205,31 @@ export const useSettingsPanel = () => {
     let unlistenUpdateAvailable: UnlistenFn | null = null;
     let lastAppliedLoggingRequestKey: string | null = null;
     let lastAppliedYtdlRequestKey: string | null = null;
+
+    const closeUpdateResource = async (update: Update | null) => {
+        if (!update) return;
+        try {
+            await update.close();
+        } catch {
+            // Ignore cleanup failures from updater resource handles.
+        }
+    };
+
+    const setAvailableUpdateResource = async (update: Update | null) => {
+        if (cachedAvailableUpdateResource && cachedAvailableUpdateResource !== update) {
+            await closeUpdateResource(cachedAvailableUpdateResource);
+        }
+        cachedAvailableUpdateResource = update;
+        hasAvailableUpdate.value = Boolean(update);
+        availableUpdateVersion.value = update?.version?.trim() || null;
+        cachedAvailableUpdateVersion = availableUpdateVersion.value;
+    };
+
+    const consumeAvailableUpdateResource = () => {
+        const update = cachedAvailableUpdateResource;
+        cachedAvailableUpdateResource = null;
+        return update;
+    };
 
     const findLogPathItem = (groups: SettingGroup[]) => {
         const item = groups
@@ -382,8 +415,25 @@ export const useSettingsPanel = () => {
     const loadUpdateAvailability = async () => {
         try {
             hasAvailableUpdate.value = await invoke<boolean>("has_available_update");
+            if (hasAvailableUpdate.value) {
+                availableUpdateVersion.value = cachedAvailableUpdateVersion;
+                if (!cachedAvailableUpdateVersion || !cachedAvailableUpdateResource) {
+                    void resolveAvailableUpdateVersion();
+                }
+            } else {
+                void setAvailableUpdateResource(null);
+            }
         } catch {
-            hasAvailableUpdate.value = false;
+            void setAvailableUpdateResource(null);
+        }
+    };
+
+    const resolveAvailableUpdateVersion = async () => {
+        try {
+            const update = await check();
+            await setAvailableUpdateResource(update);
+        } catch {
+            // Keep last known availability when refresh check fails.
         }
     };
 
@@ -393,6 +443,14 @@ export const useSettingsPanel = () => {
                 "soia-update-available",
                 (event) => {
                     hasAvailableUpdate.value = event.payload === true;
+                    if (hasAvailableUpdate.value) {
+                        availableUpdateVersion.value = cachedAvailableUpdateVersion;
+                        if (!cachedAvailableUpdateVersion || !cachedAvailableUpdateResource) {
+                            void resolveAvailableUpdateVersion();
+                        }
+                    } else {
+                        void setAvailableUpdateResource(null);
+                    }
                     if (!hasAvailableUpdate.value && !isUpdateBusyPhase(updateButtonPhase.value)) {
                         updateButtonPhase.value = "idle";
                     }
@@ -518,41 +576,37 @@ export const useSettingsPanel = () => {
         () => updateButtonPhase.value === "failed",
     );
 
-    const updateProgressPercent = computed(() => {
-        if (updateButtonPhase.value !== "downloading") return 0;
-        const total = updateProgressTotalBytes.value;
-        if (!total || total <= 0) return 0;
-        const ratio = updateProgressDownloadedBytes.value / total;
-        const percent = Math.round(Math.min(1, Math.max(0, ratio)) * 100);
-        return Number.isFinite(percent) ? percent : 0;
-    });
-
-    const isUpdateProgressIndeterminate = computed(
-        () =>
-            updateButtonPhase.value === "checking" ||
-            updateButtonPhase.value === "installing" ||
-            (updateButtonPhase.value === "downloading" &&
-                (!updateProgressTotalBytes.value || updateProgressTotalBytes.value <= 0)),
-    );
-
-    const shouldShowUpdateProgress = computed(
+    const shouldShowUpdateStatus = computed(
         () =>
             updateButtonPhase.value === "checking" ||
             updateButtonPhase.value === "downloading" ||
             updateButtonPhase.value === "installing",
     );
 
-    const updateProgressText = computed(() => {
+    const updateDownloadPercent = computed(() => {
+        if (updateButtonPhase.value !== "downloading") return null;
+        const total = updateProgressTotalBytes.value;
+        if (!total || total <= 0) return null;
+        const ratio = updateProgressDownloadedBytes.value / total;
+        const percent = Math.round(Math.min(1, Math.max(0, ratio)) * 100);
+        return Number.isFinite(percent) ? percent : null;
+    });
+
+    const updateStatusText = computed(() => {
         if (updateButtonPhase.value === "checking") {
-            return "Checking for update...";
+            return "Checking for update... 0%";
         }
         if (updateButtonPhase.value === "downloading") {
-            const downloaded = Math.max(0, updateProgressDownloadedBytes.value);
-            const total = updateProgressTotalBytes.value;
-            if (!total || total <= 0) {
-                return `Downloading update... ${formatByteSize(downloaded)}`;
+            const percent = updateDownloadPercent.value;
+            const speed = updateDownloadSpeedBytesPerSec.value;
+            const speedText =
+                typeof speed === "number" && Number.isFinite(speed) && speed > 0
+                    ? ` · ${formatByteSize(speed)}/s`
+                    : "";
+            if (typeof percent === "number") {
+                return `Downloading update... ${percent}%${speedText}`;
             }
-            return `Downloading ${formatByteSize(downloaded)} / ${formatByteSize(total)} (${updateProgressPercent.value}%)`;
+            return `Downloading update...${speedText}`;
         }
         if (updateButtonPhase.value === "installing") {
             return "Installing update...";
@@ -560,21 +614,29 @@ export const useSettingsPanel = () => {
         return "";
     });
 
+    const shouldShowUpdateHint = computed(
+        () => hasAvailableUpdate.value && !isUpdateBusyPhase(updateButtonPhase.value),
+    );
+
+    const updateHintText = computed(() => {
+        const version = availableUpdateVersion.value?.trim();
+        if (version) {
+            return `Version ${version} is available!`;
+        }
+        return "New version is available!";
+    });
+
     const installUpdate = async () => {
         if (isUpdateBusyPhase(updateButtonPhase.value)) return;
-        let updateResource: Update | null = null;
         updateProgressTotalBytes.value = null;
         updateProgressDownloadedBytes.value = 0;
-        updateButtonPhase.value = "checking";
-        try {
-            const update = await check();
-            updateResource = update;
-            if (!update) {
-                hasAvailableUpdate.value = false;
-                updateButtonPhase.value = "idle";
-                return;
-            }
+        updateDownloadSpeedBytesPerSec.value = null;
+        updateLastProgressAtMs.value = null;
+        updateLastProgressBytes.value = 0;
+
+        const runDownloadAndInstall = async (update: Update) => {
             hasAvailableUpdate.value = true;
+            availableUpdateVersion.value = update.version?.trim() || null;
             updateButtonPhase.value = "downloading";
             await update.download((event: DownloadEvent) => {
                 if (event.event === "Started") {
@@ -589,6 +651,9 @@ export const useSettingsPanel = () => {
                         updateProgressTotalBytes.value = null;
                     }
                     updateProgressDownloadedBytes.value = 0;
+                    updateDownloadSpeedBytesPerSec.value = null;
+                    updateLastProgressAtMs.value = Date.now();
+                    updateLastProgressBytes.value = 0;
                     return;
                 }
                 if (event.event === "Progress") {
@@ -603,6 +668,24 @@ export const useSettingsPanel = () => {
                         updateProgressDownloadedBytes.value =
                             total && total > 0 ? Math.min(nextValue, total) : nextValue;
                     }
+
+                    const now = Date.now();
+                    const lastAt = updateLastProgressAtMs.value;
+                    const lastBytes = updateLastProgressBytes.value;
+                    if (lastAt && now > lastAt) {
+                        const bytesDelta = updateProgressDownloadedBytes.value - lastBytes;
+                        const timeDeltaSec = (now - lastAt) / 1000;
+                        if (bytesDelta > 0 && timeDeltaSec > 0) {
+                            const instantSpeed = bytesDelta / timeDeltaSec;
+                            const previous = updateDownloadSpeedBytesPerSec.value;
+                            updateDownloadSpeedBytesPerSec.value =
+                                previous && Number.isFinite(previous)
+                                    ? previous * 0.7 + instantSpeed * 0.3
+                                    : instantSpeed;
+                        }
+                    }
+                    updateLastProgressAtMs.value = now;
+                    updateLastProgressBytes.value = updateProgressDownloadedBytes.value;
                     return;
                 }
                 if (event.event === "Finished") {
@@ -610,24 +693,64 @@ export const useSettingsPanel = () => {
                     if (total && total > 0) {
                         updateProgressDownloadedBytes.value = total;
                     }
+                    updateDownloadSpeedBytesPerSec.value = null;
                 }
             });
             updateButtonPhase.value = "installing";
             await update.install();
-            hasAvailableUpdate.value = false;
-            updateButtonPhase.value = "idle";
-            updateProgressTotalBytes.value = null;
-            updateProgressDownloadedBytes.value = 0;
-        } catch {
-            updateButtonPhase.value = "failed";
-        } finally {
-            if (updateResource) {
+            await relaunch();
+        };
+
+        let primaryUpdate = consumeAvailableUpdateResource();
+        let lastKnownVersion: string | null = primaryUpdate?.version?.trim() || null;
+
+        try {
+            if (!primaryUpdate) {
+                updateButtonPhase.value = "checking";
+                primaryUpdate = await check();
+            }
+            if (!primaryUpdate) {
+                await setAvailableUpdateResource(null);
+                updateButtonPhase.value = "idle";
+                return;
+            }
+
+            lastKnownVersion = primaryUpdate.version?.trim() || lastKnownVersion;
+
+            try {
+                await runDownloadAndInstall(primaryUpdate);
+                closeUpdateResource(primaryUpdate);
+                await setAvailableUpdateResource(null);
+                updateButtonPhase.value = "idle";
+                return;
+            } catch {
+                closeUpdateResource(primaryUpdate);
+                updateButtonPhase.value = "checking";
+                const fallbackUpdate = await check();
+                if (!fallbackUpdate) {
+                    await setAvailableUpdateResource(null);
+                    updateButtonPhase.value = "idle";
+                    return;
+                }
+                lastKnownVersion = fallbackUpdate.version?.trim() || lastKnownVersion;
                 try {
-                    await updateResource.close();
+                    await runDownloadAndInstall(fallbackUpdate);
+                    closeUpdateResource(fallbackUpdate);
+                    await setAvailableUpdateResource(null);
+                    updateButtonPhase.value = "idle";
+                    return;
                 } catch {
-                    // Ignore cleanup failures from updater resource handles.
+                    closeUpdateResource(fallbackUpdate);
+                    hasAvailableUpdate.value = true;
+                    availableUpdateVersion.value = lastKnownVersion;
+                    updateButtonPhase.value = "failed";
+                    return;
                 }
             }
+        } catch {
+            hasAvailableUpdate.value = true;
+            availableUpdateVersion.value = lastKnownVersion;
+            updateButtonPhase.value = "failed";
         }
     };
 
@@ -705,10 +828,10 @@ export const useSettingsPanel = () => {
         isUpdateButtonDisabled,
         updateButtonText,
         isUpdateRetry,
-        shouldShowUpdateProgress,
-        isUpdateProgressIndeterminate,
-        updateProgressPercent,
-        updateProgressText,
+        shouldShowUpdateStatus,
+        updateStatusText,
+        shouldShowUpdateHint,
+        updateHintText,
         mediaAssociationSummary,
         mediaAssociationMessage,
         isCheckingMediaAssociation,

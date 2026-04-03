@@ -17,10 +17,10 @@ const {
     isUpdateButtonDisabled,
     updateButtonText,
     isUpdateRetry,
-    shouldShowUpdateProgress,
-    isUpdateProgressIndeterminate,
-    updateProgressPercent,
-    updateProgressText,
+    shouldShowUpdateStatus,
+    updateStatusText,
+    shouldShowUpdateHint,
+    updateHintText,
     isApplyingMediaAssociation,
     setMediaAssociationToSoia,
     installUpdate,
@@ -42,38 +42,35 @@ const shouldShowSettingItem = (item: SettingItem): boolean =>
         <div class="panel__header">
             <div class="panel__title">Settings</div>
             <div class="panel__header-actions">
-                <div v-if="shouldShowUpdateProgress" class="panel__update-progress">
-                    <div class="panel__update-progress-text">{{ updateProgressText }}</div>
-                    <div class="panel__update-progress-track">
-                        <span
-                            v-if="isUpdateProgressIndeterminate"
-                            class="panel__update-progress-fill panel__update-progress-fill--indeterminate"
-                        ></span>
-                        <span
-                            v-else
-                            class="panel__update-progress-fill"
-                            :style="{ width: `${updateProgressPercent}%` }"
-                        ></span>
-                    </div>
+                <div v-if="shouldShowUpdateStatus" class="panel__update-status" aria-live="polite">
+                    <span class="panel__spinner" aria-hidden="true"></span>
+                    <div class="panel__update-status-text">{{ updateStatusText }}</div>
                 </div>
-                <button
-                    v-if="shouldShowUpdateButton"
-                    class="panel__action panel__action--glow panel__header-action panel__header-action--compact"
-                    type="button"
-                    :disabled="isUpdateButtonDisabled"
-                    @click="installUpdate"
-                >
+                <div v-if="shouldShowUpdateButton" class="panel__update-action-wrap">
                     <span
-                        v-if="isUpdateRetry"
-                        class="panel__status-icon panel__status-icon--failed"
-                        aria-hidden="true"
+                        v-if="shouldShowUpdateHint"
+                        class="panel__update-hint"
                     >
-                        <svg class="panel__status-icon-svg" viewBox="0 0 20 20">
-                            <path d="M5.5 5.5l9 9M14.5 5.5l-9 9" />
-                        </svg>
+                        {{ updateHintText }}
                     </span>
-                    <span>{{ updateButtonText }}</span>
-                </button>
+                    <button
+                        class="panel__action panel__action--glow panel__header-action panel__header-action--compact"
+                        type="button"
+                        :disabled="isUpdateButtonDisabled"
+                        @click="installUpdate"
+                    >
+                        <span
+                            v-if="isUpdateRetry"
+                            class="panel__status-icon panel__status-icon--failed"
+                            aria-hidden="true"
+                        >
+                            <svg class="panel__status-icon-svg" viewBox="0 0 20 20">
+                                <path d="M5.5 5.5l9 9M14.5 5.5l-9 9" />
+                            </svg>
+                        </span>
+                        <span>{{ updateButtonText }}</span>
+                    </button>
+                </div>
                 <button
                     v-if="shouldShowSetDefaultMediaButton"
                     class="panel__action panel__action--glow panel__header-action"

@@ -41,7 +41,8 @@ fn init_logging() {
     builder
         .filter_module("reqwest", log::LevelFilter::Warn)
         .filter_module("hyper", log::LevelFilter::Warn)
-        .filter_module("hyper_util", log::LevelFilter::Warn);
+        .filter_module("hyper_util", log::LevelFilter::Warn)
+        .filter_module("tauri_plugin_updater", log::LevelFilter::Warn);
     builder.format(|buf, record| {
         use std::io::Write;
 
@@ -246,6 +247,7 @@ pub fn run() {
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             commands::playback::mpv_run_command,
             commands::playback::mpv_set_option_string,
