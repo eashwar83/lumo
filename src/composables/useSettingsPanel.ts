@@ -1,5 +1,5 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import { open } from "@tauri-apps/plugin-dialog";
+import { confirm, open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { relaunch } from "@tauri-apps/plugin-process";
@@ -89,6 +89,16 @@ const isUpdateBusyPhase = (phase: UpdateButtonPhase): boolean =>
 
 let cachedAvailableUpdateVersion: string | null = null;
 let cachedAvailableUpdateResource: Update | null = null;
+let updateWorkflowPromise: Promise<void> | null = null;
+
+const sharedHasAvailableUpdate = ref(false);
+const sharedAvailableUpdateVersion = ref<string | null>(cachedAvailableUpdateVersion);
+const sharedUpdateButtonPhase = ref<UpdateButtonPhase>("idle");
+const sharedUpdateProgressTotalBytes = ref<number | null>(null);
+const sharedUpdateProgressDownloadedBytes = ref(0);
+const sharedUpdateDownloadSpeedBytesPerSec = ref<number | null>(null);
+const sharedUpdateLastProgressAtMs = ref<number | null>(null);
+const sharedUpdateLastProgressBytes = ref(0);
 
 const cloneSettingGroups = () =>
     defaultSettingGroups.map((group) => ({
@@ -188,14 +198,14 @@ export const useSettingsPanel = () => {
     const isApplyingMediaAssociation = ref(false);
     const mediaAssociationMessage = ref("");
     const setDefaultButtonPhase = ref<SetDefaultButtonPhase>("idle");
-    const hasAvailableUpdate = ref(false);
-    const availableUpdateVersion = ref<string | null>(cachedAvailableUpdateVersion);
-    const updateButtonPhase = ref<UpdateButtonPhase>("idle");
-    const updateProgressTotalBytes = ref<number | null>(null);
-    const updateProgressDownloadedBytes = ref(0);
-    const updateDownloadSpeedBytesPerSec = ref<number | null>(null);
-    const updateLastProgressAtMs = ref<number | null>(null);
-    const updateLastProgressBytes = ref(0);
+    const hasAvailableUpdate = sharedHasAvailableUpdate;
+    const availableUpdateVersion = sharedAvailableUpdateVersion;
+    const updateButtonPhase = sharedUpdateButtonPhase;
+    const updateProgressTotalBytes = sharedUpdateProgressTotalBytes;
+    const updateProgressDownloadedBytes = sharedUpdateProgressDownloadedBytes;
+    const updateDownloadSpeedBytesPerSec = sharedUpdateDownloadSpeedBytesPerSec;
+    const updateLastProgressAtMs = sharedUpdateLastProgressAtMs;
+    const updateLastProgressBytes = sharedUpdateLastProgressBytes;
     const isLoading = ref(true);
     const uiStateSaver = createDebouncedUiStateSaver(300);
     const LOGGING_APPLY_DELAY_MS = 250;
@@ -628,6 +638,12 @@ export const useSettingsPanel = () => {
 
     const installUpdate = async () => {
         if (isUpdateBusyPhase(updateButtonPhase.value)) return;
+        if (updateWorkflowPromise) {
+            await updateWorkflowPromise;
+            return;
+        }
+
+        updateWorkflowPromise = (async () => {
         updateProgressTotalBytes.value = null;
         updateProgressDownloadedBytes.value = 0;
         updateDownloadSpeedBytesPerSec.value = null;
@@ -698,7 +714,22 @@ export const useSettingsPanel = () => {
             });
             updateButtonPhase.value = "installing";
             await update.install();
-            await relaunch();
+            try {
+                const shouldRelaunch = await confirm(
+                    "Update installed. Restart now to apply the new version?",
+                    {
+                        title: "Restart Required",
+                        kind: "info",
+                        okLabel: "Restart now",
+                        cancelLabel: "Later",
+                    },
+                );
+                if (shouldRelaunch) {
+                    await relaunch();
+                }
+            } catch {
+                // Update is already installed; avoid surfacing this as update failure.
+            }
         };
 
         let primaryUpdate = consumeAvailableUpdateResource();
@@ -751,6 +782,13 @@ export const useSettingsPanel = () => {
             hasAvailableUpdate.value = true;
             availableUpdateVersion.value = lastKnownVersion;
             updateButtonPhase.value = "failed";
+        }
+        })();
+
+        try {
+            await updateWorkflowPromise;
+        } finally {
+            updateWorkflowPromise = null;
         }
     };
 
