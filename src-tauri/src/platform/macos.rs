@@ -11,8 +11,9 @@ mod imp {
     use std::io;
     use std::sync::mpsc;
     use std::sync::Mutex;
-    use tauri::menu::{AboutMetadata, Menu, PredefinedMenuItem, Submenu};
+    use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
     use tauri::{Emitter, Manager};
+    use tauri_plugin_opener::OpenerExt;
 
     use crate::mpv::SoiaUtils;
     use crate::platform::macos_ffi::{
@@ -54,6 +55,10 @@ mod imp {
     }
 
     const SEEK_STEP_SETTING_LABEL: &str = "Skip Step";
+    const APP_MENU_GITHUB_ITEM_ID: &str = "app.github";
+    const APP_MENU_CHECK_UPDATE_ITEM_ID: &str = "app.check-update";
+    const OPEN_SETTINGS_PANEL_EVENT: &str = "soia-open-settings-panel";
+    const PROJECT_GITHUB_URL: &str = "https://github.com/FengZeng/soia";
 
     struct PipEventCtx {
         app_handle: tauri::AppHandle,
@@ -357,6 +362,20 @@ mod imp {
                     true,
                     &[
                         &PredefinedMenuItem::about(&app_handle, None, Some(about_metadata))?,
+                        &MenuItem::with_id(
+                            &app_handle,
+                            APP_MENU_GITHUB_ITEM_ID,
+                            "GitHub",
+                            true,
+                            None::<&str>,
+                        )?,
+                        &MenuItem::with_id(
+                            &app_handle,
+                            APP_MENU_CHECK_UPDATE_ITEM_ID,
+                            "Check Update",
+                            true,
+                            None::<&str>,
+                        )?,
                         &PredefinedMenuItem::separator(&app_handle)?,
                         &PredefinedMenuItem::services(&app_handle, None)?,
                         &PredefinedMenuItem::separator(&app_handle)?,
@@ -405,6 +424,17 @@ mod imp {
                 )?,
             ],
         )?;
+
+        app_handle.on_menu_event(|app, event| {
+            if event.id() == APP_MENU_GITHUB_ITEM_ID {
+                let _ = app.opener().open_url(PROJECT_GITHUB_URL, None::<&str>);
+                return;
+            }
+            if event.id() == APP_MENU_CHECK_UPDATE_ITEM_ID {
+                let _ = app.emit(OPEN_SETTINGS_PANEL_EVENT, ());
+                crate::check_update::check_update_now(app.clone());
+            }
+        });
 
         app_handle.set_menu(menu)?;
         Ok(())

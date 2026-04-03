@@ -21,6 +21,7 @@ const {
     updateStatusText,
     shouldShowUpdateHint,
     updateHintText,
+    openProjectGithub,
     isApplyingMediaAssociation,
     setMediaAssociationToSoia,
     installUpdate,
@@ -231,9 +232,28 @@ const shouldShowSettingItem = (item: SettingItem): boolean =>
             </div>
             <div class="panel__section">
                 <div class="panel__subtitle panel__subtitle--large">
-                    Version
+                    About
                 </div>
                 <div class="panel__table panel__table--card">
+                    <div class="panel__row panel__row--card" data-window-no-drag>
+                        <div class="panel__card-text">
+                            <div class="panel__card-title">GitHub</div>
+                        </div>
+                        <div class="panel__control panel__control--card">
+                            <div class="panel__github-actions">
+                                <a
+                                    class="panel__link-button"
+                                    href="https://github.com/FengZeng/soia"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    data-window-no-drag
+                                    @click.prevent="openProjectGithub"
+                                >
+                                    https://github.com/FengZeng/soia
+                                </a>
+                            </div>
+                        </div>
+                    </div>
                     <div class="panel__row panel__row--card">
                         <div class="panel__card-text">
                             <div class="panel__card-title">Runtime</div>

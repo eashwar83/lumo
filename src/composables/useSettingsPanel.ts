@@ -2,6 +2,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { confirm, open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type DownloadEvent, type Update } from "@tauri-apps/plugin-updater";
 import {
@@ -52,6 +53,8 @@ type UpdateButtonPhase =
     | "downloading"
     | "installing"
     | "failed";
+
+const PROJECT_GITHUB_URL = "https://github.com/FengZeng/soia";
 
 const normalizeLogLevel = (value: string): string | null => {
     const trimmed = value.trim();
@@ -390,6 +393,17 @@ export const useSettingsPanel = () => {
         });
         if (selected) {
             item.value = selected as string;
+        }
+    };
+
+    const openProjectGithub = async () => {
+        try {
+            await openUrl(PROJECT_GITHUB_URL);
+            return;
+        } catch {
+            if (typeof window !== "undefined") {
+                window.open(PROJECT_GITHUB_URL, "_blank", "noopener,noreferrer");
+            }
         }
     };
 
@@ -877,6 +891,7 @@ export const useSettingsPanel = () => {
         refreshMediaAssociationStatus,
         setMediaAssociationToSoia,
         installUpdate,
+        openProjectGithub,
         resetAllSettings,
         browseForPath,
         isFixedLogPathItem,

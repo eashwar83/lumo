@@ -137,6 +137,14 @@ pub(crate) fn check_update(app_handle: tauri::AppHandle) {
 }
 
 #[cfg(desktop)]
+pub(crate) fn check_update_now(app_handle: tauri::AppHandle) {
+    set_update_available_state(false);
+    tauri::async_runtime::spawn(async move {
+        run_tauri_updater_check(app_handle).await;
+    });
+}
+
+#[cfg(desktop)]
 async fn run_tauri_updater_check(app_handle: tauri::AppHandle) {
     use tauri_plugin_updater::UpdaterExt;
     use tauri::Emitter;

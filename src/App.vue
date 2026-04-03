@@ -243,6 +243,7 @@ let dragStartY = 0;
 let isDragPending = false;
 let unlistenAppOpenFiles: UnlistenFn | null = null;
 let unlistenWindowDragDrop: UnlistenFn | null = null;
+let unlistenOpenSettingsPanel: UnlistenFn | null = null;
 let drainPendingOpenFilesRef: (() => Promise<void>) | null = null;
 let mediaSizeQueryId = 0;
 const mediaFileSizeBytes = ref<number | null>(null);
@@ -511,6 +512,20 @@ onMounted(() => {
         }
 
         try {
+            unlistenOpenSettingsPanel = await listen(
+                "soia-open-settings-panel",
+                () => {
+                    if (player.state.media.isFileLoaded) return;
+                    clearNavSelectionDuringLoad.value = false;
+                    activePanel.value = "settings";
+                    hideHistory.value = false;
+                },
+            );
+        } catch {
+            // Ignore event-listener failures in unsupported environments.
+        }
+
+        try {
             unlistenWindowDragDrop = await getCurrentWindow().onDragDropEvent(
                 ({ payload }) => {
                     if (payload.type !== "drop") return;
@@ -534,6 +549,8 @@ onBeforeUnmount(() => {
     unlistenAppOpenFiles = null;
     unlistenWindowDragDrop?.();
     unlistenWindowDragDrop = null;
+    unlistenOpenSettingsPanel?.();
+    unlistenOpenSettingsPanel = null;
     drainPendingOpenFilesRef = null;
     window.removeEventListener("focus", onWindowFocusDrainPendingFiles);
 });
