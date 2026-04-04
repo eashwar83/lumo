@@ -5,6 +5,7 @@ import { usePlaybackController } from "./usePlaybackController";
 import { useMediaTracks } from "./useMediaTracks";
 import { usePlaybackSpeed } from "./usePlaybackSpeed";
 import { usePlaybackAdjustments } from "./usePlaybackAdjustments";
+import { useSubtitleAppearance } from "./useSubtitleAppearance";
 import { usePlaybackHistory } from "./usePlaybackHistory";
 import { usePlaylistState } from "./usePlaylistState";
 import { usePointerUiState } from "./usePointerUiState";
@@ -31,6 +32,7 @@ export const useAppBootstrap = () => {
     const tracks = useMediaTracks(() => player.state.media.url, history);
     const speed = usePlaybackSpeed();
     const adjustments = usePlaybackAdjustments();
+    const subtitleAppearance = useSubtitleAppearance();
     const playlistState = usePlaylistState();
 
     const {
@@ -153,6 +155,7 @@ export const useAppBootstrap = () => {
         tracks,
         speed,
         adjustments,
+        subtitleAppearance,
         history,
         playlistState,
         playlists,

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import type { MediaTrack } from "../../types/media";
+import type { SubtitleTarget } from "../../composables/useSubtitleState";
 import ControlSlider from "./ControlSlider.vue";
 
 const props = defineProps<{
@@ -12,6 +13,7 @@ const props = defineProps<{
     showSettingsMenu: boolean;
     audioDelay: number;
     subDelay: number;
+    secondarySubDelay: number;
     brightness: number;
     contrast: number;
     saturation: number;
@@ -21,6 +23,9 @@ const props = defineProps<{
     audioTracks: MediaTrack[];
     showAudioMenu: boolean;
     subTracks: MediaTrack[];
+    dualSubEnabled: boolean;
+    secondarySubId: MediaTrack["id"];
+    activeSubTarget: SubtitleTarget;
     showSubMenu: boolean;
     hasAudioTracks: boolean;
     hasSubTracks: boolean;
@@ -32,14 +37,16 @@ const emit = defineEmits<{
     (e: "toggle-loop-one"): void;
     (e: "set-speed", rate: number): void;
     (e: "set-audio-delay", value: number): void;
-    (e: "set-sub-delay", value: number): void;
+    (e: "set-sub-delay-for-target", payload: { target: SubtitleTarget; value: number }): void;
     (e: "set-brightness", value: number): void;
     (e: "set-contrast", value: number): void;
     (e: "set-saturation", value: number): void;
     (e: "set-gamma", value: number): void;
     (e: "set-hue", value: number): void;
     (e: "select-audio", track: MediaTrack): void;
-    (e: "select-sub", track: MediaTrack): void;
+    (e: "select-sub-track", payload: { target: SubtitleTarget; track: MediaTrack }): void;
+    (e: "set-active-sub-target", target: SubtitleTarget): void;
+    (e: "toggle-dual-sub", enabled: boolean): void;
     (e: "add-external-audio"): void;
     (e: "add-external-sub"): void;
     (e: "toggle-fullscreen"): void;
@@ -56,6 +63,53 @@ const isWindowsPlatform =
 const isPipEnabled = ref(false);
 const isTogglingPip = ref(false);
 let unlistenNativePipChanged: (() => void) | null = null;
+
+const isSameTrackId = (left: MediaTrack["id"], right: MediaTrack["id"]) =>
+    String(left) === String(right);
+const activeSubTarget = computed(() => props.activeSubTarget);
+
+const activeTrackId = computed<MediaTrack["id"]>(() =>
+    props.activeSubTarget === "primary"
+        ? props.subTracks.find((track) => track.selected)?.id ?? 0
+        : props.secondarySubId,
+);
+
+const primaryTrackId = computed<MediaTrack["id"]>(
+    () => props.subTracks.find((track) => track.selected)?.id ?? 0,
+);
+
+const isTrackDisabled = (track: MediaTrack) => {
+    if (!props.dualSubEnabled) return false;
+    if (String(track.id) === "0") return false;
+    if (props.activeSubTarget === "primary") {
+        return isSameTrackId(track.id, props.secondarySubId);
+    }
+    return isSameTrackId(track.id, primaryTrackId.value);
+};
+
+const isTrackSelectedByOtherTarget = (track: MediaTrack) => {
+    if (!props.dualSubEnabled) return false;
+    if (String(track.id) === "0") return false;
+    if (props.activeSubTarget === "primary") {
+        return isSameTrackId(track.id, props.secondarySubId);
+    }
+    return isSameTrackId(track.id, primaryTrackId.value);
+};
+
+const onSelectSubTrack = (track: MediaTrack) => {
+    emit("select-sub-track", { target: props.activeSubTarget, track });
+};
+
+const onChangeActiveSubDelay = (value: number) => {
+    emit("set-sub-delay-for-target", {
+        target: props.activeSubTarget,
+        value,
+    });
+};
+
+const onResetActiveSubDelay = () => {
+    onChangeActiveSubDelay(0);
+};
 
 const refreshPipState = async () => {
     if (!isNativePipPlatform) return;
@@ -266,60 +320,119 @@ onUnmounted(() => {
                     class="track-menu track-menu--wide"
                 >
                     <div class="track-menu__header">
-                        <span>Subtitles</span>
-                        <button
-                            class="icon-button track-menu__header-action"
-                            type="button"
-                            title="Add external subtitles"
-                            aria-label="Add external subtitles"
-                            @click.stop="emit('add-external-sub')"
-                        >
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                <path
-                                    d="M12 5v14M5 12h14"
-                                    stroke-width="2"
-                                    stroke-linecap="round"
-                                />
-                            </svg>
-                        </button>
-                    </div>
-                    <div class="track-menu__list">
-                        <button
-                            v-for="track in subTracks"
-                            :key="track.id"
-                            class="track-menu__item"
-                            :class="{ 'track-menu__item--active': track.selected }"
-                            type="button"
-                            @click="emit('select-sub', track)"
-                        >
-                            <span class="track-menu__check">
-                                <svg
-                                    v-if="track.selected"
-                                    viewBox="0 0 24 24"
-                                    fill="currentColor"
+                        <span>Subtitle</span>
+                        <div class="track-menu__header-actions">
+                            <button
+                                class="track-menu__mode-toggle"
+                                type="button"
+                                :aria-pressed="dualSubEnabled"
+                                :title="dualSubEnabled ? 'Dual subtitles' : 'Single subtitle'"
+                                @click.stop="emit('toggle-dual-sub', !dualSubEnabled)"
+                            >
+                                <span class="track-menu__mode-label">Dual</span>
+                                <span
+                                    class="track-menu__mode-switch"
+                                    :class="{ 'track-menu__mode-switch--on': dualSubEnabled }"
                                 >
+                                    <span class="track-menu__mode-thumb"></span>
+                                </span>
+                            </button>
+                            <button
+                                class="icon-button track-menu__header-action"
+                                type="button"
+                                title="Add external subtitles"
+                                aria-label="Add external subtitles"
+                                @click.stop="emit('add-external-sub')"
+                            >
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
                                     <path
-                                        d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"
+                                        d="M12 5v14M5 12h14"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
                                     />
                                 </svg>
-                            </span>
-                            <span class="track-menu__text">
-                                {{ track.title }}
-                            </span>
-                        </button>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="track-menu__list">
+                        <div v-if="dualSubEnabled" class="track-menu__sub-targets">
+                            <button
+                                class="track-menu__sub-target"
+                                :class="{
+                                    'track-menu__sub-target--active':
+                                        activeSubTarget === 'primary',
+                                }"
+                                type="button"
+                                @click="emit('set-active-sub-target', 'primary')"
+                            >
+                                PRIMARY
+                            </button>
+                            <button
+                                class="track-menu__sub-target"
+                                :class="{
+                                    'track-menu__sub-target--active':
+                                        activeSubTarget === 'secondary',
+                                }"
+                                type="button"
+                                @click="emit('set-active-sub-target', 'secondary')"
+                            >
+                                SECONDARY
+                            </button>
+                        </div>
+                        <div class="track-menu__section">
+                            <button
+                                v-for="track in subTracks"
+                                :key="track.id"
+                                class="track-menu__item"
+                                :class="{
+                                    'track-menu__item--active': isSameTrackId(
+                                        track.id,
+                                        activeTrackId,
+                                    ) && !isTrackDisabled(track),
+                                    'track-menu__item--disabled': isTrackDisabled(track),
+                                }"
+                                type="button"
+                                :disabled="isTrackDisabled(track)"
+                                @click="onSelectSubTrack(track)"
+                            >
+                                <span class="track-menu__check">
+                                    <svg
+                                        v-if="
+                                            isSameTrackId(track.id, activeTrackId) ||
+                                            isTrackSelectedByOtherTarget(track)
+                                        "
+                                        viewBox="0 0 24 24"
+                                        fill="currentColor"
+                                    >
+                                        <path
+                                            d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"
+                                        />
+                                    </svg>
+                                </span>
+                                <span class="track-menu__text">
+                                    {{ track.title }}
+                                </span>
+                            </button>
+                        </div>
                     </div>
                     <div v-if="props.hasSubTracks" class="track-menu__footer">
                         <ControlSlider
-                            label="Delay"
-                            :value="subDelay"
+                            :label="dualSubEnabled ? 'Delay' : 'Delay'"
+                            :value="
+                                dualSubEnabled
+                                    ? activeSubTarget === 'primary'
+                                        ? subDelay
+                                        : secondarySubDelay
+                                    : subDelay
+                            "
                             :min="-10"
                             :max="10"
                             :step="0.1"
                             unit="s"
                             :show-sign="true"
                             :precision="1"
-                            @change="emit('set-sub-delay', $event)"
-                            @reset="emit('set-sub-delay', 0)"
+                            @change="onChangeActiveSubDelay"
+                            @reset="onResetActiveSubDelay"
                         />
                     </div>
                 </div>
@@ -486,5 +599,126 @@ onUnmounted(() => {
 
 .pip-toggle--active {
     color: #8fb3ff;
+}
+
+.track-menu__header-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.track-menu__mode-toggle {
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.92);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border-radius: 8px;
+    padding: 4px 6px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.track-menu__mode-toggle:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.track-menu__mode-label {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.track-menu__mode-switch {
+    width: 26px;
+    height: 12px;
+    background: rgba(255, 255, 255, 0.28);
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    padding: 2px;
+    transition: background-color 0.2s ease;
+}
+
+.track-menu__mode-switch--on {
+    background: #8fb3ff;
+}
+
+.track-menu__mode-thumb {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #fff;
+    transform: translateX(0);
+    transition: transform 0.2s ease;
+}
+
+.track-menu__mode-switch--on .track-menu__mode-thumb {
+    transform: translateX(12px);
+}
+
+.track-menu__section + .track-menu__section {
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.track-menu__sub-targets {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    padding: 8px 14px 4px;
+}
+
+.track-menu__sub-target {
+    height: 28px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.78);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    transition:
+        background-color 0.2s ease,
+        border-color 0.2s ease,
+        color 0.2s ease;
+}
+
+.track-menu__sub-target:hover {
+    background: rgba(255, 255, 255, 0.11);
+}
+
+.track-menu__sub-target--active {
+    background: rgba(143, 179, 255, 0.22);
+    border-color: rgba(143, 179, 255, 0.75);
+    color: #dfeaff;
+}
+
+.track-menu__item--disabled {
+    color: rgba(255, 255, 255, 0.36);
+    cursor: not-allowed;
+}
+
+.track-menu__item--disabled:hover {
+    background: transparent;
+}
+
+.track-menu__item--disabled .track-menu__check svg {
+    opacity: 0.35;
+}
+
+.track-menu__section-label {
+    padding: 8px 16px 4px;
+    color: rgba(255, 255, 255, 0.66);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+}
+
+.track-menu__footer {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
 }
 </style>

@@ -1,5 +1,6 @@
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import type { SubtitleTarget } from "./useSubtitleState";
 
 const clamp = (value: number, min: number, max: number) =>
     Math.min(max, Math.max(min, value));
@@ -8,6 +9,7 @@ export const usePlaybackAdjustments = () => {
     const showSettingsMenu = ref(false);
     const audioDelay = ref(0);
     const subDelay = ref(0);
+    const secondarySubDelay = ref(0);
     const brightness = ref(0);
     const contrast = ref(0);
     const saturation = ref(0);
@@ -27,6 +29,26 @@ export const usePlaybackAdjustments = () => {
         const next = clamp(value, -10, 10);
         subDelay.value = next;
         await invoke("mpv_set_option_string", { name: "sub-delay", value: next });
+    };
+
+    const setSecondarySubDelay = async (value: number) => {
+        const next = clamp(value, -10, 10);
+        secondarySubDelay.value = next;
+        await invoke("mpv_set_option_string", {
+            name: "secondary-sub-delay",
+            value: next,
+        });
+    };
+
+    const setSubDelayForTarget = async (payload: {
+        target: SubtitleTarget;
+        value: number;
+    }) => {
+        if (payload.target === "secondary") {
+            await setSecondarySubDelay(payload.value);
+            return;
+        }
+        await setSubDelay(payload.value);
     };
 
     const setBrightness = async (value: number) => {
@@ -66,6 +88,7 @@ export const usePlaybackAdjustments = () => {
         showSettingsMenu,
         audioDelay,
         subDelay,
+        secondarySubDelay,
         brightness,
         contrast,
         saturation,
@@ -73,6 +96,8 @@ export const usePlaybackAdjustments = () => {
         hue,
         setAudioDelay,
         setSubDelay,
+        setSecondarySubDelay,
+        setSubDelayForTarget,
         setBrightness,
         setContrast,
         setSaturation,

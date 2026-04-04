@@ -2,6 +2,7 @@ import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { MediaTrack } from "../types/media";
+import { useSubtitleState, type SubtitleTarget } from "./useSubtitleState";
 
 type HistoryApi = {
     getExternalTracks: (path: string) => { audio: string[]; sub: string[] };
@@ -22,6 +23,7 @@ export const useMediaTracks = (
 
     const showAudioMenu = ref(false);
     const showSubMenu = ref(false);
+    const subtitleState = useSubtitleState(subTracks, showSubMenu);
     const subtitleExtensions = [
         "srt",
         "ass",
@@ -43,6 +45,8 @@ export const useMediaTracks = (
         if (!selected) return [];
         return Array.isArray(selected) ? selected : [selected];
     };
+    const isSameTrackId = (left: MediaTrack["id"], right: MediaTrack["id"]) =>
+        String(left) === String(right);
 
     const getMediaKey = (explicitUrl?: string): string | null => {
         const url = (explicitUrl ?? getCurrentMediaUrl?.() ?? "").trim();
@@ -61,15 +65,39 @@ export const useMediaTracks = (
         videoTracks.value = all.filter((t) => t.track_type === "video");
         audioTracks.value = all.filter((t) => t.track_type === "audio");
         const subs = all.filter((t) => t.track_type === "sub");
+        const previousPrimaryId = subtitleState.primarySubId.value;
+        const selectedIds = subs
+            .filter((track) => track.selected)
+            .map((track) => track.id);
+        const hasSelected = (id: MediaTrack["id"]) =>
+            selectedIds.some((selectedId) => isSameTrackId(selectedId, id));
+        const normalizedPrimaryId = (() => {
+            if (!selectedIds.length) return 0;
+            if (selectedIds.length === 1) return selectedIds[0];
+            if (previousPrimaryId !== 0 && hasSelected(previousPrimaryId)) {
+                return previousPrimaryId;
+            }
+            const nonSecondary = selectedIds.find(
+                (id) => !isSameTrackId(id, subtitleState.secondarySubId.value),
+            );
+            return nonSecondary ?? selectedIds[0];
+        })();
+        const normalizedSubs = subs.map((track) => ({
+            ...track,
+            selected:
+                normalizedPrimaryId !== 0 &&
+                isSameTrackId(track.id, normalizedPrimaryId),
+        }));
+        void subtitleState.reconcileSubtitleState(normalizedSubs);
         subTracks.value = [
             {
                 id: 0,
                 title: "None (Off)",
                 lang: "",
-                selected: !subs.some((s) => s.selected),
+                selected: normalizedPrimaryId === 0,
                 track_type: "sub",
             },
-            ...subs,
+            ...normalizedSubs,
         ];
     };
 
@@ -79,10 +107,15 @@ export const useMediaTracks = (
         await invoke("mpv_set_option_string", { name: "aid", value: track.id });
     };
 
-    const selectSub = async (track: MediaTrack) => {
-        subTracks.value.forEach((t) => (t.selected = t.id === track.id));
-        showSubMenu.value = false;
-        await invoke("mpv_set_option_string", { name: "sid", value: track.id });
+    const selectSubTrack = async (payload: {
+        target: SubtitleTarget;
+        track: MediaTrack;
+    }) => {
+        await subtitleState.selectSubTrack(payload);
+    };
+
+    const setDualSubEnabled = async (enabled: boolean) => {
+        await subtitleState.setDualSubEnabled(enabled);
     };
 
     const addExternalAudioTrack = async () => {
@@ -144,6 +177,7 @@ export const useMediaTracks = (
         subTracks.value = [];
         showAudioMenu.value = false;
         showSubMenu.value = false;
+        subtitleState.resetSubtitleState();
     };
 
     return {
@@ -153,8 +187,13 @@ export const useMediaTracks = (
         handleTracksUpdate,
         showAudioMenu,
         showSubMenu,
+        dualSubEnabled: subtitleState.dualSubEnabled,
+        secondarySubId: subtitleState.secondarySubId,
+        activeSubTarget: subtitleState.activeSubTarget,
         selectAudio,
-        selectSub,
+        selectSubTrack,
+        setDualSubEnabled,
+        setActiveSubTarget: subtitleState.setActiveSubTarget,
         addExternalAudioTrack,
         addExternalSubtitleTrack,
         applyExternalTracksForUrl,

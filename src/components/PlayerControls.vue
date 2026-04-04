@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted, ref } from "vue";
 import type { MediaTrack } from "../types/media";
+import type { SubtitleTarget } from "../composables/useSubtitleState";
 import SeekBar from "./player-controls/SeekBar.vue";
 import LeftControls from "./player-controls/LeftControls.vue";
 import RightControls from "./player-controls/RightControls.vue";
@@ -21,6 +22,7 @@ const props = defineProps<{
     showSettingsMenu: boolean;
     audioDelay: number;
     subDelay: number;
+    secondarySubDelay: number;
     brightness: number;
     contrast: number;
     saturation: number;
@@ -30,6 +32,9 @@ const props = defineProps<{
     audioTracks: MediaTrack[];
     showAudioMenu: boolean;
     subTracks: MediaTrack[];
+    dualSubEnabled: boolean;
+    secondarySubId: MediaTrack["id"];
+    activeSubTarget: SubtitleTarget;
     showSubMenu: boolean;
     hasAudioTracks: boolean;
     hasSubTracks: boolean;
@@ -46,14 +51,16 @@ const emit = defineEmits<{
     (e: "toggle-loop-one"): void;
     (e: "set-speed", rate: number): void;
     (e: "set-audio-delay", value: number): void;
-    (e: "set-sub-delay", value: number): void;
+    (e: "set-sub-delay-for-target", payload: { target: SubtitleTarget; value: number }): void;
     (e: "set-brightness", value: number): void;
     (e: "set-contrast", value: number): void;
     (e: "set-saturation", value: number): void;
     (e: "set-gamma", value: number): void;
     (e: "set-hue", value: number): void;
     (e: "select-audio", track: MediaTrack): void;
-    (e: "select-sub", track: MediaTrack): void;
+    (e: "select-sub-track", payload: { target: SubtitleTarget; track: MediaTrack }): void;
+    (e: "set-active-sub-target", target: SubtitleTarget): void;
+    (e: "toggle-dual-sub", enabled: boolean): void;
     (e: "add-external-audio"): void;
     (e: "add-external-sub"): void;
     (e: "toggle-fullscreen"): void;
@@ -218,6 +225,7 @@ onUnmounted(() => {
                         :show-settings-menu="showSettingsMenu"
                         :audio-delay="audioDelay"
                         :sub-delay="subDelay"
+                        :secondary-sub-delay="secondarySubDelay"
                         :brightness="brightness"
                         :contrast="contrast"
                         :saturation="saturation"
@@ -227,6 +235,9 @@ onUnmounted(() => {
                         :audio-tracks="audioTracks"
                         :show-audio-menu="showAudioMenu"
                         :sub-tracks="subTracks"
+                        :dual-sub-enabled="dualSubEnabled"
+                        :secondary-sub-id="secondarySubId"
+                        :active-sub-target="activeSubTarget"
                         :show-sub-menu="showSubMenu"
                         :has-audio-tracks="hasAudioTracks"
                         :has-sub-tracks="hasSubTracks"
@@ -235,14 +246,18 @@ onUnmounted(() => {
                         @toggle-loop-one="emit('toggle-loop-one')"
                         @set-speed="emit('set-speed', $event)"
                         @set-audio-delay="emit('set-audio-delay', $event)"
-                        @set-sub-delay="emit('set-sub-delay', $event)"
+                        @set-sub-delay-for-target="
+                            emit('set-sub-delay-for-target', $event)
+                        "
                         @set-brightness="emit('set-brightness', $event)"
                         @set-contrast="emit('set-contrast', $event)"
                         @set-saturation="emit('set-saturation', $event)"
                         @set-gamma="emit('set-gamma', $event)"
                         @set-hue="emit('set-hue', $event)"
                         @select-audio="emit('select-audio', $event)"
-                        @select-sub="emit('select-sub', $event)"
+                        @select-sub-track="emit('select-sub-track', $event)"
+                        @set-active-sub-target="emit('set-active-sub-target', $event)"
+                        @toggle-dual-sub="emit('toggle-dual-sub', $event)"
                         @add-external-audio="emit('add-external-audio')"
                         @add-external-sub="emit('add-external-sub')"
                         @toggle-fullscreen="emit('toggle-fullscreen')"
