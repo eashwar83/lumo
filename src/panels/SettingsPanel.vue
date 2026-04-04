@@ -2,7 +2,9 @@
 import { useSettingsPanel } from "../composables/useSettingsPanel";
 import {
     ENABLE_COMPACT_MODE_SETTING_LABEL,
+    WALLPAPER_MODE_SETTING_LABEL,
     type SettingItem,
+    type SettingGroup,
 } from "../mock/settings";
 
 const {
@@ -33,9 +35,20 @@ const {
 
 const isLinuxPlatform =
     typeof navigator !== "undefined" && /\blinux\b/i.test(navigator.userAgent);
+const isWindowsPlatform =
+    typeof navigator !== "undefined" && /\bwindows\b/i.test(navigator.userAgent);
 
 const shouldShowSettingItem = (item: SettingItem): boolean =>
-    !(isLinuxPlatform && item.label === ENABLE_COMPACT_MODE_SETTING_LABEL);
+    !(
+        (isLinuxPlatform && item.label === ENABLE_COMPACT_MODE_SETTING_LABEL) ||
+        (!isWindowsPlatform && item.label === WALLPAPER_MODE_SETTING_LABEL)
+    );
+
+const visibleItems = (group: SettingGroup): SettingItem[] =>
+    group.items.filter(shouldShowSettingItem);
+
+const shouldShowGroup = (group: SettingGroup): boolean =>
+    visibleItems(group).length > 0;
 </script>
 
 <template>
@@ -116,13 +129,14 @@ const shouldShowSettingItem = (item: SettingItem): boolean =>
                 v-for="group in settingGroups"
                 :key="group.title"
                 class="panel__section"
+                v-show="shouldShowGroup(group)"
             >
                 <div class="panel__subtitle panel__subtitle--large">
                     {{ group.title }}
                 </div>
                 <div class="panel__table panel__table--card">
                     <div
-                        v-for="item in group.items.filter(shouldShowSettingItem)"
+                        v-for="item in visibleItems(group)"
                         :key="item.label"
                         class="panel__row panel__row--card"
                     >

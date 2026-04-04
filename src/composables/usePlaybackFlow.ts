@@ -11,6 +11,7 @@ import {
     ENABLE_COMPACT_MODE_SETTING_LABEL,
     SETTINGS_UPDATED_EVENT,
     SKIP_INTRO_SECONDS_SETTING_LABEL,
+    WALLPAPER_MODE_SETTING_LABEL,
 } from "../mock/settings";
 
 type TracksApi = {
@@ -66,6 +67,7 @@ type PlaybackPreferences = {
     autoPlay: boolean;
     allowUrlInputDuringPlayback: boolean;
     compactModeEnabled: boolean;
+    wallpaperModeEnabled: boolean;
 };
 
 const DEFAULT_PLAYBACK_PREFERENCES: PlaybackPreferences = {
@@ -74,6 +76,7 @@ const DEFAULT_PLAYBACK_PREFERENCES: PlaybackPreferences = {
     autoPlay: true,
     allowUrlInputDuringPlayback: true,
     compactModeEnabled: false,
+    wallpaperModeEnabled: false,
 };
 
 const parsePlaybackPreferences = (
@@ -97,6 +100,7 @@ const parsePlaybackPreferences = (
     const allowUrlInputDuringPlaybackValue =
         getValue(ALLOW_URL_INPUT_DURING_PLAYBACK_SETTING_LABEL) ?? "On";
     const compactModeValue = getValue(ENABLE_COMPACT_MODE_SETTING_LABEL) ?? "On";
+    const wallpaperModeValue = getValue(WALLPAPER_MODE_SETTING_LABEL) ?? "Disable";
 
     return {
         skipIntroSeconds,
@@ -105,6 +109,7 @@ const parsePlaybackPreferences = (
         autoPlay: autoPlayValue === "On",
         allowUrlInputDuringPlayback: allowUrlInputDuringPlaybackValue === "On",
         compactModeEnabled: compactModeValue === "On",
+        wallpaperModeEnabled: wallpaperModeValue === "Enable",
     };
 };
 
@@ -126,6 +131,7 @@ export const usePlaybackFlow = ({
     const playbackPreferences = ref<PlaybackPreferences>({
         ...DEFAULT_PLAYBACK_PREFERENCES,
         compactModeEnabled: true,
+        wallpaperModeEnabled: false,
     });
     let loadPlaybackPreferencesPromise: Promise<void> | null = null;
 
@@ -361,6 +367,9 @@ export const usePlaybackFlow = ({
     const compactModeEnabled = computed(
         () => playbackPreferences.value.compactModeEnabled,
     );
+    const wallpaperModeEnabled = computed(
+        () => playbackPreferences.value.wallpaperModeEnabled,
+    );
 
     return {
         isLoading,
@@ -378,5 +387,6 @@ export const usePlaybackFlow = ({
         openSelectedPaths: openWithSelected,
         allowUrlInputDuringPlayback,
         compactModeEnabled,
+        wallpaperModeEnabled,
     };
 };

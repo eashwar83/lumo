@@ -99,12 +99,23 @@ const {
     openSelectedPaths,
     allowUrlInputDuringPlayback,
     compactModeEnabled,
+    wallpaperModeEnabled,
 } = playbackFlow;
 
 const isWindowsPlatform =
     typeof navigator !== "undefined" && /\bwindows\b/i.test(navigator.userAgent);
 const playerHeaderCompactModeEnabled = computed(
     () => compactModeEnabled.value || (isWindowsPlatform && isPipEnabled.value),
+);
+const shouldKeepPlaybackBackgroundOpaque = computed(
+    () =>
+        (isMacOS && isPipEnabled.value) ||
+        (isWindowsPlatform && wallpaperModeEnabled.value),
+);
+const shouldUseTransparentVideoMode = computed(
+    () =>
+        player.state.media.isFileLoaded &&
+        !shouldKeepPlaybackBackgroundOpaque.value,
 );
 const sideNavActivePanel = computed(() =>
     isLoading.value && clearNavSelectionDuringLoad.value
@@ -571,7 +582,7 @@ function onWindowFocusDrainPendingFiles() {
     <main
         class="soia-container"
         :class="{
-            'video-mode': player.state.media.isFileLoaded,
+            'video-mode': shouldUseTransparentVideoMode,
             'cursor-hidden':
                 player.state.media.isFileLoaded &&
                 !ui.showControls.value &&

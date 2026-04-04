@@ -55,6 +55,7 @@ export const LOG_LEVEL_SETTING_LABEL = "SOIA_LOG_LEVEL";
 export const SKIP_INTRO_SECONDS_SETTING_LABEL = "SKIP_INTRO_SECONDS";
 export const SEEK_STEP_SETTING_LABEL = "Skip Step";
 export const ENABLE_COMPACT_MODE_SETTING_LABEL = "ENABLE_COMPACT_MODE";
+export const WALLPAPER_MODE_SETTING_LABEL = "WALLPAPER_MODE";
 export const AUTO_PLAY_ON_OPEN_SETTING_LABEL = "Auto‑Play";
 export const AUTO_PLAY_NEXT_IN_PLAYLIST_SETTING_LABEL =
     "AUTO_PLAY_NEXT_IN_PLAYLIST";
@@ -267,6 +268,19 @@ export const defaultSettingGroups: SettingGroup[] = [
                 type: "path" as const,
                 placeholder: "Log path unavailable",
                 browseTitle: "Open log file folder",
+            },
+        ],
+    },
+    {
+        title: "Experiments",
+        items: [
+            {
+                label: WALLPAPER_MODE_SETTING_LABEL,
+                displayLabel: "Wallpaper Mode",
+                value: "Disable",
+                type: "toggle",
+                onValue: "Enable",
+                offValue: "Disable",
             },
         ],
     },

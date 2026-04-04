@@ -10,6 +10,7 @@ import {
     LOG_LEVEL_SETTING_LABEL,
     LOG_PATH_SETTING_LABEL,
     SETTINGS_UPDATED_EVENT,
+    WALLPAPER_MODE_SETTING_LABEL,
     YTDL_PATH_SETTING_LABEL,
     type SettingGroup,
     type SettingItem,
@@ -194,6 +195,8 @@ const applyVisualSettings = (groups: SettingGroup[]) => {
 export const useSettingsPanel = () => {
     const isMacOS =
         typeof navigator !== "undefined" && /mac|darwin/i.test(navigator.userAgent);
+    const isWindowsPlatform =
+        typeof navigator !== "undefined" && /\bwindows\b/i.test(navigator.userAgent);
     const settingGroups = ref(cloneSettingGroups());
     const runtimeVersions = ref<RuntimeVersions | null>(null);
     const mediaAssociationStatus = ref<MediaAssociationStatus | null>(null);
@@ -218,6 +221,8 @@ export const useSettingsPanel = () => {
     let unlistenUpdateAvailable: UnlistenFn | null = null;
     let lastAppliedLoggingRequestKey: string | null = null;
     let lastAppliedYtdlRequestKey: string | null = null;
+    let lastWallpaperModeValue: string | null = null;
+    let isWallpaperRestartPromptOpen = false;
 
     const closeUpdateResource = async (update: Update | null) => {
         if (!update) return;
@@ -370,6 +375,43 @@ export const useSettingsPanel = () => {
         await Promise.all([applyLoggingOptions(groups), applyYtdlOptions(groups)]);
     };
 
+    const findWallpaperModeValue = (groups: SettingGroup[]): string | null => {
+        const item = groups
+            .flatMap((group) => group.items)
+            .find((candidate) => candidate.label === WALLPAPER_MODE_SETTING_LABEL);
+        if (!item) return null;
+        const value = item.value.trim();
+        return value ? value : null;
+    };
+
+    const maybePromptWallpaperModeRestart = async (groups: SettingGroup[]) => {
+        if (!isWindowsPlatform || isWallpaperRestartPromptOpen) return;
+
+        const currentValue = findWallpaperModeValue(groups);
+        if (currentValue === lastWallpaperModeValue) return;
+
+        lastWallpaperModeValue = currentValue;
+        isWallpaperRestartPromptOpen = true;
+        try {
+            const shouldRelaunch = await confirm(
+                "Wallpaper Mode change will take effect after restart. Restart now?",
+                {
+                    title: "Restart Required",
+                    kind: "info",
+                    okLabel: "Restart now",
+                    cancelLabel: "Later",
+                },
+            );
+            if (shouldRelaunch) {
+                await relaunch();
+            }
+        } catch {
+            // Ignore dialog/relaunch errors and keep current runtime session.
+        } finally {
+            isWallpaperRestartPromptOpen = false;
+        }
+    };
+
     const resetAllSettings = () => {
         settingGroups.value = cloneSettingGroups();
         void initializeLoggingOptions(settingGroups.value);
@@ -422,6 +464,7 @@ export const useSettingsPanel = () => {
         const groups = mergeSettingGroups(stored?.settings?.groups);
         await initializeLoggingOptions(groups);
         settingGroups.value = groups;
+        lastWallpaperModeValue = findWallpaperModeValue(groups);
         applyVisualSettings(settingGroups.value);
         isLoading.value = false;
     };
@@ -862,6 +905,7 @@ export const useSettingsPanel = () => {
             scheduleApplyYtdlOptions();
             saveState();
             emitSettingsUpdated(settingGroups.value);
+            void maybePromptWallpaperModeRestart(settingGroups.value);
         },
         { deep: true },
     );
