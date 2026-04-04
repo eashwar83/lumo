@@ -302,7 +302,7 @@ watch(
                     <div class="panel__table panel__table--card">
                         <div class="panel__row panel__row--card">
                             <div class="panel__card-text">
-                                <div class="panel__card-title">Custom shader</div>
+                                <div class="panel__card-title">Custom Shader</div>
                                 <div class="panel__card-subtitle">
                                     Select one or more <code>.glsl</code> shader files.
                                 </div>

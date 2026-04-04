@@ -1,10 +1,22 @@
 use chrono::Utc;
 use log::{info, warn};
+use serde_json::json;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 const UPDATE_AVAILABLE_EVENT: &str = "soia-update-available";
 static HAS_AVAILABLE_UPDATE: AtomicBool = AtomicBool::new(false);
+const HOST_AUTH_CACHE_KEY: &str = "host_auth_v1";
+const HOST_AUTH_EXPIRY_SKEW_SECS: i64 = 30;
+const HOST_AUTH_CONNECT_TIMEOUT_SECS: u64 = 3;
+const HOST_AUTH_TIMEOUT_SECS: u64 = 7;
+
+#[derive(Clone, Debug)]
+pub(crate) struct HostAuthToken {
+    pub payload: String,
+    pub signature_hex: String,
+    pub expire_at: i64,
+}
 
 #[tauri::command]
 pub(crate) fn has_available_update() -> bool {
@@ -50,66 +62,136 @@ fn soia_os_code() -> String {
     )
 }
 
-fn run_daily_signal_ping(app_handle: tauri::AppHandle) {
-    let daily = match crate::store::installation_store::mark_daily_signal(&app_handle) {
-        Ok(result) => result,
+fn parse_payload_expire_at(payload: &str) -> Option<i64> {
+    payload.split(';').find_map(|part| {
+        let raw = part.strip_prefix("exp=")?;
+        raw.trim().parse::<i64>().ok()
+    })
+}
+
+fn parse_host_auth_from_json(value: &serde_json::Value) -> Option<HostAuthToken> {
+    let payload = value
+        .get("auth_payload")
+        .and_then(|v| v.as_str())
+        .or_else(|| value.get("payload").and_then(|v| v.as_str()))?
+        .trim()
+        .to_string();
+    let signature_hex = value
+        .get("auth_signature_hex")
+        .and_then(|v| v.as_str())
+        .or_else(|| value.get("signature_hex").and_then(|v| v.as_str()))
+        .or_else(|| value.get("signature").and_then(|v| v.as_str()))?
+        .trim()
+        .to_string();
+    if payload.is_empty() || signature_hex.is_empty() {
+        return None;
+    }
+    let expire_at = value
+        .get("expire_at")
+        .and_then(|v| v.as_i64())
+        .or_else(|| parse_payload_expire_at(&payload))?;
+    Some(HostAuthToken {
+        payload,
+        signature_hex,
+        expire_at,
+    })
+}
+
+fn read_cached_host_auth(app_handle: &tauri::AppHandle) -> Option<HostAuthToken> {
+    let state = crate::store::installation_store::get_installation_state(app_handle).ok()?;
+    let token = state
+        .uuid_update_data
+        .get(HOST_AUTH_CACHE_KEY)
+        .and_then(parse_host_auth_from_json)?;
+    let now = Utc::now().timestamp();
+    (token.expire_at > now + HOST_AUTH_EXPIRY_SKEW_SECS).then_some(token)
+}
+
+fn persist_host_auth(app_handle: &tauri::AppHandle, token: &HostAuthToken) {
+    let state = match crate::store::installation_store::get_installation_state(app_handle) {
+        Ok(state) => state,
         Err(err) => {
-            warn!("mark_daily_signal failed, skip daily signal ping: {err}");
+            warn!("failed to read installation state for host auth cache: {err}");
             return;
         }
     };
-    if !daily.should_run {
-        return;
+    let mut obj = state
+        .uuid_update_data
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
+    obj.insert(
+        HOST_AUTH_CACHE_KEY.to_string(),
+        json!({
+            "auth_payload": token.payload,
+            "auth_signature_hex": token.signature_hex,
+            "expire_at": token.expire_at
+        }),
+    );
+    if let Err(err) = crate::store::installation_store::update_uuid_update_data(
+        app_handle,
+        serde_json::Value::Object(obj),
+    ) {
+        warn!("failed to persist host auth cache: {err}");
     }
+}
 
-    let version_query = daily.version.unwrap_or_default();
-    if version_query.is_empty() {
-        return;
-    }
-
+fn request_host_auth_from_server(app_handle: &tauri::AppHandle) -> Option<HostAuthToken> {
+    let state = crate::store::installation_store::get_installation_state(app_handle).ok()?;
     let base_url = option_env!("SOIA_API_URL").unwrap_or("").trim();
     if base_url.is_empty() {
-        return;
+        return None;
     }
 
-    let base_url = base_url.to_string();
-    std::thread::spawn(move || {
-        let os = soia_os_code();
-        let separator = if base_url.contains('?') { '&' } else { '?' };
-        let url = format!("{base_url}{separator}{version_query}&os={os}");
+    let version_query = format!("id={}&v={}", state.install_id, env!("CARGO_PKG_VERSION"));
+    let os = soia_os_code();
+    let separator = if base_url.contains('?') { '&' } else { '?' };
+    let url = format!("{base_url}{separator}{version_query}&os={os}");
 
-        let client = match reqwest::blocking::Client::builder()
-            .connect_timeout(Duration::from_secs(3))
-            .timeout(Duration::from_secs(10))
-            .build()
-        {
-            Ok(client) => client,
-            Err(_) => {
-                return;
-            }
-        };
+    let client = reqwest::blocking::Client::builder()
+        .connect_timeout(Duration::from_secs(HOST_AUTH_CONNECT_TIMEOUT_SECS))
+        .timeout(Duration::from_secs(HOST_AUTH_TIMEOUT_SECS))
+        .build()
+        .ok()?;
 
-        let response = match client.get(&url).send() {
-            Ok(response) => response,
-            Err(_) => {
-                return;
-            }
-        };
+    let response = client.get(&url).send().ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
 
-        if !response.status().is_success() {
-            #[cfg(debug_assertions)]
-            warn!(
-                "daily signal ping request returned non-success status: {}",
-                response.status()
-            );
-            return;
+    let body = response.text().ok()?;
+    let payload: serde_json::Value = serde_json::from_str(&body).ok()?;
+    let token = parse_host_auth_from_json(&payload).or_else(|| {
+        payload
+            .get("data")
+            .and_then(parse_host_auth_from_json)
+            .or_else(|| payload.get("result").and_then(parse_host_auth_from_json))
+    })?;
+
+    persist_host_auth(app_handle, &token);
+    if let Err(err) = crate::store::installation_store::mark_daily_signal_reported(app_handle) {
+        warn!("mark_daily_signal_reported failed after successful host auth fetch: {err}");
+    }
+    Some(token)
+}
+
+pub(crate) fn run_daily_signal_ping(app_handle: &tauri::AppHandle) -> Option<HostAuthToken> {
+    if let Some(token) = read_cached_host_auth(app_handle) {
+        return Some(token);
+    }
+
+    let daily = match crate::store::installation_store::mark_daily_signal(app_handle) {
+        Ok(result) => result,
+        Err(err) => {
+            warn!("mark_daily_signal failed, skip daily signal ping: {err}");
+            return None;
         }
+    };
+    if !daily.should_run {
+        return None;
+    }
 
-        if let Err(err) = crate::store::installation_store::mark_daily_signal_reported(&app_handle)
-        {
-            warn!("mark_daily_signal_reported failed after successful ping: {err}");
-        }
-    });
+    request_host_auth_from_server(app_handle)
 }
 
 fn run_daily_update_check(app_handle: &tauri::AppHandle) {
@@ -130,10 +212,15 @@ fn run_daily_update_check(app_handle: &tauri::AppHandle) {
     }
 }
 
-pub(crate) fn check_update(app_handle: tauri::AppHandle) {
+pub(crate) fn check_update(app_handle: tauri::AppHandle) -> Option<HostAuthToken> {
     set_update_available_state(false);
-    run_daily_signal_ping(app_handle.clone());
+    let daily_signal_result = run_daily_signal_ping(&app_handle);
+    #[cfg(target_os = "macos")]
+    let host_auth = daily_signal_result;
+    #[cfg(not(target_os = "macos"))]
+    let host_auth = None;
     run_daily_update_check(&app_handle);
+    host_auth
 }
 
 #[cfg(desktop)]

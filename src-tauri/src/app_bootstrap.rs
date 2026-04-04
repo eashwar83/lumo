@@ -23,12 +23,25 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
         .get_webview_window("main")
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Failed to get main window"))?;
 
-    crate::check_update::check_update(app.handle().clone());
+    #[cfg(target_os = "macos")]
+    let host_auth_token = crate::check_update::check_update(app.handle().clone());
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = crate::check_update::check_update(app.handle().clone());
+    }
 
     let initial_scale_factor = window.scale_factor()?;
     let (render_target, display) = resolve_render_target(&window)?;
 
-    let mpv_player_handle = MpvHandle::new(render_target, display, app.handle().clone())
+    #[cfg(not(target_os = "macos"))]
+    let host_auth_token = None;
+
+    let mpv_player_handle = MpvHandle::new(
+        render_target,
+        display,
+        app.handle().clone(),
+        host_auth_token,
+    )
         .map_err(|e| Box::new(io::Error::other(e)) as Box<dyn Error>)?;
 
     app.manage(build_app_state(mpv_player_handle));

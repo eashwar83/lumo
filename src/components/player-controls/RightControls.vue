@@ -236,7 +236,7 @@ onUnmounted(() => {
                     class="track-menu track-menu--wide"
                 >
                     <div class="track-menu__header">
-                        <span>Audio Track</span>
+                        <span>Audio</span>
                         <button
                             class="icon-button track-menu__header-action"
                             type="button"

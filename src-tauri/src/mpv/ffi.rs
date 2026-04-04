@@ -187,6 +187,8 @@ unsafe extern "C" {
         window: *const c_void,
         display: *const c_void,
         mode: i32,
+        auth_payload: *const c_char,
+        auth_signature_hex: *const c_char,
     ) -> *mut SoiaUtils;
     pub(super) fn soia_utils_render_target_resize(utils: *mut SoiaUtils, width: u32, height: u32);
     pub(super) fn soia_utils_render_context_update(utils: *mut SoiaUtils);

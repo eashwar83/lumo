@@ -7,6 +7,7 @@ use super::ffi::{
     mpv_terminate_destroy, soia_utils_create, soia_utils_destroy, soia_utils_render_context_update,
     soia_utils_render_target_resize, soia_utils_uses_render_context, SoiaUtils,
 };
+use crate::check_update::HostAuthToken;
 use log::info;
 use std::ffi::{c_void, CStr, CString};
 use std::os::raw::{c_char, c_int};
@@ -51,14 +52,35 @@ fn release_mpv_context(ctx: &AtomicPtr<c_void>, terminate: bool) {
     }
 }
 
-fn release_soia_utils(utils: &AtomicPtr<SoiaUtils>) {
-    let utils = utils.swap(std::ptr::null_mut(), Ordering::AcqRel);
-    if utils.is_null() {
+fn release_soia_utils(utils_ptr: *mut SoiaUtils) {
+    if utils_ptr.is_null() {
         return;
     }
     // println!("Freeing SoiaUtils instance...");
     unsafe {
-        soia_utils_destroy(utils);
+        soia_utils_destroy(utils_ptr);
+    }
+}
+
+fn shutdown_mpv_and_soia(
+    ctx: &AtomicPtr<c_void>,
+    utils: &AtomicPtr<SoiaUtils>,
+    terminate: bool,
+) {
+    // Acquire ownership once to avoid load-then-destroy races with concurrent shutdown paths.
+    let utils_ptr = utils.swap(std::ptr::null_mut(), Ordering::AcqRel);
+    let uses_render_context = if utils_ptr.is_null() {
+        false
+    } else {
+        unsafe { soia_utils_uses_render_context(utils_ptr) != 0 }
+    };
+
+    if uses_render_context {
+        release_soia_utils(utils_ptr);
+        release_mpv_context(ctx, terminate);
+    } else {
+        release_mpv_context(ctx, terminate);
+        release_soia_utils(utils_ptr);
     }
 }
 
@@ -81,10 +103,11 @@ impl MpvHandle {
         self.soia_utils.load(Ordering::Acquire)
     }
 
-    pub fn new(
+    pub(crate) fn new(
         window: *const c_void,
         display: Option<*const c_void>,
         app_handle: AppHandle,
+        host_auth_token: Option<HostAuthToken>,
     ) -> Result<Self, String> {
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         ensure_numeric_locale_for_mpv();
@@ -141,8 +164,39 @@ impl MpvHandle {
         }
 
         let display_ptr = display.unwrap_or(std::ptr::null());
+        #[cfg(target_os = "macos")]
+        let auth_payload = host_auth_token
+            .as_ref()
+            .map(|token| token.payload.clone())
+            .or_else(|| std::env::var("SOIA_AUTH_PAYLOAD").ok())
+            .and_then(|value| CString::new(value).ok());
+        #[cfg(not(target_os = "macos"))]
+        let auth_payload = CString::new("").ok();
+        let auth_payload_ptr = auth_payload
+            .as_ref()
+            .map_or(std::ptr::null(), |value| value.as_ptr());
+        #[cfg(target_os = "macos")]
+        let auth_signature_hex = host_auth_token
+            .as_ref()
+            .map(|token| token.signature_hex.clone())
+            .or_else(|| std::env::var("SOIA_AUTH_SIGNATURE_HEX").ok())
+            .and_then(|value| CString::new(value).ok());
+        #[cfg(not(target_os = "macos"))]
+        let auth_signature_hex = CString::new("").ok();
+        let auth_signature_hex_ptr = auth_signature_hex
+            .as_ref()
+            .map_or(std::ptr::null(), |value| value.as_ptr());
         let soia_utils: *mut SoiaUtils =
-            unsafe { soia_utils_create(ctx, window, display_ptr, mode) };
+            unsafe {
+                soia_utils_create(
+                    ctx,
+                    window,
+                    display_ptr,
+                    mode,
+                    auth_payload_ptr,
+                    auth_signature_hex_ptr,
+                )
+            };
         if soia_utils.is_null() {
             unsafe { mpv_destroy(ctx) };
             return Err("Failed to create SoiaUtils instance".to_string());
@@ -358,8 +412,7 @@ impl MpvHandle {
     pub fn terminate(&self) {
         self.stop_event_listener();
         self.stop_render_loop();
-        release_soia_utils(&self.soia_utils);
-        release_mpv_context(&self.ctx, true);
+        shutdown_mpv_and_soia(&self.ctx, &self.soia_utils, true);
     }
 }
 
@@ -367,7 +420,6 @@ impl Drop for MpvHandle {
     fn drop(&mut self) {
         self.stop_event_listener();
         self.stop_render_loop();
-        release_soia_utils(&self.soia_utils);
-        release_mpv_context(&self.ctx, false);
+        shutdown_mpv_and_soia(&self.ctx, &self.soia_utils, false);
     }
 }
