@@ -12,6 +12,7 @@
 }
 
 .panel--settings {
+    height: 100%;
     user-select: none;
     -webkit-user-select: none;
     cursor: default;
