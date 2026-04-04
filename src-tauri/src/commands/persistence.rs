@@ -1,7 +1,7 @@
 use crate::store::installation_store::{DailyActionResult, InstallationState};
 use crate::store::play_history::PlayHistoryEntry;
 use crate::store::ui_state_store::UiState;
-use crate::{mpv_set_option_string_checked, with_mpv, AppState};
+use crate::{mpv_command_checked, mpv_set_option_string_checked, with_mpv, AppState};
 #[cfg(debug_assertions)]
 use log::info;
 use std::path::{Path, PathBuf};
@@ -216,6 +216,13 @@ pub(crate) struct YtdlSettingsState {
     ytdl_path: Option<String>,
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RenderingSettingsState {
+    selected_shader_files: Vec<String>,
+    active_shader_files: Vec<String>,
+}
+
 #[derive(serde::Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct MediaAssociationStatus {
@@ -403,6 +410,105 @@ fn clear_ytdl_path(mpv_guard: &crate::mpv::MpvHandle) -> Result<(), String> {
     ))
 }
 
+fn normalized_shader_file_list(input: Vec<String>) -> Vec<String> {
+    input
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .filter(|value| {
+            value
+                .rsplit('.')
+                .next()
+                .map(|suffix| suffix.eq_ignore_ascii_case("glsl"))
+                .unwrap_or(false)
+        })
+        .fold(Vec::new(), |mut acc, path| {
+            if !acc.contains(&path) {
+                acc.push(path);
+            }
+            acc
+        })
+}
+
+fn collect_glsl_files_from_dir(dir: &Path, output: &mut Vec<String>) {
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(current) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&current) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if !file_type.is_file() {
+                continue;
+            }
+            let is_glsl = path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext.eq_ignore_ascii_case("glsl"))
+                .unwrap_or(false);
+            if !is_glsl {
+                continue;
+            }
+            output.push(path.to_string_lossy().into_owned());
+        }
+    }
+}
+
+fn align_active_shaders(selected: &[String], active: Vec<String>) -> Vec<String> {
+    active
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .filter(|value| selected.contains(value))
+        .fold(Vec::new(), |mut acc, path| {
+            if !acc.contains(&path) {
+                acc.push(path);
+            }
+            acc
+        })
+}
+
+fn is_existing_glsl_file(path: &str) -> bool {
+    let file_path = PathBuf::from(path);
+    if !file_path.is_file() {
+        return false;
+    }
+    file_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("glsl"))
+        .unwrap_or(false)
+}
+
+fn filter_existing_shader_files(paths: &[String]) -> Vec<String> {
+    paths
+        .iter()
+        .filter(|path| is_existing_glsl_file(path))
+        .cloned()
+        .collect()
+}
+
+fn apply_runtime_glsl_shaders(
+    mpv_guard: &crate::mpv::MpvHandle,
+    shaders: &[String],
+) -> Result<(), String> {
+    mpv_command_checked(mpv_guard, &["change-list", "glsl-shaders", "clr", ""])?;
+    for shader in shaders {
+        mpv_command_checked(
+            mpv_guard,
+            &["change-list", "glsl-shaders", "append", shader],
+        )?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub(crate) fn open_log_directory(app: tauri::AppHandle) -> Result<(), String> {
     let log_path = resolve_current_log_path(&app)
@@ -459,6 +565,62 @@ pub(crate) fn apply_ytdl_settings(
     Ok(YtdlSettingsState {
         ytdl_path: resolved_ytdl_path,
     })
+}
+
+#[tauri::command]
+pub(crate) fn apply_rendering_settings(
+    state: tauri::State<'_, AppState>,
+    selected_shader_files: Vec<String>,
+    active_shader_files: Vec<String>,
+) -> Result<RenderingSettingsState, String> {
+    let selected = normalized_shader_file_list(selected_shader_files);
+    let existing_selected = filter_existing_shader_files(&selected);
+    let active = align_active_shaders(&existing_selected, active_shader_files);
+
+    with_mpv(&state, |mpv_guard| {
+        apply_runtime_glsl_shaders(mpv_guard, &active)?;
+        Ok(())
+    })?;
+
+    Ok(RenderingSettingsState {
+        selected_shader_files: selected,
+        active_shader_files: active,
+    })
+}
+
+#[tauri::command]
+pub(crate) fn resolve_existing_shader_files(paths: Vec<String>) -> Result<Vec<String>, String> {
+    let normalized = normalized_shader_file_list(paths);
+    Ok(filter_existing_shader_files(&normalized))
+}
+
+#[tauri::command]
+pub(crate) fn resolve_shader_candidates(paths: Vec<String>) -> Result<Vec<String>, String> {
+    let mut resolved = Vec::new();
+    for raw in paths {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let path = PathBuf::from(trimmed);
+        if path.is_dir() {
+            collect_glsl_files_from_dir(&path, &mut resolved);
+            continue;
+        }
+        if path.is_file() {
+            let is_glsl = path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext.eq_ignore_ascii_case("glsl"))
+                .unwrap_or(false);
+            if is_glsl {
+                resolved.push(path.to_string_lossy().into_owned());
+            }
+        }
+    }
+    resolved.sort();
+    resolved.dedup();
+    Ok(resolved)
 }
 
 #[tauri::command]

@@ -825,6 +825,10 @@
     gap: var(--network-row-gap, 6px);
 }
 
+.panel__row.panel__row--stacked {
+    display: block;
+}
+
 .panel__row + .panel__row {
     border-top: 1px solid rgba(0, 0, 0, 0.08);
 }
@@ -910,6 +914,183 @@
     justify-content: flex-end;
 }
 
+.panel__shader-list-wrap {
+    width: 100%;
+}
+
+.panel__shader-empty {
+    font-size: 12px;
+    color: rgba(0, 0, 0, 0.56);
+}
+
+.panel__shader-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.panel__shader-list-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 8px;
+}
+
+.panel__shader-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: none;
+}
+
+.panel__shader-toggle-icon {
+    width: 14px;
+    height: 14px;
+    opacity: 0.9;
+}
+
+@media (max-width: 760px) {
+    .panel__shader-list {
+        grid-template-columns: 1fr;
+    }
+}
+
+.panel__shader-item {
+    position: relative;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    gap: 8px 10px;
+    align-items: center;
+    padding: 7px 3px 7px 10px;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.03);
+    cursor: pointer;
+    transition:
+        border-color 0.15s ease,
+        background-color 0.15s ease,
+        box-shadow 0.15s ease;
+}
+
+.panel__shader-item:focus-visible {
+    outline: 2px solid rgba(57, 108, 216, 0.45);
+    outline-offset: 1px;
+}
+
+.panel__shader-item--active {
+    border-color: rgba(57, 108, 216, 0.58);
+    background: rgba(57, 108, 216, 0.12);
+    box-shadow: 0 0 0 1px rgba(57, 108, 216, 0.2) inset;
+}
+
+.panel__shader-select {
+    width: 18px;
+    height: 18px;
+    border: 1px solid rgba(0, 0, 0, 0.22);
+    border-radius: 999px;
+    display: grid;
+    place-items: center;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    color: transparent;
+    background: transparent;
+    padding: 0;
+    cursor: pointer;
+    transition:
+        color 0.15s ease,
+        background-color 0.15s ease,
+        border-color 0.15s ease,
+        transform 0.15s ease;
+}
+
+.panel__shader-select--active {
+    border-color: rgba(57, 108, 216, 0.95);
+    background: rgba(57, 108, 216, 0.92);
+    color: #fff;
+}
+
+.panel__shader-select--unavailable {
+    opacity: 0.45;
+}
+
+.panel__shader-item--unavailable {
+    cursor: default;
+}
+
+.panel__shader-name {
+    min-width: 0;
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(0, 0, 0, 0.78);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.panel__shader-item--unavailable {
+    opacity: 0.8;
+}
+
+.panel__shader-item--unavailable .panel__shader-name {
+    color: rgba(0, 0, 0, 0.56);
+}
+
+.panel__shader-missing {
+    grid-column: 3;
+    font-size: 10px;
+    line-height: 1;
+    padding: 3px 6px;
+    border-radius: 999px;
+    color: rgba(168, 35, 35, 0.95);
+    background: rgba(168, 35, 35, 0.14);
+    white-space: nowrap;
+}
+
+.panel__shader-remove {
+    grid-column: 4;
+    justify-self: end;
+    opacity: 0;
+    pointer-events: none;
+    width: 22px;
+    height: 24px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    transition:
+        color 0.2s ease,
+        background-color 0.2s ease,
+        transform 0.2s ease,
+        opacity 0.3s ease;
+}
+
+.panel__shader-item:hover .panel__shader-remove,
+.panel__shader-remove:focus-visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.panel__shader-remove:focus-visible {
+    transform: translateY(0);
+    outline: 2px solid rgba(57, 108, 216, 0.5);
+    outline-offset: 1px;
+}
+
+.panel__shader-remove-icon {
+    width: 16px;
+    height: 16px;
+    fill: currentColor;
+}
+
+.panel__shader-remove:hover {
+    background: rgba(0, 0, 0, 0.06);
+    color: rgba(168, 35, 35, 0.95);
+    transform: translateY(-1px);
+}
 
 .panel__action:disabled,
 .panel__reset:disabled {
@@ -1141,7 +1322,7 @@
         border-color: rgba(255, 255, 255, 0.2);
     }
 
-    :root:not([data-theme]) .panel__toggle-input:checked + .panel__toggle-track {
+:root:not([data-theme]) .panel__toggle-input:checked + .panel__toggle-track {
         background: rgba(88, 166, 255, 0.75);
         border-color: rgba(147, 197, 253, 0.9);
     }
@@ -1154,7 +1335,7 @@
         background: rgba(88, 166, 255, 0.6);
     }
 
-    :root:not([data-theme]) .panel__skeleton-row {
+:root:not([data-theme]) .panel__skeleton-row {
         background: linear-gradient(
             90deg,
             rgba(255, 255, 255, 0.06) 25%,
@@ -1162,6 +1343,54 @@
             rgba(255, 255, 255, 0.06) 63%
         );
     }
+}
+
+:root:not([data-theme]) .panel__shader-empty {
+    color: rgba(255, 255, 255, 0.64);
+}
+
+:root:not([data-theme]) .panel__shader-item {
+    border-color: rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+:root:not([data-theme]) .panel__shader-item--active {
+    border-color: rgba(147, 197, 253, 0.78);
+    background: rgba(147, 197, 253, 0.18);
+    box-shadow: 0 0 0 1px rgba(147, 197, 253, 0.28) inset;
+}
+
+:root:not([data-theme]) .panel__shader-name {
+    color: rgba(255, 255, 255, 0.9);
+}
+
+:root:not([data-theme]) .panel__shader-select {
+    border-color: rgba(255, 255, 255, 0.35);
+}
+
+:root:not([data-theme]) .panel__shader-select--active {
+    color: rgba(18, 19, 22, 0.95);
+    background: rgba(147, 197, 253, 0.92);
+    border-color: rgba(147, 197, 253, 0.95);
+}
+
+:root:not([data-theme]) .panel__shader-item--unavailable .panel__shader-name {
+    color: rgba(255, 255, 255, 0.62);
+}
+
+:root:not([data-theme]) .panel__shader-missing {
+    color: rgba(255, 188, 188, 0.98);
+    background: rgba(168, 35, 35, 0.28);
+}
+
+:root:not([data-theme]) .panel__shader-remove {
+    background: transparent;
+    color: inherit;
+}
+
+:root:not([data-theme]) .panel__shader-remove:hover {
+    background: rgba(255, 255, 255, 0.16);
+    color: rgba(255, 170, 170, 0.96);
 }
 
 :root:is([data-theme="dark"], [data-theme="graphite"]) .panel__subtitle {
@@ -1369,6 +1598,54 @@
 :root:is([data-theme="dark"], [data-theme="graphite"]) .panel__toggle-input:checked + .panel__toggle-track {
     background: rgba(88, 166, 255, 0.75);
     border-color: rgba(147, 197, 253, 0.9);
+}
+
+:root:is([data-theme="dark"], [data-theme="graphite"]) .panel__shader-empty {
+    color: rgba(255, 255, 255, 0.64);
+}
+
+:root:is([data-theme="dark"], [data-theme="graphite"]) .panel__shader-item {
+    border-color: rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+:root:is([data-theme="dark"], [data-theme="graphite"]) .panel__shader-item--active {
+    border-color: rgba(147, 197, 253, 0.78);
+    background: rgba(147, 197, 253, 0.18);
+    box-shadow: 0 0 0 1px rgba(147, 197, 253, 0.28) inset;
+}
+
+:root:is([data-theme="dark"], [data-theme="graphite"]) .panel__shader-name {
+    color: rgba(255, 255, 255, 0.9);
+}
+
+:root:is([data-theme="dark"], [data-theme="graphite"]) .panel__shader-select {
+    border-color: rgba(255, 255, 255, 0.35);
+}
+
+:root:is([data-theme="dark"], [data-theme="graphite"]) .panel__shader-select--active {
+    color: rgba(18, 19, 22, 0.95);
+    background: rgba(147, 197, 253, 0.92);
+    border-color: rgba(147, 197, 253, 0.95);
+}
+
+:root:is([data-theme="dark"], [data-theme="graphite"]) .panel__shader-item--unavailable .panel__shader-name {
+    color: rgba(255, 255, 255, 0.62);
+}
+
+:root:is([data-theme="dark"], [data-theme="graphite"]) .panel__shader-missing {
+    color: rgba(255, 188, 188, 0.98);
+    background: rgba(168, 35, 35, 0.28);
+}
+
+:root:is([data-theme="dark"], [data-theme="graphite"]) .panel__shader-remove {
+    background: transparent;
+    color: inherit;
+}
+
+:root:is([data-theme="dark"], [data-theme="graphite"]) .panel__shader-remove:hover {
+    background: rgba(255, 255, 255, 0.16);
+    color: rgba(255, 170, 170, 0.96);
 }
 
 :root:is([data-theme="dark"], [data-theme="graphite"]) .toggle__track {

@@ -1,5 +1,7 @@
 <script setup lang="ts">
+import { computed, ref, watch } from "vue";
 import { useSettingsPanel } from "../composables/useSettingsPanel";
+import { getPathDisplayName } from "../utils/getPathDisplayName";
 import {
     ENABLE_COMPACT_MODE_SETTING_LABEL,
     WALLPAPER_MODE_SETTING_LABEL,
@@ -29,6 +31,13 @@ const {
     installUpdate,
     resetAllSettings,
     browseForPath,
+    browseForCustomShaders,
+    selectedShaderFiles,
+    activeShaderFiles,
+    unavailableShaderFiles,
+    setShaderEnabled,
+    removeShaderFromList,
+    clearShaders,
     isFixedLogPathItem,
     isLoading,
 } = useSettingsPanel();
@@ -49,6 +58,49 @@ const visibleItems = (group: SettingGroup): SettingItem[] =>
 
 const shouldShowGroup = (group: SettingGroup): boolean =>
     visibleItems(group).length > 0;
+
+const getShaderDisplayName = (path: string): string => {
+    const name = getPathDisplayName(path, path);
+    return name.replace(/\.glsl$/i, "");
+};
+
+const isShaderUnavailable = (path: string): boolean =>
+    unavailableShaderFiles.value.includes(path);
+
+const getActiveShaderOrder = (path: string): number | null => {
+    const index = activeShaderFiles.value.indexOf(path);
+    return index >= 0 ? index + 1 : null;
+};
+
+const toggleShaderEnabled = (path: string) => {
+    const nextEnabled = !activeShaderFiles.value.includes(path);
+    setShaderEnabled(path, nextEnabled);
+};
+
+const SHADER_COLLAPSED_VISIBLE_COUNT = 4;
+const isShaderListExpanded = ref(false);
+const shouldShowShaderListCollapseToggle = computed(
+    () => selectedShaderFiles.value.length > SHADER_COLLAPSED_VISIBLE_COUNT,
+);
+const visibleShaderFiles = computed(() => {
+    if (
+        shouldShowShaderListCollapseToggle.value &&
+        !isShaderListExpanded.value
+    ) {
+        return selectedShaderFiles.value.slice(0, SHADER_COLLAPSED_VISIBLE_COUNT);
+    }
+    return selectedShaderFiles.value;
+});
+
+watch(
+    selectedShaderFiles,
+    (next) => {
+        if (!next.length) {
+            isShaderListExpanded.value = false;
+        }
+    },
+    { deep: true },
+);
 </script>
 
 <template>
@@ -243,6 +295,169 @@ const shouldShowGroup = (group: SettingGroup): boolean =>
                         </div>
                     </div>
                 </div>
+                <template v-if="group.title === 'Playback'">
+                    <div class="panel__subtitle panel__subtitle--large">
+                        Rendering
+                    </div>
+                    <div class="panel__table panel__table--card">
+                        <div class="panel__row panel__row--card">
+                            <div class="panel__card-text">
+                                <div class="panel__card-title">Custom shader</div>
+                                <div class="panel__card-subtitle">
+                                    Select one or more <code>.glsl</code> shader files.
+                                </div>
+                            </div>
+                            <div class="panel__control panel__control--card panel__control--stack">
+                                <div class="panel__actions panel__actions--inline">
+                                    <button
+                                        class="panel__action panel__action--ghost panel__action--compact"
+                                        type="button"
+                                        @click="browseForCustomShaders"
+                                    >
+                                        Add Shaders
+                                    </button>
+                                    <button
+                                        class="panel__action panel__action--ghost panel__action--compact"
+                                        type="button"
+                                        :disabled="!selectedShaderFiles.length"
+                                        @click="clearShaders"
+                                    >
+                                        Clear
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="panel__row panel__row--card panel__row--stacked">
+                            <div class="panel__shader-list-wrap">
+                                <div
+                                    v-if="!selectedShaderFiles.length"
+                                    class="panel__shader-empty"
+                                >
+                                    No shader files selected.
+                                </div>
+                                <div v-else class="panel__shader-list">
+                                    <div
+                                        v-for="shaderPath in visibleShaderFiles"
+                                        :key="shaderPath"
+                                        class="panel__shader-item"
+                                        :class="{
+                                            'panel__shader-item--active':
+                                                getActiveShaderOrder(shaderPath) !== null,
+                                            'panel__shader-item--unavailable':
+                                                isShaderUnavailable(shaderPath),
+                                        }"
+                                        role="checkbox"
+                                        :aria-checked="
+                                            getActiveShaderOrder(shaderPath) !== null
+                                        "
+                                        :aria-disabled="
+                                            isShaderUnavailable(shaderPath)
+                                        "
+                                        :tabindex="
+                                            isShaderUnavailable(shaderPath) ? -1 : 0
+                                        "
+                                        :title="
+                                            isShaderUnavailable(shaderPath)
+                                                ? `File not found: ${shaderPath}`
+                                                : shaderPath
+                                        "
+                                        @click="toggleShaderEnabled(shaderPath)"
+                                        @keydown.enter.prevent="
+                                            toggleShaderEnabled(shaderPath)
+                                        "
+                                        @keydown.space.prevent="
+                                            toggleShaderEnabled(shaderPath)
+                                        "
+                                    >
+                                        <span
+                                            class="panel__shader-select"
+                                            :class="{
+                                                'panel__shader-select--active':
+                                                    getActiveShaderOrder(shaderPath) !== null,
+                                                'panel__shader-select--unavailable':
+                                                    isShaderUnavailable(shaderPath),
+                                            }"
+                                            :title="
+                                                getActiveShaderOrder(shaderPath) !== null
+                                                    ? `Shader order ${getActiveShaderOrder(shaderPath)}`
+                                                    : 'Select shader'
+                                            "
+                                        >
+                                            {{ getActiveShaderOrder(shaderPath) ?? "" }}
+                                        </span>
+                                        <span class="panel__shader-name">
+                                            {{ getShaderDisplayName(shaderPath) }}
+                                        </span>
+                                        <span
+                                            v-if="isShaderUnavailable(shaderPath)"
+                                            class="panel__shader-missing"
+                                        >
+                                            Missing
+                                        </span>
+                                        <button
+                                            class="panel__shader-remove"
+                                            type="button"
+                                            aria-label="Remove shader"
+                                            @click.stop.prevent="
+                                                removeShaderFromList(shaderPath)
+                                            "
+                                        >
+                                            <svg
+                                                class="panel__shader-remove-icon"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                                stroke-linecap="round"
+                                            >
+                                                <path d="M6 6l12 12M18 6l-12 12" />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div
+                                    v-if="shouldShowShaderListCollapseToggle"
+                                    class="panel__shader-list-actions"
+                                >
+                                    <button
+                                        class="panel__action panel__action--ghost panel__action--compact panel__shader-toggle"
+                                        type="button"
+                                        @click="
+                                            isShaderListExpanded = !isShaderListExpanded
+                                        "
+                                    >
+                                        <span>
+                                            {{
+                                                isShaderListExpanded
+                                                    ? `Collapse (${selectedShaderFiles.length})`
+                                                    : `Show all (${selectedShaderFiles.length})`
+                                            }}
+                                        </span>
+                                        <svg
+                                            class="panel__shader-toggle-icon"
+                                            viewBox="0 0 20 20"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            stroke-width="2"
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            aria-hidden="true"
+                                        >
+                                            <path
+                                                v-if="isShaderListExpanded"
+                                                d="M5 12l5-5 5 5"
+                                            />
+                                            <path
+                                                v-else
+                                                d="M5 8l5 5 5-5"
+                                            />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </template>
             </div>
             <div class="panel__section">
                 <div class="panel__subtitle panel__subtitle--large">

@@ -64,14 +64,11 @@ fn release_soia_utils(utils: &AtomicPtr<SoiaUtils>) {
 
 #[cfg(target_os = "windows")]
 fn resolve_wallpaper_mode_enabled(app_handle: &AppHandle) -> bool {
-    crate::store::ui_state_store::load_setting_value(
-        app_handle,
-        WALLPAPER_MODE_SETTING_LABEL,
-    )
-    .ok()
-    .flatten()
-    .map(|value| value.eq_ignore_ascii_case(WALLPAPER_MODE_ENABLED_VALUE))
-    .unwrap_or(false)
+    crate::store::ui_state_store::load_setting_value(app_handle, WALLPAPER_MODE_SETTING_LABEL)
+        .ok()
+        .flatten()
+        .map(|value| value.eq_ignore_ascii_case(WALLPAPER_MODE_ENABLED_VALUE))
+        .unwrap_or(false)
 }
 
 impl MpvHandle {

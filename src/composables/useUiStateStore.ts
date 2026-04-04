@@ -8,6 +8,10 @@ type LoggingSettingsState = {
 type YtdlSettingsState = {
     ytdlPath: string | null;
 };
+type RenderingSettingsState = {
+    selectedShaderFiles: string[];
+    activeShaderFiles: string[];
+};
 
 let cachedUiState: UiStateObject | null = null;
 let hasCachedUiState = false;
@@ -77,6 +81,49 @@ export const applyYtdlSettings = async (
         return await invoke<YtdlSettingsState>("apply_ytdl_settings", {
             ytdlPath,
         });
+    } catch {
+        return null;
+    }
+};
+
+export const applyRenderingSettings = async (
+    selectedShaderFiles: string[],
+    activeShaderFiles: string[],
+): Promise<RenderingSettingsState | null> => {
+    try {
+        return await invoke<RenderingSettingsState>("apply_rendering_settings", {
+            selectedShaderFiles,
+            activeShaderFiles,
+        });
+    } catch {
+        return null;
+    }
+};
+
+export const resolveShaderCandidates = async (
+    paths: string[],
+): Promise<string[]> => {
+    try {
+        return await invoke<string[]>("resolve_shader_candidates", { paths });
+    } catch {
+        return [];
+    }
+};
+
+export const resolveExistingShaderFiles = async (
+    paths: string[],
+): Promise<string[]> => {
+    try {
+        return await invoke<string[]>("resolve_existing_shader_files", { paths });
+    } catch {
+        return [];
+    }
+};
+
+export const pickPathsNative = async (): Promise<string[] | null> => {
+    try {
+        const selected = await invoke<string[]>("pick_paths_native");
+        return Array.isArray(selected) ? selected : [];
     } catch {
         return null;
     }

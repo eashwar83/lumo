@@ -32,6 +32,8 @@ pub struct UiState {
     #[serde(default)]
     pub settings: Option<SettingsState>,
     #[serde(default)]
+    pub rendering: Option<RenderingState>,
+    #[serde(default)]
     pub playlist: Option<Vec<PlaylistEntry>>,
     #[serde(default)]
     pub playlists: Option<Vec<Playlist>>,
@@ -49,6 +51,7 @@ impl Default for UiState {
             active_panel: Some("home".into()),
             network: None,
             settings: None,
+            rendering: None,
             playlist: None,
             playlists: None,
             active_playlist_id: None,
@@ -64,6 +67,7 @@ impl UiState {
             active_panel: incoming.active_panel.or(self.active_panel),
             network: incoming.network.or(self.network),
             settings: incoming.settings.or(self.settings),
+            rendering: incoming.rendering.or(self.rendering),
             playlist: incoming.playlist.or(self.playlist),
             playlists: incoming.playlists.or(self.playlists),
             active_playlist_id: incoming.active_playlist_id.or(self.active_playlist_id),
@@ -103,6 +107,15 @@ pub struct NetworkState {
 pub struct SettingsState {
     #[serde(default)]
     pub groups: Option<Vec<SettingsGroup>>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RenderingState {
+    #[serde(default)]
+    pub selected_shader_files: Option<Vec<String>>,
+    #[serde(default)]
+    pub active_shader_files: Option<Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]

@@ -61,3 +61,8 @@ pub(crate) fn pick_media_paths_native(app: tauri::AppHandle) -> Result<Vec<Strin
     let selected = crate::platform::pick_media_paths_native(app)?;
     Ok(expand_media_paths(selected))
 }
+
+#[tauri::command]
+pub(crate) fn pick_paths_native(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    crate::platform::pick_media_paths_native(app)
+}

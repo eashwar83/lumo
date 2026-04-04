@@ -239,7 +239,8 @@ pub fn run() {
         .manage(OpenFileState::default())
         .setup(|app| {
             #[cfg(desktop)]
-            app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
+            app.handle()
+                .plugin(tauri_plugin_updater::Builder::new().build())?;
 
             let startup_paths = collect_open_media_paths_from_args();
             queue_open_media_paths(&app.handle(), startup_paths, false);
@@ -254,6 +255,7 @@ pub fn run() {
             commands::playback::mpv_set_option_string,
             commands::playback::load_file,
             commands::platform::pick_media_paths_native,
+            commands::platform::pick_paths_native,
             commands::playback::consume_pending_open_files,
             commands::playback::cycle_pause,
             commands::playback::seek_video,
@@ -285,6 +287,9 @@ pub fn run() {
             commands::persistence::open_log_directory,
             commands::persistence::apply_logging_settings,
             commands::persistence::apply_ytdl_settings,
+            commands::persistence::apply_rendering_settings,
+            commands::persistence::resolve_shader_candidates,
+            commands::persistence::resolve_existing_shader_files,
             commands::persistence::get_media_association_status,
             commands::persistence::set_media_association_to_soia,
             check_update::has_available_update
