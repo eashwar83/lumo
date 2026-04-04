@@ -62,6 +62,7 @@ export const AUTO_PLAY_NEXT_IN_PLAYLIST_SETTING_LABEL =
 export const ALLOW_URL_INPUT_DURING_PLAYBACK_SETTING_LABEL =
     "ALLOW_URL_INPUT_DURING_PLAYBACK";
 export const DEFAULT_SPEED_SETTING_LABEL = "Default Speed";
+export const IMAGE_DISPLAY_DURATION_SETTING_LABEL = "IMAGE_DISPLAY_DURATION";
 export const SETTINGS_UPDATED_EVENT = "soia:settings-updated";
 
 export const defaultSettingGroups: SettingGroup[] = [
@@ -134,6 +135,16 @@ export const defaultSettingGroups: SettingGroup[] = [
                 type: "slider",
                 min: 0,
                 max: 300,
+                step: 1,
+                unit: "s",
+            },
+            {
+                label: IMAGE_DISPLAY_DURATION_SETTING_LABEL,
+                displayLabel: "Image Display Duration",
+                value: "5",
+                type: "slider",
+                min: 1,
+                max: 60,
                 step: 1,
                 unit: "s",
             },

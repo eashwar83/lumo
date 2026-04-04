@@ -27,19 +27,33 @@ function writeUtf8(filePath, content) {
 }
 
 function normalizeExtensions(value, options = {}) {
-  const { allowEmpty = false } = options;
+  const { allowEmpty = false, excludeImageKind = false } = options;
   if (!Array.isArray(value)) {
-    throw new Error("mediaExtensions.json must be a JSON array of strings");
+    throw new Error("mediaExtensions.json must be a JSON array");
   }
 
   const deduped = [];
   const seen = new Set();
 
   for (const item of value) {
-    if (typeof item !== "string") {
-      throw new Error("mediaExtensions.json entries must be strings");
+    let rawExt = "";
+    let kind = "";
+    if (typeof item === "string") {
+      rawExt = item;
+    } else if (item && typeof item === "object" && typeof item.ext === "string") {
+      rawExt = item.ext;
+      kind = typeof item.kind === "string" ? item.kind.trim().toLowerCase() : "";
+    } else {
+      throw new Error(
+        "mediaExtensions.json entries must be strings or objects with an ext field",
+      );
     }
-    const normalized = item.trim().toLowerCase();
+
+    if (excludeImageKind && kind === "image") {
+      continue;
+    }
+
+    const normalized = rawExt.trim().toLowerCase();
     if (!normalized || seen.has(normalized)) {
       continue;
     }
@@ -76,7 +90,9 @@ function ensureRuntimeBase(config) {
 }
 
 function main() {
-  const sourceExtensions = normalizeExtensions(JSON.parse(readUtf8(sourcePath)));
+  const sourceExtensions = normalizeExtensions(JSON.parse(readUtf8(sourcePath)), {
+    excludeImageKind: true,
+  });
   const targetPath = selectTargetConfigPath();
   const targetLabel = path.relative(root, targetPath).replaceAll("\\", "/");
   const runtimeConfig = JSON.parse(readUtf8(targetPath));

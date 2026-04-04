@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { ref } from "vue";
 import {
     defaultSettingGroups,
+    IMAGE_DISPLAY_DURATION_SETTING_LABEL,
     LOG_LEVEL_SETTING_LABEL,
     LOG_PATH_SETTING_LABEL,
     WALLPAPER_MODE_SETTING_LABEL,
@@ -14,6 +15,7 @@ import {
 import { applyThemeFromSettingGroups } from "../../constants/theme";
 import { applyWindowDecorationsFromSettingGroups } from "../../constants/windowDecorations";
 import {
+    applyImageDisplayDuration,
     applyLoggingSettings,
     applyYtdlSettings,
     openLogDirectory,
@@ -132,6 +134,17 @@ const findYtdlPathItem = (groups: SettingGroup[]) => {
     return item?.type === "path" ? item : undefined;
 };
 
+const findImageDisplayDurationItem = (groups: SettingGroup[]) => {
+    const item = groups
+        .flatMap((group) => group.items)
+        .find(
+            (candidate) =>
+                candidate.type === "slider" &&
+                candidate.label === IMAGE_DISPLAY_DURATION_SETTING_LABEL,
+        );
+    return item?.type === "slider" ? item : undefined;
+};
+
 const toPersistedGroups = (groups: SettingGroup[]): StoredSettingGroup[] =>
     groups.map((group) => ({
         title: group.title,
@@ -151,10 +164,13 @@ export const useGeneralSettingsSection = (isWindowsPlatform: boolean) => {
     const settingGroups = ref<SettingGroup[]>(cloneSettingGroups());
     const LOGGING_APPLY_DELAY_MS = 250;
     const YTDL_APPLY_DELAY_MS = 250;
+    const IMAGE_DURATION_APPLY_DELAY_MS = 250;
     let loggingApplyTimer: number | null = null;
     let ytdlApplyTimer: number | null = null;
+    let imageDurationApplyTimer: number | null = null;
     let lastAppliedLoggingRequestKey: string | null = null;
     let lastAppliedYtdlRequestKey: string | null = null;
+    let lastAppliedImageDurationRequestKey: string | null = null;
     let lastWallpaperModeValue: string | null = null;
     let isWallpaperRestartPromptOpen = false;
 
@@ -247,8 +263,54 @@ export const useGeneralSettingsSection = (isWindowsPlatform: boolean) => {
         }, YTDL_APPLY_DELAY_MS);
     };
 
+    const buildImageDurationRequestKey = (
+        durationItem: ReturnType<typeof findImageDisplayDurationItem>,
+    ): string =>
+        JSON.stringify({
+            imageDisplayDuration: durationItem?.value.trim() ?? "",
+        });
+
+    const applyImageDurationOptions = async (groups: SettingGroup[]) => {
+        const durationItem = findImageDisplayDurationItem(groups);
+        const requestKey = buildImageDurationRequestKey(durationItem);
+        if (requestKey === lastAppliedImageDurationRequestKey) {
+            return;
+        }
+
+        const parsed = Number.parseFloat(durationItem?.value ?? "");
+        const durationSeconds =
+            Number.isFinite(parsed) && parsed > 0 ? Math.min(60, Math.max(1, parsed)) : 5;
+
+        const applied = await applyImageDisplayDuration(durationSeconds);
+        if (!applied) return;
+
+        if (durationItem) {
+            const normalized = String(Math.round(durationSeconds));
+            if (durationItem.value !== normalized) {
+                durationItem.value = normalized;
+            }
+        }
+        lastAppliedImageDurationRequestKey = buildImageDurationRequestKey(
+            findImageDisplayDurationItem(groups),
+        );
+    };
+
+    const scheduleApplyImageDurationOptions = () => {
+        if (imageDurationApplyTimer) {
+            window.clearTimeout(imageDurationApplyTimer);
+        }
+        imageDurationApplyTimer = window.setTimeout(() => {
+            void applyImageDurationOptions(settingGroups.value);
+            imageDurationApplyTimer = null;
+        }, IMAGE_DURATION_APPLY_DELAY_MS);
+    };
+
     const initializeStorageBackedOptions = async (groups: SettingGroup[]) => {
-        await Promise.all([applyLoggingOptions(groups), applyYtdlOptions(groups)]);
+        await Promise.all([
+            applyLoggingOptions(groups),
+            applyYtdlOptions(groups),
+            applyImageDurationOptions(groups),
+        ]);
     };
 
     const findWallpaperModeValue = (groups: SettingGroup[]): string | null => {
@@ -312,6 +374,7 @@ export const useGeneralSettingsSection = (isWindowsPlatform: boolean) => {
         applyVisualSettings(settingGroups.value);
         scheduleApplyLoggingOptions();
         scheduleApplyYtdlOptions();
+        scheduleApplyImageDurationOptions();
         void maybePromptWallpaperModeRestart();
     };
 
@@ -337,6 +400,10 @@ export const useGeneralSettingsSection = (isWindowsPlatform: boolean) => {
         if (ytdlApplyTimer) {
             window.clearTimeout(ytdlApplyTimer);
             ytdlApplyTimer = null;
+        }
+        if (imageDurationApplyTimer) {
+            window.clearTimeout(imageDurationApplyTimer);
+            imageDurationApplyTimer = null;
         }
     };
 

@@ -319,7 +319,7 @@ fn build_media_association_status(target_bundle_id: &str) -> MediaAssociationSta
     let mut missing_extensions = Vec::new();
     let mut checked_extensions = Vec::new();
 
-    for extension in crate::media_extensions::all() {
+    for extension in crate::media_extensions::media_association_extensions() {
         let extension = extension.as_str();
         let Some(content_type) = extension_to_content_type(extension) else {
             missing_extensions.push(extension.to_string());
@@ -646,7 +646,7 @@ pub(crate) fn set_media_association_to_soia(
         let target_bundle_id = objc2_core_foundation::CFString::from_str(&target_bundle_id_string);
         let mut failed_extensions = Vec::new();
 
-        for extension in crate::media_extensions::all() {
+        for extension in crate::media_extensions::media_association_extensions() {
             let extension = extension.as_str();
             let Some(content_type) = extension_to_content_type(extension) else {
                 failed_extensions.push(extension.to_string());

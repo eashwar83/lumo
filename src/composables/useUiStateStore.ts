@@ -86,6 +86,20 @@ export const applyYtdlSettings = async (
     }
 };
 
+export const applyImageDisplayDuration = async (
+    seconds: number,
+): Promise<boolean> => {
+    try {
+        await invoke("mpv_set_option_string", {
+            name: "image-display-duration",
+            value: seconds,
+        });
+        return true;
+    } catch {
+        return false;
+    }
+};
+
 export const applyRenderingSettings = async (
     selectedShaderFiles: string[],
     activeShaderFiles: string[],
