@@ -134,12 +134,88 @@ const loadingDownloadSpeedBps = computed(() => {
 });
 const isLoadingOverlayVisible = ref(false);
 let loadingOverlayDelayTimer: ReturnType<typeof setTimeout> | null = null;
+const seekOverlayLeftText = ref("");
+const seekOverlayRightText = ref("");
+const seekOverlayLeftTimelineText = ref("");
+const seekOverlayLeftPulseToken = ref(0);
+const seekOverlayRightPulseToken = ref(0);
+let seekOverlayTimer: ReturnType<typeof setTimeout> | null = null;
+let seekOverlayAccumulatedDelta = 0;
+let seekOverlayBaseTime = 0;
 
 const clearLoadingOverlayDelayTimer = () => {
     if (loadingOverlayDelayTimer !== null) {
         window.clearTimeout(loadingOverlayDelayTimer);
         loadingOverlayDelayTimer = null;
     }
+};
+
+const clearSeekOverlayTimer = () => {
+    if (seekOverlayTimer !== null) {
+        window.clearTimeout(seekOverlayTimer);
+        seekOverlayTimer = null;
+    }
+};
+
+const formatSeekDeltaSeconds = (delta: number) => {
+    const seconds = Math.abs(delta);
+    const rounded = Math.round(seconds * 10) / 10;
+    return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+};
+
+const clampNumber = (value: number, min: number, max: number) =>
+    Math.min(Math.max(value, min), max);
+
+const buildSeekTimelineText = (targetTime: number, duration: number) => {
+    const safeDuration =
+        Number.isFinite(duration) && duration > 0 ? duration : 0;
+    const safeTarget = clampNumber(targetTime, 0, safeDuration);
+    return `${player.formatTime(safeTarget)} / ${player.formatTime(safeDuration)}`;
+};
+
+const showSeekOverlay = (delta: number) => {
+    const hasActiveOverlay = seekOverlayTimer !== null;
+    const hasSameDirection =
+        seekOverlayAccumulatedDelta === 0 ||
+        Math.sign(seekOverlayAccumulatedDelta) === Math.sign(delta);
+    if (!(hasActiveOverlay && hasSameDirection)) {
+        seekOverlayBaseTime = player.state.playback.currentTime;
+    }
+    seekOverlayAccumulatedDelta =
+        hasActiveOverlay && hasSameDirection
+            ? seekOverlayAccumulatedDelta + delta
+            : delta;
+    clearSeekOverlayTimer();
+    seekOverlayLeftText.value = "";
+    seekOverlayRightText.value = "";
+    seekOverlayLeftTimelineText.value = "";
+    
+    const seekTargetTime = seekOverlayBaseTime + seekOverlayAccumulatedDelta;
+    const timelineText = buildSeekTimelineText(
+        seekTargetTime,
+        player.state.playback.duration,
+    );
+    if (seekOverlayAccumulatedDelta < 0) {
+        seekOverlayLeftText.value = `- ${formatSeekDeltaSeconds(
+            seekOverlayAccumulatedDelta,
+        )}`;
+        seekOverlayLeftTimelineText.value = timelineText;
+        seekOverlayLeftPulseToken.value += 1;
+    } else if (seekOverlayAccumulatedDelta > 0) {
+        seekOverlayRightText.value = `+ ${formatSeekDeltaSeconds(
+            seekOverlayAccumulatedDelta,
+        )}`;
+        seekOverlayLeftTimelineText.value = timelineText;
+        seekOverlayRightPulseToken.value += 1;
+    }
+    seekOverlayTimer = window.setTimeout(() => {
+        seekOverlayLeftText.value = "";
+        seekOverlayRightText.value = "";
+        seekOverlayLeftTimelineText.value = "";
+        seekOverlayTimer = null;
+        seekOverlayAccumulatedDelta = 0;
+        seekOverlayBaseTime = 0;
+    }, 700);
 };
 
 const {
@@ -227,6 +303,7 @@ const { onKeydown, onDoubleClick } = usePlaybackShortcuts(
     },
     onToggleFullscreen,
     toggleInfo,
+    showSeekOverlay,
 );
 
 const DRAG_THRESHOLD_PX = 4;
@@ -555,6 +632,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
     clearLoadingOverlayDelayTimer();
+    clearSeekOverlayTimer();
     clearWindowDragCandidate();
     unlistenAppOpenFiles?.();
     unlistenAppOpenFiles = null;
@@ -638,6 +716,12 @@ function onWindowFocusDrainPendingFiles() {
                 nowPlaying.showStatusOverlay.value
             "
             :status-overlay-mode="nowPlaying.statusOverlayMode.value"
+            :seek-overlay-left-text="seekOverlayLeftText"
+            :seek-overlay-right-text="seekOverlayRightText"
+            :seek-overlay-left-timeline-text="seekOverlayLeftTimelineText"
+            :hide-seek-timeline="ui.showControls.value"
+            :seek-overlay-left-pulse-token="seekOverlayLeftPulseToken"
+            :seek-overlay-right-pulse-token="seekOverlayRightPulseToken"
         />
 
         <MainPanels

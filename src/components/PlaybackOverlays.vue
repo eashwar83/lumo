@@ -8,6 +8,12 @@ const props = defineProps<{
     loadingSpeedBps?: number | null;
     showStatusOverlay: boolean;
     statusOverlayMode: StatusOverlayMode;
+    seekOverlayLeftText?: string;
+    seekOverlayRightText?: string;
+    seekOverlayLeftTimelineText?: string;
+    hideSeekTimeline?: boolean;
+    seekOverlayLeftPulseToken?: number;
+    seekOverlayRightPulseToken?: number;
 }>();
 
 const loadingSpeedText = computed(() => {
@@ -21,6 +27,23 @@ const loadingSpeedText = computed(() => {
     }
     return `${Math.round(speed)} B/s`;
 });
+
+const parseSeekOverlayText = (text?: string) => {
+    if (!text) return null;
+    const trimmed = text.trim();
+    if (!trimmed) return null;
+    const sign = trimmed.startsWith("-") ? "-" : "+";
+    const value = trimmed.replace(/^[-+]\s*/, "");
+    if (!value) return null;
+    return { sign, value };
+};
+
+const seekOverlayLeftDisplay = computed(() =>
+    parseSeekOverlayText(props.seekOverlayLeftText),
+);
+const seekOverlayRightDisplay = computed(() =>
+    parseSeekOverlayText(props.seekOverlayRightText),
+);
 </script>
 
 <template>
@@ -57,6 +80,54 @@ const loadingSpeedText = computed(() => {
             </div>
         </div>
     </transition>
+
+    <div class="seek-overlay" aria-hidden="true">
+        <transition name="fade-in">
+            <div
+                v-if="seekOverlayLeftDisplay"
+                :key="`left-${seekOverlayLeftPulseToken ?? 0}`"
+                class="seek-overlay__hint is-left"
+            >
+                <span
+                    class="seek-overlay__sign"
+                    :class="
+                        seekOverlayLeftDisplay.sign === '+'
+                            ? 'is-plus'
+                            : 'is-minus'
+                    "
+                    aria-hidden="true"
+                ></span>
+                <span>{{ seekOverlayLeftDisplay.value }}</span>
+            </div>
+        </transition>
+        <transition name="fade-in">
+            <div
+                v-if="seekOverlayRightDisplay"
+                :key="`right-${seekOverlayRightPulseToken ?? 0}`"
+                class="seek-overlay__hint is-right"
+            >
+                <span
+                    class="seek-overlay__sign"
+                    :class="
+                        seekOverlayRightDisplay.sign === '+'
+                            ? 'is-plus'
+                            : 'is-minus'
+                    "
+                    aria-hidden="true"
+                ></span>
+                <span>{{ seekOverlayRightDisplay.value }}</span>
+            </div>
+        </transition>
+
+        <transition name="fade-in">
+            <div
+                v-if="seekOverlayLeftTimelineText && !hideSeekTimeline"
+                class="seek-overlay__timeline is-left"
+            >
+                {{ seekOverlayLeftTimelineText }}
+            </div>
+        </transition>
+    </div>
 </template>
 
 <style scoped>
@@ -108,6 +179,107 @@ const loadingSpeedText = computed(() => {
     width: 82px;
     height: 82px;
     display: block;
+}
+
+.seek-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 132;
+    pointer-events: none;
+}
+
+.seek-overlay__hint {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 5ch;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55ch;
+    padding: 0;
+    color: rgba(255, 255, 255, 0.96);
+    font-size: 28px;
+    font-family:
+        "SF Pro Display",
+        "SF Pro Text",
+        "Segoe UI",
+        "PingFang SC",
+        "Hiragino Sans GB",
+        Roboto,
+        Arial,
+        sans-serif;
+    font-weight: 500;
+    line-height: 1;
+    text-align: left;
+    white-space: pre;
+    font-variant-numeric: tabular-nums;
+}
+
+.seek-overlay__sign {
+    position: relative;
+    width: 0.52em;
+    height: 0.52em;
+    flex: 0 0 auto;
+}
+
+.seek-overlay__sign::before,
+.seek-overlay__sign::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    background: currentColor;
+    transform: translate(-50%, -50%);
+    border-radius: 999px;
+}
+
+.seek-overlay__sign::before {
+    width: 100%;
+    height: 0.1em;
+}
+
+.seek-overlay__sign.is-minus::before {
+    width: 93%;
+}
+
+.seek-overlay__sign.is-plus::after {
+    width: 0.1em;
+    height: 100%;
+}
+
+.seek-overlay__sign.is-minus::after {
+    display: none;
+}
+
+.seek-overlay__hint.is-left {
+    left: clamp(20px, 8vw, 140px);
+}
+
+.seek-overlay__hint.is-right {
+    right: clamp(20px, 8vw, 140px);
+}
+
+.seek-overlay__timeline {
+    position: absolute;
+    bottom: clamp(10px, 2.2vh, 24px);
+    font-size: 14px;
+    font-family:
+        "SF Pro Text",
+        "Segoe UI",
+        "PingFang SC",
+        "Hiragino Sans GB",
+        Roboto,
+        Arial,
+        sans-serif;
+    font-weight: 500;
+    line-height: 1.1;
+    letter-spacing: 0.01em;
+    color: rgba(255, 255, 255, 0.9);
+    font-variant-numeric: tabular-nums;
+}
+
+.seek-overlay__timeline.is-left {
+    left: clamp(8px, 1.8vw, 20px);
 }
 
 .fade-in-enter-active,
@@ -166,6 +338,14 @@ const loadingSpeedText = computed(() => {
         inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
+:root[data-theme="light"] .seek-overlay__hint {
+    color: rgba(27, 39, 54, 0.92);
+}
+
+:root[data-theme="light"] .seek-overlay__timeline {
+    color: rgba(27, 39, 54, 0.86);
+}
+
 :root[data-theme="light"] .loading-spinner {
     border-color: rgba(0, 0, 0, 0.2);
     border-top-color: rgba(57, 108, 216, 0.78);
@@ -186,6 +366,14 @@ const loadingSpeedText = computed(() => {
     box-shadow:
         0 20px 36px rgba(0, 0, 0, 0.42),
         inset 0 1px 0 rgba(188, 196, 208, 0.08);
+}
+
+:root[data-theme="graphite"] .seek-overlay__hint {
+    color: rgba(235, 241, 249, 0.95);
+}
+
+:root[data-theme="graphite"] .seek-overlay__timeline {
+    color: rgba(235, 241, 249, 0.9);
 }
 
 :root[data-theme="graphite"] .loading-spinner {

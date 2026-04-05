@@ -41,6 +41,7 @@ export const usePlaybackShortcuts = (
     player: PlaybackShortcutApi,
     onToggleFullscreen: () => Promise<void>,
     onToggleInfo: () => void,
+    onSeekByArrow?: (deltaSeconds: number) => void,
 ) => {
     let clickTimer: number | null = null;
     const seekStepSeconds = ref(DEFAULT_SEEK_STEP_SECONDS);
@@ -132,6 +133,7 @@ export const usePlaybackShortcuts = (
             event.code === "ArrowLeft"
                 ? -seekStepSeconds.value
                 : seekStepSeconds.value;
+        onSeekByArrow?.(delta);
         await player.seekRelative(delta);
     };
 
