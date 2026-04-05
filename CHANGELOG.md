@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.4] - 2026-04-05
+
+### Features
+
+- Added dual subtitles support.
+- Added custom shader support.
+- Added experimental Wallpaper mode on Windows.
+- Added image playback support for common formats, including playlist playback and Wallpaper mode combinations.
+
+### Fixes
+
+- Fixed a potential crash when quitting the app during playback.
+
 ## [0.1.2] - 2026-03-30
 
 ### Fixes

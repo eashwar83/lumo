@@ -6,31 +6,42 @@
 </h1>
 
 <h3 align="center">
-A cross-platform media player based on <a href="https://github.com/tauri-apps/tauri">Tauri 2.0</a>.
+Minimalist Design. Maximum Performance.
 </h3>
 
+[**Download Latest Release**](https://github.com/FengZeng/soia/releases) | [**Report a Bug**](https://github.com/FengZeng/soia/issues)
+
 ---
-Soia is a cross-platform media player built with Tauri 2.0, Vue 3, TypeScript, Rust, and libmpv.
+Experience your media library like never before. **Soia** combines a sleek Vue 3 interface with a robust Rust backend to support everything from local Dolby Vision files to remote WebDAV streams—all in one elegant, cross-platform package.
 
-## Features
+## ✨ Key Features
 
-- Play local video files with mpv-backed playback.
-- Picture in Picture (PiP) support on macOS and Windows.
-- Borderless window mode on macOS, Windows, and Linux (Ubuntu Wayland).
-- Support HDR and Dolby Vision playback on compatible media and hardware (currently not supported on Linux).
-- Keep playback history with resume position and pin-to-top support.
-- Manage multiple playlists with sort modes and loop/shuffle behaviors.
-- Browse and stream media from WebDAV servers.
-- Show a buffering progress bar for network video playback.
-- Show current download speed when network video buffering is paused.
-- Configure playback preferences (seek step, default speed, auto-play, skip intro).
-- Platform integrations (currently macOS) for media keys, Now Playing metadata, and artwork capture.
+### 🎬 Superior Playback
+
+- Hardware Acceleration: Powered by libmpv for smooth playback, including 4K, HDR, and Dolby Vision on supported hardware (currently not supported on Linux).
+- Picture in Picture (PiP): Multi-task effortlessly on macOS and Windows.
+- Custom Shaders: Enhance your visual experience with high-quality scaling and processing.
+- Dual Subtitles: Watch with bilingual subtitle workflows more comfortably.
+
+### ☁️ Cloud & Local Integration
+
+- Stream via WebDAV: Browse and play your remote media library with ease.
+- Smart Buffering: Visual progress bars and real-time download speed for network streams.
+- Library Management: History tracking with resume position, pin-to-top, and robust multiple playlist support.
+- Multiple Playlists: Create and switch between playlists, each with sort, loop, and shuffle modes for flexible media sessions.
+
+### 💻 Platform Native Experience
+
+- Deep Integration: Native media keys, Now Playing metadata, and artwork capture (macOS).
+- Modern UI: Borderless window support across macOS, Windows, and Linux (Wayland).
+- Experimental Wallpaper Mode (Windows): Combine wallpaper playback with playlists and image media.
+- Playback Preferences: Configure seek step, default speed, auto-play, and skip-intro behaviors.
 
 ## Install
 
 Download from the [release page](https://github.com/FengZeng/soia/releases).
 
-Or you can build it yourself. Support macOS 10.15+.
+Or you can build it yourself. Support macOS 10.15+, Windows, and Linux(Ubuntu).
 Current Linux builds target Ubuntu Wayland sessions only (`X11` is not supported at this time).
 
 ## FAQ
@@ -51,103 +62,57 @@ sudo xattr -r -d com.apple.quarantine /Applications/Soia.app
 - Playback engine: libmpv
 - Persistence: SQLite (`media.db`) + JSON state files
 
-## Requirements
-
-- Node.js 18+
-- pnpm 10.x
-- Rust stable toolchain
-- Tauri build prerequisites for your platform
-- Network access to download prebuilt `libmpv` release assets
-
 ## Getting Started
 
-1. Install dependencies:
+1. Prerequisites
 
-```bash
-pnpm install
-```
+   Ensure you have the following installed:
 
-`pnpm install` runs `setup:libs` automatically, so runtime libraries are prepared by default.
-`setup:libs` goes through `scripts/setup_runtime_libs.mjs` as the unified entrypoint.
-macOS runtime frameworks are generated into `src-tauri/tauri.runtime.macos.json` (runtime file, not hand-edited).
-Current implementation status:
-- `darwin`: implemented (`scripts/setup_runtime_libs_macos.sh`)
-- `linux`: implemented (`scripts/setup_runtime_libs_linux.sh`)
-- `win32`: implemented (`scripts/setup_runtime_libs_windows.mjs`)
-- `android`: TODO placeholder (will be dispatched by `setup_runtime_libs.mjs`)
-When running implicitly from `pnpm install`, Android is currently skipped (no failure).
+   - Node.js 18+ & pnpm 10.x
+   - Rust (stable toolchain)
+   - Tauri build prerequisites for your specific platform
 
-2. Start the app in development mode:
+2. Setup
 
-```bash
-pnpm tauri dev
-```
+   ```bash
+   # Automatically prepares runtime libs
+   pnpm install
+   ```
 
-`scripts/run_tauri.mjs` will auto-inject runtime library search paths for `dev`
-(`DYLD_FALLBACK_LIBRARY_PATH` on macOS, `LD_LIBRARY_PATH` on Linux, `PATH` on Windows).
-On macOS `dev/build`, it also auto-merges `src-tauri/tauri.runtime.macos.json` via `tauri --config`.
+3. Run
 
-If you want to use a local bundled `mpv + dependencies` directory for dev testing:
-
-```bash
-pnpm setup:libs /absolute/path/to/mpv-bundle
-```
-
-Optional (frontend only):
-
-```bash
-pnpm dev
-```
-
+   ```bash
+   # Launches with auto-injected library paths
+   pnpm tauri dev
+   ```
 ## Build and Bundle
 
-- Build frontend assets:
+### Frontend
 
 ```bash
 pnpm build
 ```
 
-- Build macOS app bundle (debug):
+### macOS
 
 ```bash
 pnpm bundle:mac:debug
-```
-
-- Build macOS app bundle + package DMG (release):
-
-```bash
 pnpm bundle:mac:release
 ```
 
-macOS bundle flow also runs:
-
-- `scripts/bundle_runtime_libs_macos.sh` to copy/sign non-system dylibs into the app bundle
-- `scripts/bundle_dmg_macos.sh` to create a distributable DMG
-
-- Build Linux bundles:
+### Linux
 
 ```bash
 pnpm bundle:linux:debug
 pnpm bundle:linux:release
 ```
 
-Linux bundle flow runs `scripts/bundle_runtime_libs_linux.mjs` after `tauri build`.
-Linux release artifacts are named with `Wayland` (for example: `Soia-vX.Y.Z-Linux-x64-Wayland.deb`)
-to indicate the current Linux target is Wayland-only.
-
-- Build Windows bundles:
+### Windows
 
 ```bash
 pnpm bundle:win:debug
 pnpm bundle:win:release
 ```
-
-Windows bundle flow uses `src-tauri/tauri.windows.conf.json` + `src-tauri/windows/hooks.nsh`
-to include mpv DLLs and copy them next to `Soia.exe` during NSIS install.
-
-Linux bundle post-processing expects runtime manifests:
-
-- `src-tauri/libs/runtime-libs.linux.json`
 
 ## Keyboard Shortcuts
 
@@ -205,15 +170,6 @@ pnpm setup:libs
   - `https://github.com/FengZeng/mpv/releases/tag/v0.41.0-r0`
   - or set `MPV_RELEASE_ASSET_URL` to a direct asset URL and retry.
 
-- If you need to explicitly test platform dispatch in the unified entrypoint:
-
-```bash
-node ./scripts/setup_runtime_libs.mjs --platform darwin
-node ./scripts/setup_runtime_libs.mjs --platform linux
-node ./scripts/setup_runtime_libs.mjs --platform win32
-node ./scripts/setup_runtime_libs.mjs --platform android
-```
-
 - If Linux/Windows bundle scripts report missing runtime manifest, generate it on the target platform:
 
 ```bash
@@ -232,6 +188,14 @@ Equivalent environment-variable form:
 ```bash
 MPV_LOCAL_BUNDLE_DIR=/absolute/path/to/mpv-bundle pnpm setup:libs
 ```
+
+---
+
+## 👤 Author & Maintainer
+
+**Soia** is an independent, **solo project** developed and maintained by **[@FengZeng](https://github.com/FengZeng)**.
+
+As a single developer balancing performance and features across macOS, Windows, and Linux, your support means the world to me. If Soia has improved your media experience, please consider giving it a **⭐ Star**—it's the best way to keep the project growing!
 
 ## License
 
