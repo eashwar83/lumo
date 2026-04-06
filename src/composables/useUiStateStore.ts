@@ -58,6 +58,13 @@ export const saveUiState = async (state: UiStateObject): Promise<void> => {
     }
 };
 
+export const factoryReset = async (): Promise<void> => {
+    await invoke("factory_reset");
+    cachedUiState = null;
+    hasCachedUiState = false;
+    pendingLoad = null;
+};
+
 export const openLogDirectory = async (): Promise<void> => {
     await invoke("open_log_directory");
 };

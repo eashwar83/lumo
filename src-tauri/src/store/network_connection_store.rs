@@ -112,3 +112,9 @@ pub fn find_network_connection(
         .find(|item| item.id == connection_id);
     connection.ok_or_else(|| format!("Connection {} not found", connection_id))
 }
+
+pub fn clear_network_connections(app: &tauri::AppHandle) -> Result<(), String> {
+    let path = connections_file_path(app)?;
+    let empty_connections: Vec<NetworkConnectionRecord> = Vec::new();
+    json_io::write_json(&path, &empty_connections)
+}

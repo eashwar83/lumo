@@ -881,6 +881,16 @@
     transform: translateY(-1px);
 }
 
+.panel__reset--danger {
+    border-color: rgba(170, 34, 34, 0.35);
+    color: #a82222;
+}
+
+.panel__reset--danger:hover {
+    border-color: rgba(170, 34, 34, 0.55);
+    background: rgba(170, 34, 34, 0.08);
+}
+
 .panel__link-button {
     border: none;
     padding: 0;
@@ -1263,6 +1273,16 @@
         background: rgba(255, 255, 255, 0.1);
     }
 
+    :root:not([data-theme]) .panel__reset--danger {
+        border-color: rgba(255, 130, 130, 0.45);
+        color: rgba(255, 168, 168, 0.95);
+    }
+
+    :root:not([data-theme]) .panel__reset--danger:hover {
+        border-color: rgba(255, 150, 150, 0.62);
+        background: rgba(255, 140, 140, 0.18);
+    }
+
     :root:not([data-theme]) .panel__table {
         border-color: rgba(255, 255, 255, 0.12);
     }
@@ -1534,6 +1554,16 @@
 :root:is([data-theme="dark"], [data-theme="graphite"]) .panel__reset:hover {
     border-color: rgba(255, 255, 255, 0.4);
     background: rgba(255, 255, 255, 0.1);
+}
+
+:root:is([data-theme="dark"], [data-theme="graphite"]) .panel__reset--danger {
+    border-color: rgba(255, 130, 130, 0.45);
+    color: rgba(255, 168, 168, 0.95);
+}
+
+:root:is([data-theme="dark"], [data-theme="graphite"]) .panel__reset--danger:hover {
+    border-color: rgba(255, 150, 150, 0.62);
+    background: rgba(255, 140, 140, 0.18);
 }
 
 :root:is([data-theme="dark"], [data-theme="graphite"]) .panel__table {

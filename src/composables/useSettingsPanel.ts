@@ -1,6 +1,12 @@
 import { onMounted, onUnmounted, ref, watch } from "vue";
+import { confirm } from "@tauri-apps/plugin-dialog";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { SETTINGS_UPDATED_EVENT } from "../mock/settings";
-import { createDebouncedUiStateSaver, loadUiState } from "./useUiStateStore";
+import {
+    createDebouncedUiStateSaver,
+    factoryReset as invokeFactoryReset,
+    loadUiState,
+} from "./useUiStateStore";
 import {
     useGeneralSettingsSection,
     type StoredSettingGroup,
@@ -18,6 +24,7 @@ export const useSettingsPanel = () => {
         typeof navigator !== "undefined" && /\bwindows\b/i.test(navigator.userAgent);
 
     const isLoading = ref(true);
+    const isFactoryResetInProgress = ref(false);
     const uiStateSaver = createDebouncedUiStateSaver(300);
 
     const general = useGeneralSettingsSection(isWindowsPlatform);
@@ -60,6 +67,30 @@ export const useSettingsPanel = () => {
     const resetAllSettings = () => {
         general.resetGeneralSettings();
         rendering.resetRenderingSettings();
+    };
+
+    const factoryReset = async () => {
+        if (isFactoryResetInProgress.value) return;
+
+        const confirmed = await confirm(
+            "Factory reset will erase local history, playlists, settings, and network records. UUID will be kept. Continue?",
+            {
+                title: "Factory Reset",
+                kind: "warning",
+                okLabel: "Reset and Restart",
+                cancelLabel: "Cancel",
+            },
+        ).catch(() => false);
+
+        if (!confirmed) return;
+
+        isFactoryResetInProgress.value = true;
+        try {
+            await invokeFactoryReset();
+            await relaunch();
+        } catch {
+            isFactoryResetInProgress.value = false;
+        }
     };
 
     onMounted(() => {
@@ -125,6 +156,8 @@ export const useSettingsPanel = () => {
         installUpdate: update.installUpdate,
         openProjectGithub: about.openProjectGithub,
         resetAllSettings,
+        factoryReset,
+        isFactoryResetInProgress,
         browseForPath: general.browseForPath,
         browseForCustomShaders: rendering.browseForCustomShaders,
         selectedShaderFiles: rendering.selectedShaderFiles,

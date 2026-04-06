@@ -49,6 +49,11 @@ pub(crate) fn update_uuid_update_data(
 }
 
 #[tauri::command]
+pub(crate) fn factory_reset(app: tauri::AppHandle) -> Result<(), String> {
+    crate::store::installation_store::factory_reset(&app)
+}
+
+#[tauri::command]
 pub(crate) fn mark_daily_signal(app: tauri::AppHandle) -> Result<DailyActionResult, String> {
     crate::store::installation_store::mark_daily_signal(&app)
 }

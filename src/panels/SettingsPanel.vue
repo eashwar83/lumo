@@ -30,6 +30,8 @@ const {
     setMediaAssociationToSoia,
     installUpdate,
     resetAllSettings,
+    factoryReset,
+    isFactoryResetInProgress,
     browseForPath,
     browseForCustomShaders,
     selectedShaderFiles,
@@ -493,6 +495,25 @@ watch(
                                 · mpv {{ runtimeVersions?.mpvVersion ?? "Unavailable" }}
                                 · FFmpeg {{ runtimeVersions?.ffmpegVersion ?? "Unavailable" }}
                             </span>
+                        </div>
+                    </div>
+                    <div class="panel__row panel__row--card">
+                        <div class="panel__card-text">
+                            <div class="panel__card-title">Clear All Local Data</div>
+                        </div>
+                        <div class="panel__control panel__control--card">
+                            <button
+                                class="panel__reset panel__reset--danger"
+                                type="button"
+                                :disabled="isFactoryResetInProgress"
+                                @click="factoryReset"
+                            >
+                                {{
+                                    isFactoryResetInProgress
+                                        ? "Resetting..."
+                                        : "Factory Reset"
+                                }}
+                            </button>
                         </div>
                     </div>
                 </div>

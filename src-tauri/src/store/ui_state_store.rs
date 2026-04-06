@@ -1,6 +1,7 @@
 use crate::store::{json_io, playback_store, storage_paths};
 use log::info;
 use serde::{Deserialize, Serialize};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
@@ -220,5 +221,22 @@ pub fn save_ui_state(app: &tauri::AppHandle, state: UiState) -> Result<(), Strin
     let merged = existing.merge(state);
     json_io::write_json(&path, &merged)?;
     store_ui_state_cache(&merged);
+    Ok(())
+}
+
+pub fn reset_ui_state(app: &tauri::AppHandle) -> Result<(), String> {
+    let path = ui_state_file_path(app)?;
+    let legacy_path = legacy_ui_state_file_path(app)?;
+
+    if path.exists() {
+        fs::remove_file(&path).map_err(|e| e.to_string())?;
+    }
+    if legacy_path.exists() {
+        fs::remove_file(&legacy_path).map_err(|e| e.to_string())?;
+    }
+
+    if let Ok(mut cache) = ui_state_cache().lock() {
+        *cache = Some(UiState::default());
+    }
     Ok(())
 }

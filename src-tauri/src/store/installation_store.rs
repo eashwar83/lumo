@@ -1,6 +1,8 @@
 use crate::store::media_db;
+use crate::store::storage_paths;
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use std::fs;
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -95,6 +97,101 @@ pub fn mark_daily_update_check_success(app: &tauri::AppHandle) -> Result<(), Str
              updated_at = ?2
          WHERE singleton = 1",
     )
+}
+
+pub fn factory_reset(app: &tauri::AppHandle) -> Result<(), String> {
+    let mut conn = media_db::open_db(app)?;
+    let now = media_db::now_millis();
+    let (install_id, device_id, install_id_updated_at): (String, String, i64) = conn
+        .query_row(
+            "SELECT install_id, device_id, install_id_updated_at
+             FROM app_installation_state
+             WHERE singleton = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .map_err(|e| e.to_string())?;
+
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM sync_tombstones", [])
+        .map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM sync_state", [])
+        .map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM playlist_entries", [])
+        .map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM play_history", [])
+        .map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM sync_devices", [])
+        .map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM sync_accounts", [])
+        .map_err(|e| e.to_string())?;
+
+    tx.execute(
+        "UPDATE app_installation_state
+         SET install_id = ?1,
+             device_id = ?2,
+             active_account_id = NULL,
+             install_id_updated_at = ?3,
+             last_dau_reported_date_utc = NULL,
+             last_update_checked_date_utc = NULL,
+             last_sync_started_at = NULL,
+             last_sync_finished_at = NULL,
+             updated_at = ?4
+         WHERE singleton = 1",
+        params![&install_id, &device_id, install_id_updated_at, now],
+    )
+    .map_err(|e| e.to_string())?;
+
+    tx.execute(
+        "INSERT INTO sync_devices (
+             id,
+             installation_id,
+             device_name,
+             platform,
+             app_version,
+             created_at,
+             updated_at,
+             last_seen_at,
+             is_current
+         )
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, ?6, 1)",
+        params![
+            &device_id,
+            &install_id,
+            std::env::var("COMPUTERNAME")
+                .ok()
+                .or_else(|| std::env::var("HOSTNAME").ok())
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| "local-device".to_string()),
+            std::env::consts::OS,
+            env!("CARGO_PKG_VERSION"),
+            now
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+
+    for scope in ["playlist_entries", "play_history", "tombstones"] {
+        tx.execute(
+            "INSERT INTO sync_state (scope, updated_at)
+             VALUES (?1, ?2)",
+            params![scope, now],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    tx.commit().map_err(|e| e.to_string())?;
+
+    crate::store::ui_state_store::reset_ui_state(app)?;
+    crate::store::network_connection_store::clear_network_connections(app)?;
+
+    let thumbnails_dir = storage_paths::thumbnails_dir(app)?;
+    if thumbnails_dir.exists() {
+        fs::remove_dir_all(&thumbnails_dir).map_err(|e| e.to_string())?;
+    }
+    fs::create_dir_all(&thumbnails_dir).map_err(|e| e.to_string())?;
+
+    Ok(())
 }
 
 fn check_daily_field(app: &tauri::AppHandle, select_sql: &str) -> Result<DailyActionResult, String> {
