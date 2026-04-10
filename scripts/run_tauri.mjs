@@ -27,6 +27,7 @@ const tauriArgs = process.argv.slice(2);
 const tauriSubcommand = tauriArgs.find((arg) => arg === "dev" || arg === "build") ?? "";
 const isDevOrBuild = tauriSubcommand === "dev" || tauriSubcommand === "build";
 const isDev = tauriSubcommand === "dev";
+const skipApplyRuntimeLibs = process.env.SOIA_SKIP_APPLY_RUNTIME_LIBS === "1";
 
 function runNodeScriptOrExit(commandArgs) {
   const result = spawnSync(process.execPath, commandArgs, {
@@ -72,27 +73,31 @@ if (isDevOrBuild) {
     runNodeScriptOrExit([syncScript, "--platform", "darwin", "--check"]);
   } else if (process.platform === "linux" || process.platform === "win32") {
     runNodeScriptOrExit([syncScript, "--platform", process.platform, "--check"]);
-    if (tauriSubcommand === "dev") {
-      runNodeScriptOrExit([
-        applyScript,
-        "--platform",
-        process.platform,
-        "--mode",
-        "dev",
-        "--profile",
-        "debug",
-      ]);
-    } else if (tauriSubcommand === "build") {
-      const profile = tauriArgs.includes("--debug") ? "debug" : "release";
-      runNodeScriptOrExit([
-        applyScript,
-        "--platform",
-        process.platform,
-        "--mode",
-        "bundle",
-        "--profile",
-        profile,
-      ]);
+    if (!skipApplyRuntimeLibs) {
+      if (tauriSubcommand === "dev") {
+        runNodeScriptOrExit([
+          applyScript,
+          "--platform",
+          process.platform,
+          "--mode",
+          "dev",
+          "--profile",
+          "debug",
+        ]);
+      } else if (tauriSubcommand === "build") {
+        const profile = tauriArgs.includes("--debug") ? "debug" : "release";
+        runNodeScriptOrExit([
+          applyScript,
+          "--platform",
+          process.platform,
+          "--mode",
+          "bundle",
+          "--profile",
+          profile,
+        ]);
+      }
+    } else {
+      console.log("[INFO] Skip apply_runtime_libs because SOIA_SKIP_APPLY_RUNTIME_LIBS=1");
     }
   }
 }

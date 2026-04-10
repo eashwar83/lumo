@@ -85,7 +85,7 @@ jobs:
           compression-level: 0
 
   windows-release:
-    name: Build Windows NSIS
+    name: Build Windows Packages
     runs-on: windows-2022
     timeout-minutes: 50
     permissions:
@@ -125,6 +125,53 @@ jobs:
           $hash = (Get-FileHash -Path $target -Algorithm SHA256).Hash.ToLower()
           "$hash  $([System.IO.Path]::GetFileName($target))" | Set-Content -Path "$target.sha256" -NoNewline
           pnpm tauri signer sign $target
+
+          $portableTarget = "release/Soia-$tag-Windows-x64-portable.zip"
+          $portableStaging = "release/portable"
+          if (Test-Path $portableStaging) {
+            Remove-Item -Path $portableStaging -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path $portableStaging -Force | Out-Null
+
+          $portableCandidates = @()
+          if (Test-Path "src-tauri/target/release/bundle") {
+            $portableCandidates = Get-ChildItem -Path "src-tauri/target/release/bundle" -Recurse -File -Filter "*.exe" |
+              Where-Object { $_.Name -notmatch "(?i)(setup|installer|uninstall)" }
+          }
+
+          if ($portableCandidates.Count -gt 0) {
+            $portableExe = $portableCandidates |
+              Sort-Object @{ Expression = { if ($_.Name -ieq "Soia.exe") { 0 } else { 1 } } }, FullName |
+              Select-Object -First 1
+            $portableSourceDir = $portableExe.DirectoryName
+            Get-ChildItem -Path $portableSourceDir | ForEach-Object {
+              if ($_.PSIsContainer) {
+                Copy-Item -Path $_.FullName -Destination $portableStaging -Recurse -Force
+                return
+              }
+              if ($_.Name -match "(?i)(setup|installer|uninstall)") {
+                return
+              }
+              if ($_.Extension -ieq ".msi") {
+                return
+              }
+              Copy-Item -Path $_.FullName -Destination $portableStaging -Force
+            }
+          } else {
+            $portableExePath = "src-tauri/target/release/Soia.exe"
+            if (-not (Test-Path $portableExePath)) {
+              throw "Portable executable not found at $portableExePath"
+            }
+            Copy-Item -Path $portableExePath -Destination $portableStaging -Force
+            Get-ChildItem -Path "src-tauri/target/release" -File -Filter "*.dll" |
+              ForEach-Object { Copy-Item -Path $_.FullName -Destination $portableStaging -Force }
+          }
+
+          Compress-Archive -Path "$portableStaging/*" -DestinationPath $portableTarget -Force
+          Remove-Item -Path $portableStaging -Recurse -Force
+          $portableHash = (Get-FileHash -Path $portableTarget -Algorithm SHA256).Hash.ToLower()
+          "$portableHash  $([System.IO.Path]::GetFileName($portableTarget))" | Set-Content -Path "$portableTarget.sha256" -NoNewline
+          pnpm tauri signer sign $portableTarget
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -184,6 +231,22 @@ jobs:
           cp "$DEB_SOURCE" "$DEB_TARGET"
           shasum -a 256 "$DEB_TARGET" > "${DEB_TARGET}.sha256"
           pnpm tauri signer sign "$DEB_TARGET"
+
+          APPIMAGE_COUNT="$(find src-tauri/target/release/bundle/appimage -maxdepth 1 -type f \( -name '*.AppImage' -o -name '*.appimage' \) | wc -l | tr -d '[:space:]')"
+          if [ "$APPIMAGE_COUNT" -eq 0 ]; then
+            echo "No AppImage found under src-tauri/target/release/bundle/appimage" >&2
+            exit 1
+          fi
+          if [ "$APPIMAGE_COUNT" -ne 1 ]; then
+            printf 'Expected exactly one AppImage, found %s:\n' "$APPIMAGE_COUNT" >&2
+            find src-tauri/target/release/bundle/appimage -maxdepth 1 -type f \( -name '*.AppImage' -o -name '*.appimage' \) | sort >&2
+            exit 1
+          fi
+          APPIMAGE_SOURCE="$(find src-tauri/target/release/bundle/appimage -maxdepth 1 -type f \( -name '*.AppImage' -o -name '*.appimage' \) | sort | head -n 1)"
+          APPIMAGE_TARGET="release/Soia-${TAG}-Linux-${{ matrix.package_arch }}-wayland.AppImage"
+          cp "$APPIMAGE_SOURCE" "$APPIMAGE_TARGET"
+          shasum -a 256 "$APPIMAGE_TARGET" > "${APPIMAGE_TARGET}.sha256"
+          pnpm tauri signer sign "$APPIMAGE_TARGET"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -274,9 +337,12 @@ jobs:
           BASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
           MAC_ARM_DMG="Soia-${TAG}-macOS-arm64.dmg"
           MAC_X64_DMG="Soia-${TAG}-macOS-x64.dmg"
-          WIN_X64_EXE="Soia-${TAG}-Windows-x64-setup.exe"
+          WIN_X64_SETUP="Soia-${TAG}-Windows-x64-setup.exe"
+          WIN_X64_PORTABLE="Soia-${TAG}-Windows-x64-portable.zip"
           LINUX_X64_DEB="Soia-${TAG}-Linux-x64-wayland.deb"
+          LINUX_X64_APPIMAGE="Soia-${TAG}-Linux-x64-wayland.AppImage"
           LINUX_ARM_DEB="Soia-${TAG}-Linux-arm64-wayland.deb"
+          LINUX_ARM_APPIMAGE="Soia-${TAG}-Linux-arm64-wayland.AppImage"
 
           : > release/RELEASE_BODY.md
 
@@ -290,13 +356,16 @@ jobs:
             echo
             echo "Choose your platform and download directly:"
             echo
-            echo "| Platform | Recommended file | Download |"
-            echo "| --- | --- | --- |"
-            echo "| macOS (Apple silicon) | \`${MAC_ARM_DMG}\` | [Download DMG](${BASE_URL}/${MAC_ARM_DMG}) |"
-            echo "| macOS (Intel) | \`${MAC_X64_DMG}\` | [Download DMG](${BASE_URL}/${MAC_X64_DMG}) |"
-            echo "| Windows (x64) | \`${WIN_X64_EXE}\` | [Download Setup](${BASE_URL}/${WIN_X64_EXE}) |"
-            echo "| Linux (x64, Wayland) | \`${LINUX_X64_DEB}\` | [Download DEB](${BASE_URL}/${LINUX_X64_DEB}) |"
-            echo "| Linux (arm64, Wayland) | \`${LINUX_ARM_DEB}\` | [Download DEB](${BASE_URL}/${LINUX_ARM_DEB}) |"
+            echo "| Platform | Download |"
+            echo "| --- | --- |"
+            echo "| macOS (Apple silicon) | [\`${MAC_ARM_DMG}\`](${BASE_URL}/${MAC_ARM_DMG}) |"
+            echo "| macOS (Intel) | [\`${MAC_X64_DMG}\`](${BASE_URL}/${MAC_X64_DMG}) |"
+            echo "| Windows (x64, Installer) | [\`${WIN_X64_SETUP}\`](${BASE_URL}/${WIN_X64_SETUP}) |"
+            echo "| Windows (x64, Portable) | [\`${WIN_X64_PORTABLE}\`](${BASE_URL}/${WIN_X64_PORTABLE}) |"
+            echo "| Linux (x64, Wayland) | [\`${LINUX_X64_DEB}\`](${BASE_URL}/${LINUX_X64_DEB}) |"
+            echo "| Linux (x64, Wayland) | [\`${LINUX_X64_APPIMAGE}\`](${BASE_URL}/${LINUX_X64_APPIMAGE}) |"
+            echo "| Linux (arm64, Wayland) | [\`${LINUX_ARM_DEB}\`](${BASE_URL}/${LINUX_ARM_DEB}) |"
+            echo "| Linux (arm64, Wayland) | [\`${LINUX_ARM_APPIMAGE}\`](${BASE_URL}/${LINUX_ARM_APPIMAGE}) |"
           } >> release/RELEASE_BODY.md
 
       - name: Publish GitHub Release
@@ -306,7 +375,9 @@ jobs:
             release/*.dmg
             release/*.app.tar.gz
             release/*.exe
+            release/*.zip
             release/*.deb
+            release/*.AppImage
             release/*.sig
             release/*.sha256
             release/latest.json

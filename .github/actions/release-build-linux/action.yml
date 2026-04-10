@@ -12,19 +12,29 @@ runs:
     - name: Install Linux build dependencies
       shell: bash
       run: |
+        set -euo pipefail
         sudo apt-get update
+        FUSE_PKG="libfuse2t64"
+        if ! apt-cache show "$FUSE_PKG" >/dev/null 2>&1; then
+          FUSE_PKG="libfuse2"
+        fi
         sudo apt-get install -y \
           build-essential \
           curl \
           wget \
           file \
           libssl-dev \
+          libglib2.0-dev \
           libgtk-3-dev \
           libayatana-appindicator3-dev \
           librsvg2-dev \
           pkg-config \
           libwebkit2gtk-4.1-dev \
-          patchelf
+          patchelf \
+          "$FUSE_PKG" \
+          squashfs-tools \
+          xdg-utils \
+          desktop-file-utils
 
     - name: Setup pnpm
       uses: pnpm/action-setup@v4
@@ -58,4 +68,50 @@ runs:
 
     - name: Build Linux bundles (Wayland)
       shell: bash
-      run: pnpm bundle:linux:release
+      env:
+        APPIMAGE_EXTRACT_AND_RUN: "1"
+        NO_APPSTREAM: "1"
+        NO_STRIP: "1"
+        LDAI_NO_APPSTREAM: "1"
+        TAURI_BUNDLER_LOG_LEVEL: "debug"
+      run: |
+        set -euo pipefail
+        MULTIARCH="$(dpkg-architecture -qDEB_HOST_MULTIARCH 2>/dev/null || true)"
+        if [ -n "$MULTIARCH" ]; then
+          export PKG_CONFIG_PATH="/usr/lib/${MULTIARCH}/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig:${PKG_CONFIG_PATH:-}"
+        else
+          export PKG_CONFIG_PATH="/usr/lib/pkgconfig:/usr/share/pkgconfig:${PKG_CONFIG_PATH:-}"
+        fi
+        export LD_LIBRARY_PATH="${PWD}/src-tauri/libs/mpv:${PWD}/src-tauri/target/release:${LD_LIBRARY_PATH:-}"
+        set +e
+        pnpm bundle:linux:release 2>&1 | tee /tmp/tauri-linux-bundle.log
+        status=${PIPESTATUS[0]}
+        set -e
+
+        if [ "$status" -ne 0 ]; then
+          echo "Bundle failed with status=$status, dumping linuxdeploy diagnostics..."
+          if [ -f "src-tauri/target/release/soia" ]; then
+            echo "== ldd src-tauri/target/release/soia =="
+            ldd "src-tauri/target/release/soia" || true
+            echo "== readelf -d src-tauri/target/release/soia =="
+            readelf -d "src-tauri/target/release/soia" || true
+          fi
+          if [ -d "${HOME}/.cache/tauri" ]; then
+            ls -lah "${HOME}/.cache/tauri" || true
+            for f in \
+              "${HOME}/.cache/tauri"/linuxdeploy*.AppImage \
+              "${HOME}/.cache/tauri"/linuxdeploy-plugin-appimage*.AppImage
+            do
+              if [ -f "$f" ]; then
+                echo "== $f =="
+                file "$f" || true
+                chmod +x "$f" || true
+                APPIMAGE_EXTRACT_AND_RUN=1 "$f" --version || true
+              fi
+            done
+          fi
+          command -v desktop-file-validate || true
+          command -v xdg-open || true
+          tail -n 200 /tmp/tauri-linux-bundle.log || true
+          exit "$status"
+        fi
