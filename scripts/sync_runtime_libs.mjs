@@ -58,7 +58,10 @@ function listMpvEntries(platform) {
     .filter((entry) => entry.isFile())
     .filter((entry) => {
       if (platform === "darwin") return entry.name.endsWith(".dylib");
-      if (platform === "linux") return /\.so(\..+)?$/.test(entry.name);
+      if (platform === "linux") {
+        if (!/\.so(\..+)?$/.test(entry.name)) return false;
+        return !isExcludedLinuxRuntimeLib(entry.name);
+      }
       return entry.name.toLowerCase().endsWith(".dll");
     })
     .map((entry) => `libs/mpv/${entry.name}`)
@@ -69,6 +72,19 @@ function listMpvEntries(platform) {
   }
 
   return entries;
+}
+
+function isExcludedLinuxRuntimeLib(name) {
+  return [
+    /^libEGL\.so(\..+)?$/,
+    /^libGL\.so(\..+)?$/,
+    /^libGLX\.so(\..+)?$/,
+    /^libGLdispatch\.so(\..+)?$/,
+    /^libGLES.*\.so(\..+)?$/,
+    /^libgbm\.so(\..+)?$/,
+    /^libdrm\.so(\..+)?$/,
+    /^libwayland.*\.so(\..+)?$/,
+  ].some((pattern) => pattern.test(name));
 }
 
 function listRuntimeEntries(platform) {

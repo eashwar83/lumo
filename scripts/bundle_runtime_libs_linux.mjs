@@ -110,6 +110,36 @@ function shouldIncludeDebDataDir(dataRoot, dataDir) {
   return false;
 }
 
+function isExcludedRuntimeSharedObject(name) {
+  return [
+    /^libEGL\.so(\..+)?$/,
+    /^libGL\.so(\..+)?$/,
+    /^libGLX\.so(\..+)?$/,
+    /^libGLdispatch\.so(\..+)?$/,
+    /^libGLES.*\.so(\..+)?$/,
+    /^libgbm\.so(\..+)?$/,
+    /^libdrm\.so(\..+)?$/,
+    /^libwayland.*\.so(\..+)?$/,
+  ].some((pattern) => pattern.test(name));
+}
+
+function removeExcludedRuntimeLibsFromDir(dirPath) {
+  if (!existsSync(dirPath)) {
+    return 0;
+  }
+
+  let removed = 0;
+  const entries = readdirSync(dirPath, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isFile() && !entry.isSymbolicLink()) continue;
+    if (!isExcludedRuntimeSharedObject(entry.name)) continue;
+    rmSync(resolve(dirPath, entry.name), { force: true });
+    removed += 1;
+  }
+
+  return removed;
+}
+
 function removeRuntimeLibsFromUsrBin(dataRoot) {
   const usrBinDir = resolve(dataRoot, "usr", "bin");
   if (!existsSync(usrBinDir)) {
@@ -157,15 +187,17 @@ function collectDebFiles() {
 
 function copyRuntimeLibsToDirs(targetDirs, runtimeLibSources) {
   let copied = 0;
+  let removedExcluded = 0;
   for (const targetDir of targetDirs) {
     mkdirSync(targetDir, { recursive: true });
+    removedExcluded += removeExcludedRuntimeLibsFromDir(targetDir);
     for (const source of runtimeLibSources) {
       const target = resolve(targetDir, basename(source));
       copyFileSync(source, target);
       copied += 1;
     }
   }
-  return copied;
+  return { copied, removedExcluded };
 }
 
 function detectDataArchiveKind(dataArchiveName) {
@@ -198,6 +230,7 @@ function patchDebPackage(debPath, runtimeLibSources) {
   const tempRoot = mkdtempSync(resolve(tmpdir(), "soia-linux-bundle-"));
   let copied = 0;
   let targetDirCount = 0;
+  let removedExcluded = 0;
 
   try {
     runOrThrow("ar", ["x", debPath], tempRoot);
@@ -236,7 +269,9 @@ function patchDebPackage(debPath, runtimeLibSources) {
       targetDirs.add(fallback);
     }
 
-    copied += copyRuntimeLibsToDirs(targetDirs, runtimeLibSources);
+    const copyResult = copyRuntimeLibsToDirs(targetDirs, runtimeLibSources);
+    copied += copyResult.copied;
+    removedExcluded += copyResult.removedExcluded;
     targetDirCount = targetDirs.size;
 
     const archiveKind = detectDataArchiveKind(dataArchiveName);
@@ -250,7 +285,7 @@ function patchDebPackage(debPath, runtimeLibSources) {
     );
     copyFileSync(rebuiltDebPath, debPath);
 
-    return { copied, targetDirs: targetDirCount, removedFromUsrBin };
+    return { copied, targetDirs: targetDirCount, removedFromUsrBin, removedExcluded };
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });
   }
@@ -271,9 +306,12 @@ function main() {
   }
 
   let copied = 0;
+  let removedExcluded = 0;
 
   if (expandedTargetDirs.size > 0) {
-    copied += copyRuntimeLibsToDirs(expandedTargetDirs, sources);
+    const copyResult = copyRuntimeLibsToDirs(expandedTargetDirs, sources);
+    copied += copyResult.copied;
+    removedExcluded += copyResult.removedExcluded;
   }
 
   let debPatchedCount = 0;
@@ -285,6 +323,7 @@ function main() {
     debPatchedCount += 1;
     debTargetDirs += result.targetDirs;
     removedFromUsrBin += result.removedFromUsrBin;
+    removedExcluded += result.removedExcluded;
   }
 
   const expandedMessage =
@@ -295,7 +334,7 @@ function main() {
       : "deb-packages=0";
 
   console.log(
-    `[INFO] Linux bundle runtime libs applied: ${sources.length} libs, ${expandedMessage}, ${debMessage}, copies=${copied}`
+    `[INFO] Linux bundle runtime libs applied: ${sources.length} libs, ${expandedMessage}, ${debMessage}, removed-excluded=${removedExcluded}, copies=${copied}`
   );
 }
 

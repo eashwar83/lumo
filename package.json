@@ -22,7 +22,7 @@
     "bundle:mac:debug": "pnpm tauri build --debug --bundles app && ./scripts/bundle_runtime_libs_macos.sh ./src-tauri/target/debug/bundle/macos/Soia.app",
     "bundle:mac:release": "pnpm tauri build --bundles app && ./scripts/bundle_runtime_libs_macos.sh ./src-tauri/target/release/bundle/macos/Soia.app && ./scripts/bundle_dmg_macos.sh ./src-tauri/target/release/bundle/macos/Soia.app",
     "bundle:linux:debug": "pnpm tauri build --debug --bundles deb && node ./scripts/bundle_runtime_libs_linux.mjs --profile debug",
-    "bundle:linux:release": "pnpm tauri build --bundles deb && node ./scripts/bundle_runtime_libs_linux.mjs --profile release && pnpm tauri build --bundles appimage",
+    "bundle:linux:release": "pnpm tauri build --bundles deb && node ./scripts/bundle_runtime_libs_linux.mjs --profile release && node ./scripts/prepare_tauri_linuxdeploy_plugin_gtk.mjs && pnpm tauri build --bundles appimage",
     "bundle:win:debug": "pnpm tauri build --debug --bundles nsis",
     "bundle:win:release": "pnpm tauri build --bundles nsis"
   },

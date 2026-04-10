@@ -222,14 +222,30 @@ copy_shared_objects_to_dir() {
   if [[ "$source_real" == "$output_real" ]]; then
     staging_dir="$(mktemp -d "${TMPDIR:-/tmp}/soia-mpv-stage.XXXXXX")"
     while IFS= read -r so_file; do
+      local so_name
+      so_name="$(basename "$so_file")"
+      if is_excluded_runtime_so "$so_name"; then
+        continue
+      fi
       cp -f "$so_file" "$staging_dir/$(basename "$so_file")"
     done < <(find "$extract_dir" -type f -name '*.so*')
     source_dir="$staging_dir"
   fi
 
-  so_count="$(find "$source_dir" -type f -name '*.so*' | wc -l | tr -d ' ')"
+  so_count="$(
+    find "$source_dir" -type f -name '*.so*' \
+      | while IFS= read -r so_file; do
+          so_name="$(basename "$so_file")"
+          if is_excluded_runtime_so "$so_name"; then
+            continue
+          fi
+          echo "$so_file"
+        done \
+      | wc -l \
+      | tr -d ' '
+  )"
   if [[ "$so_count" -eq 0 ]]; then
-    echo "[ERROR] Release asset does not contain any .so files."
+    echo "[ERROR] Release asset does not contain usable .so files after exclusions."
     rm -rf "$staging_dir" 2>/dev/null || true
     exit 1
   fi
@@ -237,6 +253,10 @@ copy_shared_objects_to_dir() {
   find "$output_dir" -maxdepth 1 \( -type f -o -type l \) -name '*.so*' -delete
 
   while IFS= read -r so_file; do
+    so_name="$(basename "$so_file")"
+    if is_excluded_runtime_so "$so_name"; then
+      continue
+    fi
     cp -f "$so_file" "$output_dir/$(basename "$so_file")"
   done < <(find "$source_dir" -type f -name '*.so*')
 
@@ -254,6 +274,18 @@ copy_shared_objects_to_dir() {
   ln -sf "$canonical_name" "$output_dir/$link_name"
 
   rm -rf "$staging_dir" 2>/dev/null || true
+}
+
+is_excluded_runtime_so() {
+  local so_name="$1"
+  case "$so_name" in
+    libEGL.so*|libGL.so*|libGLX.so*|libGLdispatch.so*|libGLES*.so*|libgbm.so*|libdrm.so*|libwayland*.so*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 sync_tauri_linux_manifest() {
