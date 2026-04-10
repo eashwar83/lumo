@@ -2,22 +2,78 @@ name: CI
 
 on:
   pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
   push:
     branches:
       - main
       - ci
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Detect Changed Areas
+    runs-on: ubuntu-24.04
+    outputs:
+      frontend: ${{ steps.filter.outputs.frontend }}
+      backend: ${{ steps.filter.outputs.backend }}
+      smoke: ${{ steps.filter.outputs.smoke }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Detect changed paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            frontend:
+              - 'src/**'
+              - 'public/**'
+              - 'index.html'
+              - 'vite.config.*'
+              - 'tsconfig*.json'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - '.npmrc'
+              - '.github/workflows/ci.yml'
+            backend:
+              - 'src-tauri/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - '.github/workflows/ci.yml'
+            smoke:
+              - 'src/**'
+              - 'public/**'
+              - 'src-tauri/**'
+              - 'index.html'
+              - 'vite.config.*'
+              - 'tsconfig*.json'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - '.npmrc'
+              - '.github/actions/**'
+              - '.github/workflows/ci.yml'
+
   frontend-check:
     name: Frontend Check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    needs: changes
+    if: ${{ needs.changes.outputs.frontend == 'true' }}
     timeout-minutes: 15
     env:
       SOIA_API_URL: ${{ secrets.SOIA_API_URL }}
@@ -43,24 +99,14 @@ jobs:
         run: pnpm build
 
   backend-check:
-    name: Backend Check (${{ matrix.runner_label }})
-    runs-on: ${{ matrix.runner }}
+    name: Backend Check
+    runs-on: macos-15
+    needs: changes
+    if: ${{ needs.changes.outputs.backend == 'true' }}
     timeout-minutes: 20
     env:
-      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deployment_target }}
+      MACOSX_DEPLOYMENT_TARGET: "15.0"
       SOIA_API_URL: ${{ secrets.SOIA_API_URL }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-15
-            runner_label: macos-15
-            arch: arm64
-            deployment_target: "15.0"
-          - runner: macos-15-intel
-            runner_label: macos-15-intel
-            arch: x64
-            deployment_target: "15.0"
     steps:
       - uses: actions/checkout@v6
 
@@ -84,8 +130,9 @@ jobs:
 
   macos-smoke-build:
     name: macOS Smoke Build (${{ matrix.runner_label }})
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ci' }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ci' && needs.changes.outputs.smoke == 'true' && contains(fromJson('["success","skipped"]'), needs.frontend-check.result) && contains(fromJson('["success","skipped"]'), needs.backend-check.result) }}
     needs:
+      - changes
       - frontend-check
       - backend-check
     runs-on: ${{ matrix.runner }}
@@ -109,7 +156,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Build Soia App (shared steps)
-        uses: ./.github/actions/macos-build-soia
+        uses: ./.github/actions/release-build-macos
         with:
           arch: ${{ matrix.arch }}
           deployment_target: ${{ matrix.deployment_target }}
@@ -121,80 +168,6 @@ jobs:
         with:
           name: soia-dmg-macos-${{ matrix.arch }}-smoke
           path: src-tauri/target/release/bundle/dmg/*.dmg
-          if-no-files-found: ignore
-          retention-days: 14
-
-  linux-smoke-build:
-    name: Linux Smoke Build (Wayland x64)
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ci' }}
-    needs:
-      - frontend-check
-    runs-on: ubuntu-latest
-    timeout-minutes: 50
-    env:
-      SOIA_API_URL: ${{ secrets.SOIA_API_URL }}
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install Linux build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            curl \
-            wget \
-            file \
-            libssl-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            pkg-config \
-            libwebkit2gtk-4.1-dev \
-            patchelf
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.30.3
-          run_install: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-
-      - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri -> target
-
-      - name: Install pnpm dependencies
-        run: pnpm install --frozen-lockfile --ignore-scripts
-
-      - name: Prepare runtime libs
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: pnpm setup:libs
-
-      - name: Build Linux bundles (Wayland)
-        run: pnpm bundle:linux:release
-
-      - name: Prepare smoke assets
-        run: |
-          set -euo pipefail
-          mkdir -p smoke
-          DEB_SOURCE="$(ls -1 src-tauri/target/release/bundle/deb/*.deb | head -n 1)"
-          cp "$DEB_SOURCE" "smoke/Soia-ci-Linux-x64-Wayland.deb"
-
-      - name: Upload Linux smoke artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: soia-linux-wayland-x64-smoke
-          path: smoke/*
+          compression-level: 0
           if-no-files-found: ignore
           retention-days: 14

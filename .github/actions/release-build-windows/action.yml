@@ -1,0 +1,44 @@
+name: "Build Soia Windows NSIS"
+description: "Shared Windows release build steps"
+
+inputs:
+  github_token:
+    description: "GitHub token for release API requests"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: 10.30.3
+        run_install: false
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+        cache: pnpm
+
+    - name: Setup Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache Rust build
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: src-tauri -> target
+
+    - name: Install pnpm dependencies
+      shell: pwsh
+      run: pnpm install --frozen-lockfile --ignore-scripts
+
+    - name: Prepare runtime libs
+      shell: pwsh
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: pnpm setup:libs
+
+    - name: Build Windows NSIS bundle
+      shell: pwsh
+      run: pnpm tauri build --bundles nsis

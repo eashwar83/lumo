@@ -1,0 +1,61 @@
+name: "Build Soia Linux Bundles"
+description: "Shared Linux release build steps"
+
+inputs:
+  github_token:
+    description: "GitHub token for release API requests"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install Linux build dependencies
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          curl \
+          wget \
+          file \
+          libssl-dev \
+          libgtk-3-dev \
+          libayatana-appindicator3-dev \
+          librsvg2-dev \
+          pkg-config \
+          libwebkit2gtk-4.1-dev \
+          patchelf
+
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: 10.30.3
+        run_install: false
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+        cache: pnpm
+
+    - name: Setup Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache Rust build
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: src-tauri -> target
+
+    - name: Install pnpm dependencies
+      shell: bash
+      run: pnpm install --frozen-lockfile --ignore-scripts
+
+    - name: Prepare runtime libs
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: pnpm setup:libs
+
+    - name: Build Linux bundles (Wayland)
+      shell: bash
+      run: pnpm bundle:linux:release
