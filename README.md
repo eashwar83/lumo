@@ -5,37 +5,43 @@
   <br>
 </h1>
 
-<h3 align="center">
-Minimalist Design. Maximum Performance.
-</h3>
+<p align="center">
+⚡ mpv-based · 🎬 HDR & Dolby Vision · 🌐 WebDAV Streaming · 🖥 Cross-platform
+</p>
 
-[**Download Latest Release**](https://github.com/FengZeng/soia/releases) | [**Report a Bug**](https://github.com/FengZeng/soia/issues)
+<p align="center">
+<b><a href="https://github.com/FengZeng/soia/releases">⬇️ Download Latest Release</a> · <a href="https://github.com/FengZeng/soia/issues">🐞 Report a Bug</a></b>
+</p>
 
----
-Experience your media library like never before. **Soia** combines a sleek Vue 3 interface with a robust Rust backend to support everything from local Dolby Vision files to remote WebDAV streams—all in one elegant, cross-platform package.
+![Soia App Preview](https://github.com/user-attachments/assets/9896ae38-d082-413e-8a01-bdb28e687bf7)
+> A modern mpv frontend focused on performance and clean design.
+
+**Soia** is a high-performance video player built on mpv, designed for smooth playback of everything from local Dolby Vision content to remote WebDAV streams — all in one fast, elegant, cross-platform experience.
 
 ## ✨ Key Features
 
-### 🎬 Superior Playback
+### High-Performance Playback
 
-- Hardware Acceleration: Powered by libmpv for smooth playback, including 4K, HDR, and Dolby Vision on supported hardware (currently not supported on Linux).
-- Picture in Picture (PiP): Multi-task effortlessly on macOS and Windows.
-- Custom Shaders: Enhance your visual experience with high-quality scaling and processing.
-- Dual Subtitles: Watch with bilingual subtitle workflows more comfortably.
+- **mpv-powered playback** with hardware acceleration (4K, HDR, Dolby Vision*)
+- Picture in Picture (PiP) on macOS and Windows
+- Custom shaders for high-quality scaling and rendering
+- Dual subtitles for bilingual viewing
 
-### ☁️ Cloud & Local Integration
+<sub style="padding-left: 2em;">*Dolby Vision is not currently supported on Linux*</sub>
 
-- Stream via WebDAV: Browse and play your remote media library with ease.
-- Smart Buffering: Visual progress bars and real-time download speed for network streams.
-- Library Management: History tracking with resume position, pin-to-top, and robust multiple playlist support.
-- Multiple Playlists: Create and switch between playlists, each with sort, loop, and shuffle modes for flexible media sessions.
+### Streaming & Remote Media
 
-### 💻 Platform Native Experience
+- Stream media via WebDAV with smooth playback
+- Smart buffering with real-time speed indicators
+- Resume playback with history tracking
+- Multiple playlists with sort, loop, and shuffle
 
-- Deep Integration: Native media keys, Now Playing metadata, and artwork capture (macOS).
-- Modern UI: Borderless window support across macOS, Windows, and Linux (Wayland).
-- Experimental Wallpaper Mode (Windows): Combine wallpaper playback with playlists and image media.
-- Playback Preferences: Configure seek step, default speed, auto-play, and skip-intro behaviors.
+### Native Experience
+
+- Native media keys and Now Playing integration (macOS)
+- Borderless window across macOS, Windows, and Linux (Wayland)
+- Experimental Wallpaper Mode (Windows)
+- Flexible playback preferences (speed, seek, auto-play, skip intro)
 
 ## Install
 
@@ -97,30 +103,11 @@ The app is open-source and its code is publicly available for anyone to inspect.
    ```
 ## Build and Bundle
 
-### Frontend
+Common release build commands:
 
 ```bash
-pnpm build
-```
-
-### macOS
-
-```bash
-pnpm bundle:mac:debug
 pnpm bundle:mac:release
-```
-
-### Linux
-
-```bash
-pnpm bundle:linux:debug
 pnpm bundle:linux:release
-```
-
-### Windows
-
-```bash
-pnpm bundle:win:debug
 pnpm bundle:win:release
 ```
 
@@ -201,11 +188,13 @@ MPV_LOCAL_BUNDLE_DIR=/absolute/path/to/mpv-bundle pnpm setup:libs
 
 ---
 
-## 👤 Author & Maintainer
+## Author & Maintainer
 
-**Soia** is an independent, **solo project** developed and maintained by **[@FengZeng](https://github.com/FengZeng)**.
+**Soia** is an independent project developed and maintained by **[@FengZeng](https://github.com/FengZeng)**.
 
-As a single developer balancing performance and features across macOS, Windows, and Linux, your support means the world to me. If Soia has improved your media experience, please consider giving it a **⭐ Star**—it's the best way to keep the project growing!
+While development is driven independently, issues and feedback are actively reviewed and addressed whenever possible.
+
+If you find Soia useful, consider giving it a ⭐ Star — it helps the project grow and reach more users.
 
 ## License
 
