@@ -46,13 +46,23 @@ Current Linux builds target Ubuntu Wayland sessions only (`X11` is not supported
 
 ## FAQ
 
-Q: macOS says "`Soia` is damaged and can't be opened" or cannot verify it is free of malware.
+Q: macOS says "Soia is damaged and can't be opened" or cannot verify it is free of malware.
 
-A: Current builds are not signed/notarized with an Apple Developer ID certificate, so Gatekeeper may block first launch. Open Terminal and run:
+A: This happens because the app is not yet signed with an Apple Developer ID certificate, so macOS may block it on first launch.
 
+Easy fix (recommended):
+1. Right-click Soia.app
+2. Click "Open"
+3. Click "Open" again in the dialog
+
+If that doesn't work, run:
 ```bash
 sudo xattr -r -d com.apple.quarantine /Applications/Soia.app
 ```
+
+You can also go to System Settings -> Privacy & Security and click "Open Anyway" (it appears after a blocked launch attempt).
+
+The app is open-source and its code is publicly available for anyone to inspect.
 
 ## Tech Stack
 
