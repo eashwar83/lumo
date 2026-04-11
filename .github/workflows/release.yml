@@ -361,10 +361,17 @@ jobs:
             echo "| macOS (Apple silicon) | [\`${MAC_ARM_DMG}\`](${BASE_URL}/${MAC_ARM_DMG}) |"
             echo "| macOS (Intel) | [\`${MAC_X64_DMG}\`](${BASE_URL}/${MAC_X64_DMG}) |"
             echo "| Windows (x64, Installer) | [\`${WIN_X64_SETUP}\`](${BASE_URL}/${WIN_X64_SETUP}) |"
+            echo "| Linux (x64, Wayland, DEB) | [\`${LINUX_X64_DEB}\`](${BASE_URL}/${LINUX_X64_DEB}) |"
+            echo "| Linux (arm64, Wayland, DEB) | [\`${LINUX_ARM_DEB}\`](${BASE_URL}/${LINUX_ARM_DEB}) |"
+            echo
+            echo "## Experimental Downloads"
+            echo
+            echo "> Windows Portable and Linux AppImage are currently experimental."
+            echo
+            echo "| Platform | Download |"
+            echo "| --- | --- |"
             echo "| Windows (x64, Portable) | [\`${WIN_X64_PORTABLE}\`](${BASE_URL}/${WIN_X64_PORTABLE}) |"
-            echo "| Linux (x64, Wayland) | [\`${LINUX_X64_DEB}\`](${BASE_URL}/${LINUX_X64_DEB}) |"
             echo "| Linux (x64, Wayland) | [\`${LINUX_X64_APPIMAGE}\`](${BASE_URL}/${LINUX_X64_APPIMAGE}) |"
-            echo "| Linux (arm64, Wayland) | [\`${LINUX_ARM_DEB}\`](${BASE_URL}/${LINUX_ARM_DEB}) |"
             echo "| Linux (arm64, Wayland) | [\`${LINUX_ARM_APPIMAGE}\`](${BASE_URL}/${LINUX_ARM_APPIMAGE}) |"
           } >> release/RELEASE_BODY.md
 
