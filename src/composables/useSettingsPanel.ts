@@ -44,13 +44,19 @@ export const useSettingsPanel = () => {
         );
     };
 
-    const saveState = () => {
-        uiStateSaver.saveDebounced({
-            settings: {
-                groups: general.toPersistedGroups(),
-            },
-            rendering: rendering.toPersistedRendering(),
-        });
+    const buildPersistedState = () => ({
+        settings: {
+            groups: general.toPersistedGroups(),
+        },
+        rendering: rendering.toPersistedRendering(),
+    });
+
+    const saveStateDebounced = () => {
+        uiStateSaver.saveDebounced(buildPersistedState());
+    };
+
+    const saveStateImmediately = () => {
+        uiStateSaver.flush(buildPersistedState());
     };
 
     const loadState = async () => {
@@ -102,6 +108,7 @@ export const useSettingsPanel = () => {
     });
 
     onUnmounted(() => {
+        saveStateImmediately();
         general.dispose();
         rendering.dispose();
         update.dispose();
@@ -112,7 +119,7 @@ export const useSettingsPanel = () => {
         () => {
             if (isLoading.value) return;
             general.applySectionSideEffects();
-            saveState();
+            saveStateDebounced();
             emitSettingsUpdated();
         },
         { deep: true },
@@ -123,7 +130,7 @@ export const useSettingsPanel = () => {
         () => {
             if (isLoading.value) return;
             rendering.scheduleApplyRenderingOptions();
-            saveState();
+            saveStateImmediately();
         },
         { deep: true },
     );
@@ -163,7 +170,9 @@ export const useSettingsPanel = () => {
         selectedShaderFiles: rendering.selectedShaderFiles,
         activeShaderFiles: rendering.activeShaderFiles,
         unavailableShaderFiles: rendering.unavailableShaderFiles,
+        multiShaderEnabled: rendering.multiShaderEnabled,
         setShaderEnabled: rendering.setShaderEnabled,
+        setMultiShaderEnabled: rendering.setMultiShaderEnabled,
         removeShaderFromList: rendering.removeShaderFromList,
         clearShaders: rendering.clearShaders,
         isFixedLogPathItem: general.isFixedLogPathItem,

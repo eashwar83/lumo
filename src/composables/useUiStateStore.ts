@@ -152,6 +152,7 @@ export const pickPathsNative = async (): Promise<string[] | null> => {
 
 export const createDebouncedUiStateSaver = (delayMs = 300) => {
     let saveTimer: number | null = null;
+    let pendingState: UiStateObject | null = null;
 
     const cancel = () => {
         if (saveTimer) {
@@ -161,15 +162,29 @@ export const createDebouncedUiStateSaver = (delayMs = 300) => {
     };
 
     const saveDebounced = (state: UiStateObject) => {
+        pendingState = cloneUiState(state);
         cancel();
         saveTimer = window.setTimeout(() => {
-            void saveUiState(state);
+            if (!pendingState) return;
+            void saveUiState(pendingState);
+            pendingState = null;
             saveTimer = null;
         }, delayMs);
+    };
+
+    const flush = (state?: UiStateObject) => {
+        if (state) {
+            pendingState = cloneUiState(state);
+        }
+        cancel();
+        if (!pendingState) return;
+        void saveUiState(pendingState);
+        pendingState = null;
     };
 
     return {
         saveDebounced,
         cancel,
+        flush,
     };
 };

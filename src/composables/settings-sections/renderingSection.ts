@@ -16,6 +16,7 @@ export const useRenderingSettingsSection = () => {
     const selectedShaderFiles = ref<string[]>([]);
     const activeShaderFiles = ref<string[]>([]);
     const unavailableShaderFiles = ref<string[]>([]);
+    const multiShaderEnabled = ref(false);
 
     const RENDERING_APPLY_DELAY_MS = 200;
     let renderingApplyTimer: number | null = null;
@@ -51,6 +52,12 @@ export const useRenderingSettingsSection = () => {
             selectedShaderFiles.value,
             activeShaderFiles.value,
         );
+        if (selectedShaderFiles.value.length <= 1) {
+            multiShaderEnabled.value = false;
+        }
+        if (!multiShaderEnabled.value && activeShaderFiles.value.length > 1) {
+            activeShaderFiles.value = activeShaderFiles.value.slice(0, 1);
+        }
         unavailableShaderFiles.value = unavailableShaderFiles.value.filter((file) =>
             selectedShaderFiles.value.includes(file),
         );
@@ -157,7 +164,9 @@ export const useRenderingSettingsSection = () => {
         if (!selectedShaderFiles.value.includes(shaderFile)) return;
         if (unavailableShaderFiles.value.includes(shaderFile)) return;
         if (enabled) {
-            if (!activeShaderFiles.value.includes(shaderFile)) {
+            if (!multiShaderEnabled.value) {
+                activeShaderFiles.value = [shaderFile];
+            } else if (!activeShaderFiles.value.includes(shaderFile)) {
                 activeShaderFiles.value = [...activeShaderFiles.value, shaderFile];
             }
         } else {
@@ -171,6 +180,13 @@ export const useRenderingSettingsSection = () => {
         );
     };
 
+    const setMultiShaderEnabled = (enabled: boolean) => {
+        multiShaderEnabled.value = enabled && selectedShaderFiles.value.length > 1;
+        if (!multiShaderEnabled.value && activeShaderFiles.value.length > 1) {
+            activeShaderFiles.value = activeShaderFiles.value.slice(0, 1);
+        }
+    };
+
     const removeShaderFromList = (shaderFile: string) => {
         selectedShaderFiles.value = selectedShaderFiles.value.filter(
             (path) => path !== shaderFile,
@@ -181,17 +197,22 @@ export const useRenderingSettingsSection = () => {
         unavailableShaderFiles.value = unavailableShaderFiles.value.filter(
             (path) => path !== shaderFile,
         );
+        if (selectedShaderFiles.value.length <= 1) {
+            multiShaderEnabled.value = false;
+        }
     };
 
     const clearShaders = () => {
         selectedShaderFiles.value = [];
         activeShaderFiles.value = [];
         unavailableShaderFiles.value = [];
+        multiShaderEnabled.value = false;
     };
 
     const resetRenderingSettings = () => {
         selectedShaderFiles.value = [];
         activeShaderFiles.value = [];
+        multiShaderEnabled.value = false;
         void applyRenderingOptions();
     };
 
@@ -203,6 +224,9 @@ export const useRenderingSettingsSection = () => {
             selectedShaderFiles.value,
             stored?.activeShaderFiles ?? [],
         );
+        multiShaderEnabled.value =
+            selectedShaderFiles.value.length > 1 &&
+            activeShaderFiles.value.length > 1;
         await refreshShaderAvailability();
         await applyRenderingOptions();
     };
@@ -218,8 +242,10 @@ export const useRenderingSettingsSection = () => {
         selectedShaderFiles,
         activeShaderFiles,
         unavailableShaderFiles,
+        multiShaderEnabled,
         browseForCustomShaders,
         setShaderEnabled,
+        setMultiShaderEnabled,
         removeShaderFromList,
         clearShaders,
         scheduleApplyRenderingOptions,

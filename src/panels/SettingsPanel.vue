@@ -37,7 +37,9 @@ const {
     selectedShaderFiles,
     activeShaderFiles,
     unavailableShaderFiles,
+    multiShaderEnabled,
     setShaderEnabled,
+    setMultiShaderEnabled,
     removeShaderFromList,
     clearShaders,
     isFixedLogPathItem,
@@ -83,6 +85,9 @@ const SHADER_COLLAPSED_VISIBLE_COUNT = 4;
 const isShaderListExpanded = ref(false);
 const shouldShowShaderListCollapseToggle = computed(
     () => selectedShaderFiles.value.length > SHADER_COLLAPSED_VISIBLE_COUNT,
+);
+const shouldShowMultiShaderToggle = computed(
+    () => selectedShaderFiles.value.length > 1,
 );
 const visibleShaderFiles = computed(() => {
     if (
@@ -302,7 +307,7 @@ watch(
                         Rendering
                     </div>
                     <div class="panel__table panel__table--card">
-                        <div class="panel__row panel__row--card">
+                        <div class="panel__row panel__row--card panel__row--shader-header">
                             <div class="panel__card-text">
                                 <div class="panel__card-title">Custom Shader</div>
                                 <div class="panel__card-subtitle">
@@ -310,7 +315,7 @@ watch(
                                 </div>
                             </div>
                             <div class="panel__control panel__control--card panel__control--stack">
-                                <div class="panel__actions panel__actions--inline">
+                                <div class="panel__actions panel__actions--inline panel__actions--shader">
                                     <button
                                         class="panel__action panel__action--ghost panel__action--compact"
                                         type="button"
@@ -372,6 +377,7 @@ watch(
                                         "
                                     >
                                         <span
+                                            v-if="multiShaderEnabled"
                                             class="panel__shader-select"
                                             :class="{
                                                 'panel__shader-select--active':
@@ -418,43 +424,78 @@ watch(
                                     </div>
                                 </div>
                                 <div
-                                    v-if="shouldShowShaderListCollapseToggle"
-                                    class="panel__shader-list-actions"
+                                    v-if="
+                                        shouldShowMultiShaderToggle ||
+                                        shouldShowShaderListCollapseToggle
+                                    "
+                                    class="panel__shader-list-footer"
+                                    :class="{
+                                        'panel__shader-list-footer--align-right':
+                                            !shouldShowShaderListCollapseToggle,
+                                    }"
                                 >
-                                    <button
-                                        class="panel__action panel__action--ghost panel__action--compact panel__shader-toggle"
-                                        type="button"
-                                        @click="
-                                            isShaderListExpanded = !isShaderListExpanded
-                                        "
+                                    <label
+                                        v-if="shouldShowMultiShaderToggle"
+                                        class="panel__shader-multi-toggle"
                                     >
-                                        <span>
-                                            {{
-                                                isShaderListExpanded
-                                                    ? `Collapse (${selectedShaderFiles.length})`
-                                                    : `Show all (${selectedShaderFiles.length})`
-                                            }}
+                                        <span class="panel__shader-multi-label">
+                                            Use Multiple Shader
                                         </span>
-                                        <svg
-                                            class="panel__shader-toggle-icon"
-                                            viewBox="0 0 20 20"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            stroke-width="2"
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            aria-hidden="true"
+                                        <span class="panel__toggle panel__toggle--shader-multi">
+                                            <input
+                                                class="panel__toggle-input"
+                                                type="checkbox"
+                                                :checked="multiShaderEnabled"
+                                                @change="
+                                                    setMultiShaderEnabled(
+                                                        ($event.target as HTMLInputElement).checked,
+                                                    )
+                                                "
+                                            />
+                                            <span class="panel__toggle-track">
+                                                <span class="panel__toggle-thumb"></span>
+                                            </span>
+                                        </span>
+                                    </label>
+                                    <div
+                                        v-if="shouldShowShaderListCollapseToggle"
+                                        class="panel__shader-list-actions"
+                                    >
+                                        <button
+                                            class="panel__action panel__action--ghost panel__action--compact panel__shader-toggle"
+                                            type="button"
+                                            @click="
+                                                isShaderListExpanded = !isShaderListExpanded
+                                            "
                                         >
-                                            <path
-                                                v-if="isShaderListExpanded"
-                                                d="M5 12l5-5 5 5"
-                                            />
-                                            <path
-                                                v-else
-                                                d="M5 8l5 5 5-5"
-                                            />
-                                        </svg>
-                                    </button>
+                                            <span>
+                                                {{
+                                                    isShaderListExpanded
+                                                        ? `Collapse (${selectedShaderFiles.length})`
+                                                        : `Show all (${selectedShaderFiles.length})`
+                                                }}
+                                            </span>
+                                            <svg
+                                                class="panel__shader-toggle-icon"
+                                                viewBox="0 0 20 20"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                aria-hidden="true"
+                                            >
+                                                <path
+                                                    v-if="isShaderListExpanded"
+                                                    d="M5 12l5-5 5 5"
+                                                />
+                                                <path
+                                                    v-else
+                                                    d="M5 8l5 5 5-5"
+                                                />
+                                            </svg>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
