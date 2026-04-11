@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type { MediaInfo } from "../mock/mediaInfo";
+import { SETTINGS_UPDATED_EVENT } from "../mock/settings";
 import type { MediaTrack } from "../types/media";
+import { applyRenderingSettings, loadUiState } from "../composables/useUiStateStore";
+import { getPathDisplayName } from "../utils/getPathDisplayName";
 import { getPlaybackDisplayPathWithHomePrefix } from "../utils/playbackSource";
 
 const props = defineProps<{
@@ -56,6 +59,11 @@ const showDesktopCompactControls = computed(
         !props.isFullscreen,
 );
 
+type StoredRenderingState = {
+    selectedShaderFiles?: string[];
+    activeShaderFiles?: string[];
+};
+
 const refreshWindowMaximizedState = async () => {
     if (!isDesktopCompactControlsPlatform) return;
     try {
@@ -99,6 +107,11 @@ const onWindowClose = async () => {
 let unlistenWindowResized: (() => void) | null = null;
 
 onMounted(async () => {
+    void refreshShaderNamesFromState();
+    if (typeof window !== "undefined") {
+        window.addEventListener(SETTINGS_UPDATED_EVENT, onSettingsUpdated);
+    }
+
     if (!isDesktopCompactControlsPlatform) return;
     await refreshWindowMaximizedState();
     try {
@@ -111,6 +124,9 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+    if (typeof window !== "undefined") {
+        window.removeEventListener(SETTINGS_UPDATED_EVENT, onSettingsUpdated);
+    }
     unlistenWindowResized?.();
     unlistenWindowResized = null;
 });
@@ -337,6 +353,110 @@ const subtitleTrackTag = computed(() => {
 
 const subtitleTrackName = computed(() =>
     getTrackDisplayName(selectedSubTrack.value, { allowLangFallback: true }),
+);
+
+const configuredSelectedShaderPaths = ref<string[]>([]);
+const configuredActiveShaderPaths = ref<string[]>([]);
+const configuredActiveShaderNames = ref<string[]>([]);
+const isPlaybackShaderEnabled = ref(false);
+const isPlaybackShaderToggleBusy = ref(false);
+
+const shaderDisplayNameFromPath = (path: string) => {
+    const normalized = path.trim();
+    if (!normalized) return "";
+    const displayName = getPathDisplayName(normalized, normalized);
+    return displayName.replace(/\.glsl$/i, "");
+};
+
+const updateActiveShaderNames = (paths?: string[]) => {
+    const uniqueNames: string[] = [];
+    (paths ?? []).forEach((path) => {
+        const name = shaderDisplayNameFromPath(path);
+        if (!name) return;
+        if (!uniqueNames.includes(name)) {
+            uniqueNames.push(name);
+        }
+    });
+    configuredActiveShaderNames.value = uniqueNames;
+};
+
+const setRenderingStateFromStored = (rendering?: StoredRenderingState) => {
+    configuredSelectedShaderPaths.value = rendering?.selectedShaderFiles ?? [];
+    configuredActiveShaderPaths.value = rendering?.activeShaderFiles ?? [];
+    updateActiveShaderNames(configuredActiveShaderPaths.value);
+};
+
+const refreshShaderNamesFromState = async () => {
+    const stored = await loadUiState<{
+        rendering?: StoredRenderingState;
+    }>();
+    setRenderingStateFromStored(stored?.rendering);
+    isPlaybackShaderEnabled.value = configuredActiveShaderPaths.value.length > 0;
+};
+
+const onSettingsUpdated = (event: Event) => {
+    const customEvent = event as CustomEvent<{
+        rendering?: StoredRenderingState;
+    }>;
+    const nextRendering = customEvent.detail?.rendering;
+    if (!nextRendering) {
+        void refreshShaderNamesFromState();
+        return;
+    }
+    setRenderingStateFromStored(nextRendering);
+    if (!configuredActiveShaderPaths.value.length) {
+        isPlaybackShaderEnabled.value = false;
+    }
+};
+
+const canTogglePlaybackShader = computed(
+    () => props.isFileLoaded && configuredActiveShaderPaths.value.length > 0,
+);
+
+const applyPlaybackShaderState = async (enabled: boolean): Promise<boolean> => {
+    const applied = await applyRenderingSettings(
+        configuredSelectedShaderPaths.value,
+        enabled ? configuredActiveShaderPaths.value : [],
+    );
+    if (!applied) return false;
+    isPlaybackShaderEnabled.value = enabled && applied.activeShaderFiles.length > 0;
+    return true;
+};
+
+const onPlaybackShaderToggle = async (event: Event) => {
+    const input = event.target as HTMLInputElement;
+    const nextEnabled = input.checked;
+    if (isPlaybackShaderToggleBusy.value) return;
+    if (!canTogglePlaybackShader.value) {
+        input.checked = isPlaybackShaderEnabled.value;
+        return;
+    }
+
+    isPlaybackShaderToggleBusy.value = true;
+    const ok = await applyPlaybackShaderState(nextEnabled);
+    if (!ok) {
+        input.checked = isPlaybackShaderEnabled.value;
+    }
+    isPlaybackShaderToggleBusy.value = false;
+};
+
+const shaderLine = computed(() => {
+    if (!configuredActiveShaderNames.value.length) {
+        return "Shader: Off";
+    }
+    return `Shader: ${configuredActiveShaderNames.value.join(" + ")}`;
+});
+
+watch(
+    () => [props.isFileLoaded, props.url] as const,
+    ([isFileLoaded, nextUrl], [prevLoaded, prevUrl]) => {
+        if (!isFileLoaded || !nextUrl) return;
+        if (prevLoaded && prevUrl === nextUrl) return;
+        isPlaybackShaderEnabled.value =
+            configuredActiveShaderPaths.value.length > 0;
+        if (!isPlaybackShaderEnabled.value) return;
+        void applyPlaybackShaderState(true);
+    },
 );
 
 </script>
@@ -578,6 +698,31 @@ const subtitleTrackName = computed(() =>
                 <div class="info-panel__section">
                     <div class="info-panel__label">Playback</div>
                     <div class="info-panel__value">{{ playbackLine }}</div>
+                    <div
+                        class="info-panel__value info-panel__value--shader info-panel__value--shader-row"
+                        :class="{
+                            'info-panel__value--shader-disabled':
+                                !isPlaybackShaderEnabled &&
+                                configuredActiveShaderNames.length > 0,
+                        }"
+                    >
+                        <span>{{ shaderLine }}</span>
+                        <label class="info-panel__shader-toggle">
+                            <input
+                                class="info-panel__shader-toggle-input"
+                                type="checkbox"
+                                :checked="isPlaybackShaderEnabled"
+                                :disabled="
+                                    !canTogglePlaybackShader ||
+                                    isPlaybackShaderToggleBusy
+                                "
+                                @change="onPlaybackShaderToggle"
+                            />
+                            <span class="info-panel__shader-toggle-track">
+                                <span class="info-panel__shader-toggle-thumb"></span>
+                            </span>
+                        </label>
+                    </div>
                 </div>
 
                 <div class="info-panel__section">
@@ -994,6 +1139,68 @@ const subtitleTrackName = computed(() =>
 
 .info-panel__value--sub {
     color: rgba(255, 255, 255, 0.7);
+}
+
+.info-panel__value--shader {
+    color: rgba(248, 220, 140, 0.95);
+}
+
+.info-panel__value--shader-disabled {
+    color: rgba(255, 255, 255, 0.58);
+}
+
+.info-panel__value--shader-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.info-panel__shader-toggle {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+}
+
+.info-panel__shader-toggle-input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.info-panel__shader-toggle-track {
+    width: 30px;
+    height: 16px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    display: inline-flex;
+    align-items: center;
+    padding: 1px;
+    box-sizing: border-box;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.info-panel__shader-toggle-thumb {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.92);
+    transform: translateX(0);
+    transition: transform 0.2s ease;
+}
+
+.info-panel__shader-toggle-input:checked + .info-panel__shader-toggle-track {
+    background: rgba(248, 220, 140, 0.5);
+    border-color: rgba(248, 220, 140, 0.9);
+}
+
+.info-panel__shader-toggle-input:checked + .info-panel__shader-toggle-track .info-panel__shader-toggle-thumb {
+    transform: translateX(12px);
+}
+
+.info-panel__shader-toggle-input:disabled + .info-panel__shader-toggle-track {
+    opacity: 0.42;
 }
 
 .info-panel__track-tag {

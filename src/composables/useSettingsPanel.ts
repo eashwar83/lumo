@@ -39,6 +39,7 @@ export const useSettingsPanel = () => {
             new CustomEvent(SETTINGS_UPDATED_EVENT, {
                 detail: {
                     groups: general.toPersistedGroups(),
+                    rendering: rendering.toPersistedRendering(),
                 },
             }),
         );
@@ -131,6 +132,7 @@ export const useSettingsPanel = () => {
             if (isLoading.value) return;
             rendering.scheduleApplyRenderingOptions();
             saveStateImmediately();
+            emitSettingsUpdated();
         },
         { deep: true },
     );

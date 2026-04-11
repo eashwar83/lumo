@@ -172,6 +172,13 @@ export const useAppEventBindings = ({
             async ({ payload }) => {
                 const [width, height] = payload;
                 if (width <= 0 || height <= 0) return;
+                if (player.state.window.isFullscreen) return;
+                try {
+                    const isWindowFullscreen = await currentWindow.isFullscreen();
+                    if (isWindowFullscreen) return;
+                } catch {
+                    // Ignore fullscreen detection errors and continue fallback logic.
+                }
 
                 const monitor =
                     (await currentMonitor()) ?? (await primaryMonitor());
