@@ -10,6 +10,10 @@ const HOST_AUTH_CACHE_KEY: &str = "host_auth_v1";
 const HOST_AUTH_EXPIRY_SKEW_SECS: i64 = 30;
 const HOST_AUTH_CONNECT_TIMEOUT_SECS: u64 = 3;
 const HOST_AUTH_TIMEOUT_SECS: u64 = 7;
+#[cfg(target_os = "windows")]
+const WINDOWS_PORTABLE_MARKER_FILE: &str = "marker.dll";
+#[cfg(target_os = "windows")]
+const WINDOWS_UNINSTALLER_FILE: &str = "uninstall.exe";
 
 #[derive(Clone, Debug)]
 pub(crate) struct HostAuthToken {
@@ -21,6 +25,33 @@ pub(crate) struct HostAuthToken {
 #[tauri::command]
 pub(crate) fn has_available_update() -> bool {
     HAS_AVAILABLE_UPDATE.load(Ordering::Relaxed)
+}
+
+#[tauri::command]
+pub(crate) fn should_use_embedded_update_install() -> bool {
+    #[cfg(not(target_os = "windows"))]
+    {
+        true
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        is_windows_setup_install()
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn is_windows_setup_install() -> bool {
+    let Some(exe_dir) = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(|dir| dir.to_path_buf()))
+    else {
+        return true;
+    };
+    let marker_exists = exe_dir.join(WINDOWS_PORTABLE_MARKER_FILE).is_file();
+    let uninstall_exists = exe_dir.join(WINDOWS_UNINSTALLER_FILE).is_file();
+    let is_portable = marker_exists && !uninstall_exists;
+    !is_portable
 }
 
 fn set_update_available_state(available: bool) {

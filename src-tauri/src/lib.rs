@@ -293,7 +293,8 @@ pub fn run() {
             commands::persistence::resolve_existing_shader_files,
             commands::persistence::get_media_association_status,
             commands::persistence::set_media_association_to_soia,
-            check_update::has_available_update
+            check_update::has_available_update,
+            check_update::should_use_embedded_update_install
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

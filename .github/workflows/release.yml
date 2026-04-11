@@ -167,6 +167,7 @@ jobs:
               ForEach-Object { Copy-Item -Path $_.FullName -Destination $portableStaging -Force }
           }
 
+          "portable" | Set-Content -Path "$portableStaging/marker.dll" -NoNewline
           Compress-Archive -Path "$portableStaging/*" -DestinationPath $portableTarget -Force
           Remove-Item -Path $portableStaging -Recurse -Force
           $portableHash = (Get-FileHash -Path $portableTarget -Algorithm SHA256).Hash.ToLower()

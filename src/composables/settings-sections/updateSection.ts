@@ -1,5 +1,6 @@
 import { computed, ref } from "vue";
 import { confirm } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
@@ -11,6 +12,8 @@ type UpdateButtonPhase =
     | "downloading"
     | "installing"
     | "failed";
+
+const PROJECT_RELEASES_URL = "https://github.com/FengZeng/soia/releases";
 
 const formatByteSize = (bytes: number): string => {
     if (!Number.isFinite(bytes) || bytes < 0) return "0 B";
@@ -209,6 +212,17 @@ export const useUpdateSection = () => {
         return "New version is available!";
     });
 
+    const openProjectReleases = async () => {
+        try {
+            await openUrl(PROJECT_RELEASES_URL);
+            return;
+        } catch {
+            if (typeof window !== "undefined") {
+                window.open(PROJECT_RELEASES_URL, "_blank", "noopener,noreferrer");
+            }
+        }
+    };
+
     const installUpdate = async () => {
         if (isUpdateBusyPhase(updateButtonPhase.value)) return;
         if (updateWorkflowPromise) {
@@ -217,6 +231,20 @@ export const useUpdateSection = () => {
         }
 
         updateWorkflowPromise = (async () => {
+            let allowEmbeddedInstall = true;
+            try {
+                allowEmbeddedInstall = await invoke<boolean>(
+                    "should_use_embedded_update_install",
+                );
+            } catch {
+                allowEmbeddedInstall = true;
+            }
+            if (!allowEmbeddedInstall) {
+                updateButtonPhase.value = "idle";
+                await openProjectReleases();
+                return;
+            }
+
             updateProgressTotalBytes.value = null;
             updateProgressDownloadedBytes.value = 0;
             updateDownloadSpeedBytesPerSec.value = null;
