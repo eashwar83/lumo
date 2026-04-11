@@ -498,8 +498,6 @@ const ANIME_DETECT_KEYWORDS = [
     "ani-one",
     "aniplus",
     "crunchyroll",
-    "bilibili",
-    "哔哩哔哩",
 ];
 
 const LIVE_ACTION_KEYWORDS = [
