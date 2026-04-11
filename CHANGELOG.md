@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.5] - 2026-04-11
+
+### Features
+
+- Added experimental support for Windows Portable and Linux AppImage builds.
+- Added Anime-specialized mode with automatic detection and automatic shader application.
+- Added per-playback shader toggle and active shader display.
+- Added Factory Reset to quickly clear local data and restore default state.
+
+### Improvements
+
+- Improved Custom Shader settings with mode-aware behavior and cleaner controls.
+- On Windows, Update now uses different behavior for Portable vs Setup installs.
+
 ## [0.1.4] - 2026-04-05
 
 ### Features

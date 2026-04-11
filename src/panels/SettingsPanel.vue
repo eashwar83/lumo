@@ -110,7 +110,7 @@ const hasEnabledShaderInCurrentMode = computed(
 );
 const shaderModeHintText = computed(() =>
     isAnimeModeRenderingMode.value
-        ? "Animal Mode: Auto-detect animal videos and apply shaders only for animal."
+        ? "Anime Mode: Auto-detect anime videos and apply shaders only for anime."
         : "General Mode: Selected shaders will be applied to all videos.",
 );
 
@@ -500,7 +500,7 @@ watch(
                                                         hasEnabledShaderInCurrentMode,
                                                 }"
                                             >
-                                                Animal Mode
+                                                Anime Mode
                                             </span>
                                         </button>
                                     </div>

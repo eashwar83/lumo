@@ -19,15 +19,16 @@ You can also go to System Settings > Privacy & Security and click "Open Anyway" 
 
 The app is open-source and its code is publicly available for anyone to inspect.
 
-## [0.1.4] - 2026-04-04
+## [0.1.5] - 2026-04-11
 
 ### Highlights
 
-- Dual subtitles support.
-- Custom shader support.
-- Experimental Wallpaper mode support on Windows.
-- Common image formats can now be played and browsed, and can be combined with playlist + Wallpaper mode.
+- Added experimental support for Windows Portable and Linux AppImage builds.
+- Improved Custom Shader settings with mode-aware behavior and cleaner controls.
+- Added Anime-specialized mode with automatic detection and automatic shader application.
+- Added Factory Reset to quickly clear local data and restore default state.
 
-### Fixes
+### Improvements
 
-- Fixed a potential crash when quitting the app during playback.
+- Added per-playback shader toggle and active shader display.
+- On Windows, Update now uses different behavior for Portable vs Setup installs.
