@@ -114,9 +114,17 @@ pub struct SettingsState {
 #[serde(rename_all = "camelCase")]
 pub struct RenderingState {
     #[serde(default)]
+    pub rendering_mode: Option<String>,
+    #[serde(default)]
     pub selected_shader_files: Option<Vec<String>>,
     #[serde(default)]
     pub active_shader_files: Option<Vec<String>>,
+    #[serde(default)]
+    pub normal_active_shader_files: Option<Vec<String>>,
+    #[serde(default, alias = "animeActiveShaderFiles")]
+    pub anime_mode_active_shader_files: Option<Vec<String>>,
+    #[serde(default, alias = "animeAutoShaderEnabled")]
+    pub anime_mode_enabled: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]

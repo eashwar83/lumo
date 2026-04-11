@@ -8,8 +8,18 @@ import {
 } from "../useUiStateStore";
 
 export type StoredRenderingState = {
+    renderingMode?: "normal" | "animeMode" | "animeAuto";
     selectedShaderFiles?: string[];
     activeShaderFiles?: string[];
+    animeModeEnabled?: boolean;
+    animeAutoShaderEnabled?: boolean;
+    // Legacy split-selected fields kept for migration only.
+    normalSelectedShaderFiles?: string[];
+    normalActiveShaderFiles?: string[];
+    animeModeSelectedShaderFiles?: string[];
+    animeModeActiveShaderFiles?: string[];
+    animeSelectedShaderFiles?: string[];
+    animeActiveShaderFiles?: string[];
 };
 
 export const useRenderingSettingsSection = () => {
@@ -17,6 +27,9 @@ export const useRenderingSettingsSection = () => {
     const activeShaderFiles = ref<string[]>([]);
     const unavailableShaderFiles = ref<string[]>([]);
     const multiShaderEnabled = ref(false);
+    const renderingMode = ref<"normal" | "animeMode">("normal");
+    const normalActiveShaderFiles = ref<string[]>([]);
+    const animeModeActiveShaderFiles = ref<string[]>([]);
 
     const RENDERING_APPLY_DELAY_MS = 200;
     let renderingApplyTimer: number | null = null;
@@ -46,11 +59,35 @@ export const useRenderingSettingsSection = () => {
         return normalized;
     };
 
+    const persistCurrentModeSelection = () => {
+        if (renderingMode.value === "normal") {
+            normalActiveShaderFiles.value = [...activeShaderFiles.value];
+            return;
+        }
+        animeModeActiveShaderFiles.value = [...activeShaderFiles.value];
+    };
+
+    const hydrateFromModeSelection = () => {
+        if (renderingMode.value === "normal") {
+            activeShaderFiles.value = [...normalActiveShaderFiles.value];
+            return;
+        }
+        activeShaderFiles.value = [...animeModeActiveShaderFiles.value];
+    };
+
     const ensureValidShaderSelection = () => {
         selectedShaderFiles.value = normalizeShaderFiles(selectedShaderFiles.value);
         activeShaderFiles.value = normalizeActiveShaderFiles(
             selectedShaderFiles.value,
             activeShaderFiles.value,
+        );
+        normalActiveShaderFiles.value = normalizeActiveShaderFiles(
+            selectedShaderFiles.value,
+            normalActiveShaderFiles.value,
+        );
+        animeModeActiveShaderFiles.value = normalizeActiveShaderFiles(
+            selectedShaderFiles.value,
+            animeModeActiveShaderFiles.value,
         );
         if (selectedShaderFiles.value.length <= 1) {
             multiShaderEnabled.value = false;
@@ -89,6 +126,7 @@ export const useRenderingSettingsSection = () => {
 
     const buildRenderingRequestKey = (): string =>
         JSON.stringify({
+            renderingMode: renderingMode.value,
             selectedShaderFiles: selectedShaderFiles.value,
             activeShaderFiles: activeShaderFiles.value,
         });
@@ -96,6 +134,9 @@ export const useRenderingSettingsSection = () => {
     const applyRenderingOptions = async () => {
         ensureValidShaderSelection();
         applyUnavailableFiltering();
+        persistCurrentModeSelection();
+        const runtimeActiveShaderFiles =
+            renderingMode.value === "normal" ? activeShaderFiles.value : [];
         const requestKey = buildRenderingRequestKey();
         if (requestKey === lastAppliedRenderingRequestKey) {
             return;
@@ -103,16 +144,24 @@ export const useRenderingSettingsSection = () => {
 
         const applied = await applyRenderingSettings(
             selectedShaderFiles.value,
-            activeShaderFiles.value,
+            runtimeActiveShaderFiles,
         );
         if (!applied) return;
 
         selectedShaderFiles.value = normalizeShaderFiles(applied.selectedShaderFiles);
-        activeShaderFiles.value = normalizeActiveShaderFiles(
-            selectedShaderFiles.value,
-            applied.activeShaderFiles,
-        );
+        if (renderingMode.value === "normal") {
+            activeShaderFiles.value = normalizeActiveShaderFiles(
+                selectedShaderFiles.value,
+                applied.activeShaderFiles,
+            );
+        } else {
+            activeShaderFiles.value = normalizeActiveShaderFiles(
+                selectedShaderFiles.value,
+                activeShaderFiles.value,
+            );
+        }
         applyUnavailableFiltering();
+        persistCurrentModeSelection();
 
         lastAppliedRenderingRequestKey = buildRenderingRequestKey();
     };
@@ -157,6 +206,7 @@ export const useRenderingSettingsSection = () => {
             selectedShaderFiles.value,
             activeShaderFiles.value,
         );
+        persistCurrentModeSelection();
         await refreshShaderAvailability();
     };
 
@@ -178,6 +228,7 @@ export const useRenderingSettingsSection = () => {
             selectedShaderFiles.value,
             activeShaderFiles.value,
         );
+        persistCurrentModeSelection();
     };
 
     const setMultiShaderEnabled = (enabled: boolean) => {
@@ -185,6 +236,7 @@ export const useRenderingSettingsSection = () => {
         if (!multiShaderEnabled.value && activeShaderFiles.value.length > 1) {
             activeShaderFiles.value = activeShaderFiles.value.slice(0, 1);
         }
+        persistCurrentModeSelection();
     };
 
     const removeShaderFromList = (shaderFile: string) => {
@@ -200,6 +252,7 @@ export const useRenderingSettingsSection = () => {
         if (selectedShaderFiles.value.length <= 1) {
             multiShaderEnabled.value = false;
         }
+        persistCurrentModeSelection();
     };
 
     const clearShaders = () => {
@@ -207,23 +260,69 @@ export const useRenderingSettingsSection = () => {
         activeShaderFiles.value = [];
         unavailableShaderFiles.value = [];
         multiShaderEnabled.value = false;
+        persistCurrentModeSelection();
+    };
+
+    const setRenderingMode = (mode: "normal" | "animeMode") => {
+        if (mode === renderingMode.value) return;
+        persistCurrentModeSelection();
+        renderingMode.value = mode;
+        hydrateFromModeSelection();
+        ensureValidShaderSelection();
+        void refreshShaderAvailability();
+        scheduleApplyRenderingOptions();
     };
 
     const resetRenderingSettings = () => {
         selectedShaderFiles.value = [];
         activeShaderFiles.value = [];
         multiShaderEnabled.value = false;
+        renderingMode.value = "normal";
+        normalActiveShaderFiles.value = [];
+        animeModeActiveShaderFiles.value = [];
         void applyRenderingOptions();
     };
 
     const loadRenderingSettings = async (stored?: StoredRenderingState) => {
-        selectedShaderFiles.value = normalizeShaderFiles(
+        const legacyMode: "normal" | "animeMode" =
+            stored?.renderingMode === "animeMode" ||
+            stored?.renderingMode === "animeAuto" ||
+            stored?.animeModeEnabled === true ||
+            stored?.animeAutoShaderEnabled === true
+                ? "animeMode"
+                : "normal";
+
+        const legacySelected = normalizeShaderFiles(
             stored?.selectedShaderFiles ?? [],
         );
-        activeShaderFiles.value = normalizeActiveShaderFiles(
-            selectedShaderFiles.value,
+        const legacyActive = normalizeActiveShaderFiles(
+            legacySelected,
             stored?.activeShaderFiles ?? [],
         );
+
+        selectedShaderFiles.value = legacySelected;
+        if (!selectedShaderFiles.value.length) {
+            selectedShaderFiles.value = normalizeShaderFiles([
+                ...(stored?.normalSelectedShaderFiles ?? []),
+                ...(stored?.animeModeSelectedShaderFiles ?? []),
+                ...(stored?.animeSelectedShaderFiles ?? []),
+            ]);
+        }
+        normalActiveShaderFiles.value = normalizeActiveShaderFiles(
+            selectedShaderFiles.value,
+            stored?.normalActiveShaderFiles ??
+                (legacyMode === "normal" ? legacyActive : []),
+        );
+
+        animeModeActiveShaderFiles.value = normalizeActiveShaderFiles(
+            selectedShaderFiles.value,
+            stored?.animeModeActiveShaderFiles ??
+                stored?.animeActiveShaderFiles ??
+                (legacyMode === "animeMode" ? legacyActive : []),
+        );
+
+        renderingMode.value = legacyMode;
+        hydrateFromModeSelection();
         multiShaderEnabled.value =
             selectedShaderFiles.value.length > 1 &&
             activeShaderFiles.value.length > 1;
@@ -243,9 +342,11 @@ export const useRenderingSettingsSection = () => {
         activeShaderFiles,
         unavailableShaderFiles,
         multiShaderEnabled,
+        renderingMode,
         browseForCustomShaders,
         setShaderEnabled,
         setMultiShaderEnabled,
+        setRenderingMode,
         removeShaderFromList,
         clearShaders,
         scheduleApplyRenderingOptions,
@@ -253,8 +354,18 @@ export const useRenderingSettingsSection = () => {
         loadRenderingSettings,
         dispose,
         toPersistedRendering: () => ({
+            renderingMode: renderingMode.value,
             selectedShaderFiles: selectedShaderFiles.value,
+            normalActiveShaderFiles:
+                renderingMode.value === "normal"
+                    ? activeShaderFiles.value
+                    : normalActiveShaderFiles.value,
             activeShaderFiles: activeShaderFiles.value,
+            animeModeActiveShaderFiles:
+                renderingMode.value === "animeMode"
+                    ? activeShaderFiles.value
+                    : animeModeActiveShaderFiles.value,
+            animeModeEnabled: renderingMode.value === "animeMode",
         }),
     };
 };

@@ -127,7 +127,11 @@ export const useSettingsPanel = () => {
     );
 
     watch(
-        [rendering.selectedShaderFiles, rendering.activeShaderFiles],
+        [
+            rendering.renderingMode,
+            rendering.selectedShaderFiles,
+            rendering.activeShaderFiles,
+        ],
         () => {
             if (isLoading.value) return;
             rendering.scheduleApplyRenderingOptions();
@@ -173,8 +177,10 @@ export const useSettingsPanel = () => {
         activeShaderFiles: rendering.activeShaderFiles,
         unavailableShaderFiles: rendering.unavailableShaderFiles,
         multiShaderEnabled: rendering.multiShaderEnabled,
+        renderingMode: rendering.renderingMode,
         setShaderEnabled: rendering.setShaderEnabled,
         setMultiShaderEnabled: rendering.setMultiShaderEnabled,
+        setRenderingMode: rendering.setRenderingMode,
         removeShaderFromList: rendering.removeShaderFromList,
         clearShaders: rendering.clearShaders,
         isFixedLogPathItem: general.isFixedLogPathItem,

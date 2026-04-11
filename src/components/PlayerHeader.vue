@@ -60,8 +60,17 @@ const showDesktopCompactControls = computed(
 );
 
 type StoredRenderingState = {
+    renderingMode?: "normal" | "animeMode" | "animeAuto";
     selectedShaderFiles?: string[];
     activeShaderFiles?: string[];
+    animeModeEnabled?: boolean;
+    animeAutoShaderEnabled?: boolean;
+    normalSelectedShaderFiles?: string[];
+    normalActiveShaderFiles?: string[];
+    animeModeSelectedShaderFiles?: string[];
+    animeModeActiveShaderFiles?: string[];
+    animeSelectedShaderFiles?: string[];
+    animeActiveShaderFiles?: string[];
 };
 
 const refreshWindowMaximizedState = async () => {
@@ -360,6 +369,7 @@ const configuredActiveShaderPaths = ref<string[]>([]);
 const configuredActiveShaderNames = ref<string[]>([]);
 const isPlaybackShaderEnabled = ref(false);
 const isPlaybackShaderToggleBusy = ref(false);
+const renderingMode = ref<"normal" | "animeMode">("normal");
 
 const shaderDisplayNameFromPath = (path: string) => {
     const normalized = path.trim();
@@ -381,8 +391,36 @@ const updateActiveShaderNames = (paths?: string[]) => {
 };
 
 const setRenderingStateFromStored = (rendering?: StoredRenderingState) => {
-    configuredSelectedShaderPaths.value = rendering?.selectedShaderFiles ?? [];
-    configuredActiveShaderPaths.value = rendering?.activeShaderFiles ?? [];
+    const resolvedMode: "normal" | "animeMode" =
+        rendering?.renderingMode === "animeMode" ||
+        rendering?.renderingMode === "animeAuto" ||
+        rendering?.animeModeEnabled === true ||
+        rendering?.animeAutoShaderEnabled === true
+            ? "animeMode"
+            : "normal";
+    renderingMode.value = resolvedMode;
+
+    const sharedSelected = rendering?.selectedShaderFiles ?? [];
+    const legacyActive = rendering?.activeShaderFiles ?? [];
+    const fallbackSelected = [
+        ...(rendering?.normalSelectedShaderFiles ?? []),
+        ...(rendering?.animeModeSelectedShaderFiles ?? []),
+        ...(rendering?.animeSelectedShaderFiles ?? []),
+    ];
+    const selected = (sharedSelected.length ? sharedSelected : fallbackSelected)
+        .map((path) => path.trim())
+        .filter((path) => Boolean(path));
+    const normalActive =
+        rendering?.normalActiveShaderFiles ??
+        (resolvedMode === "normal" ? legacyActive : []);
+    const animeActive =
+        rendering?.animeModeActiveShaderFiles ??
+        rendering?.animeActiveShaderFiles ??
+        (resolvedMode === "animeMode" ? legacyActive : []);
+
+    configuredSelectedShaderPaths.value = selected;
+    configuredActiveShaderPaths.value =
+        resolvedMode === "normal" ? normalActive : animeActive;
     updateActiveShaderNames(configuredActiveShaderPaths.value);
 };
 
@@ -391,7 +429,7 @@ const refreshShaderNamesFromState = async () => {
         rendering?: StoredRenderingState;
     }>();
     setRenderingStateFromStored(stored?.rendering);
-    isPlaybackShaderEnabled.value = configuredActiveShaderPaths.value.length > 0;
+    isPlaybackShaderEnabled.value = resolvePlaybackShaderEnabledState();
 };
 
 const onSettingsUpdated = (event: Event) => {
@@ -404,9 +442,7 @@ const onSettingsUpdated = (event: Event) => {
         return;
     }
     setRenderingStateFromStored(nextRendering);
-    if (!configuredActiveShaderPaths.value.length) {
-        isPlaybackShaderEnabled.value = false;
-    }
+    isPlaybackShaderEnabled.value = resolvePlaybackShaderEnabledState();
 };
 
 const canTogglePlaybackShader = computed(
@@ -447,15 +483,141 @@ const shaderLine = computed(() => {
     return `Shader: ${configuredActiveShaderNames.value.join(" + ")}`;
 });
 
+const ANIME_DETECT_KEYWORDS = [
+    "/anime/",
+    "\\anime\\",
+    "anime",
+    "donghua",
+    "cartoon",
+    "animation",
+    "3d_anime",
+    "動漫",
+    "动漫",
+    "番剧",
+    "新番",
+    "ani-one",
+    "aniplus",
+    "crunchyroll",
+    "bilibili",
+    "哔哩哔哩",
+];
+
+const LIVE_ACTION_KEYWORDS = [
+    "live action",
+    "live-action",
+    "liveaction",
+    "drama",
+    "real person",
+];
+
+const ANIME_CRC_PATTERN = /\[[0-9a-f]{8}\]/i;
+const ANIME_RELEASE_GROUP_PATTERN = /\[[^\]]+\]/;
+
+const isLikelyAnimeMedia = (input: string) => {
+    const normalized = input.trim().toLowerCase();
+    if (!normalized) return false;
+    return ANIME_DETECT_KEYWORDS.some((keyword) =>
+        normalized.includes(keyword.toLowerCase()),
+    );
+};
+
+const hasLiveActionSignal = () => {
+    const searchStr = `${props.url ?? ""} ${props.mediaTitle ?? ""}`.toLowerCase();
+    return LIVE_ACTION_KEYWORDS.some((keyword) => searchStr.includes(keyword));
+};
+
+const hasAnimeCrcSignal = () => {
+    const searchStr = `${props.url ?? ""} ${props.mediaTitle ?? ""}`;
+    return ANIME_CRC_PATTERN.test(searchStr);
+};
+
+const hasAnimeReleaseSyntaxSignal = () => {
+    const title = props.mediaTitle ?? "";
+    return ANIME_RELEASE_GROUP_PATTERN.test(title);
+};
+
+const hasJapaneseAudioSignal = () =>
+    props.audioTracks.some((track) => {
+        const lang = track.lang?.trim().toLowerCase();
+        return lang === "ja" || lang === "jpn";
+    });
+
+const shouldEnableShaderForCurrentMedia = () => {
+    if (!configuredActiveShaderPaths.value.length) return false;
+    if (renderingMode.value === "normal") return true;
+
+    // Keep the same priority as mpv-anime-build auto mode:
+    // live-action override > CRC super-signal > standard anime signals.
+    if (hasLiveActionSignal()) return false;
+    if (hasAnimeCrcSignal()) return true;
+    return (
+        isLikelyAnimeMedia(props.mediaTitle ?? "") ||
+        isLikelyAnimeMedia(props.url ?? "") ||
+        hasAnimeReleaseSyntaxSignal() ||
+        hasJapaneseAudioSignal()
+    );
+};
+
+const resolvePlaybackShaderEnabledState = () => {
+    if (!configuredActiveShaderPaths.value.length) return false;
+    if (!props.isFileLoaded || !props.url) return true;
+    return shouldEnableShaderForCurrentMedia();
+};
+
 watch(
-    () => [props.isFileLoaded, props.url] as const,
-    ([isFileLoaded, nextUrl], [prevLoaded, prevUrl]) => {
+    () =>
+        [
+            props.isFileLoaded,
+            props.url,
+            props.mediaTitle,
+            props.audioTracks.map((track) => track.lang ?? "").join("\n"),
+            renderingMode.value,
+            configuredSelectedShaderPaths.value.join("\n"),
+            configuredActiveShaderPaths.value.join("\n"),
+        ] as const,
+    (
+        [
+            isFileLoaded,
+            nextUrl,
+            nextTitle,
+            nextAudioLangsKey,
+            ,
+            nextSelectedKey,
+            nextActiveKey,
+        ],
+        [
+            prevLoaded,
+            prevUrl,
+            prevTitle,
+            prevAudioLangsKey,
+            prevMode,
+            prevSelectedKey,
+            prevActiveKey,
+        ],
+    ) => {
         if (!isFileLoaded || !nextUrl) return;
-        if (prevLoaded && prevUrl === nextUrl) return;
-        isPlaybackShaderEnabled.value =
-            configuredActiveShaderPaths.value.length > 0;
-        if (!isPlaybackShaderEnabled.value) return;
-        void applyPlaybackShaderState(true);
+        const isNewMedia = !prevLoaded || prevUrl !== nextUrl;
+        const titleChanged = nextTitle !== prevTitle;
+        const audioLangsChanged = nextAudioLangsKey !== prevAudioLangsKey;
+        const modeChanged = renderingMode.value !== prevMode;
+        const shaderConfigChanged =
+            nextSelectedKey !== prevSelectedKey ||
+            nextActiveKey !== prevActiveKey;
+        const animeRetestNeeded =
+            renderingMode.value === "animeMode" &&
+            (titleChanged || audioLangsChanged);
+        if (
+            !isNewMedia &&
+            !modeChanged &&
+            !animeRetestNeeded &&
+            !shaderConfigChanged
+        ) {
+            return;
+        }
+
+        const shouldEnable = shouldEnableShaderForCurrentMedia();
+        isPlaybackShaderEnabled.value = shouldEnable;
+        void applyPlaybackShaderState(shouldEnable);
     },
 );
 
