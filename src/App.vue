@@ -97,7 +97,7 @@ const {
     onStopPlayback,
     requestOpenFilePicker,
     openSelectedPaths,
-    allowUrlInputDuringPlayback,
+    playbackTitleMode,
     compactModeEnabled,
     wallpaperModeEnabled,
 } = playbackFlow;
@@ -687,7 +687,7 @@ function onWindowFocusDrainPendingFiles() {
             :is-info-open="isInfoOpen"
             :is-playlist-open="isPlaylistOpen"
             :is-loading="isLoadingForCurrentUrl"
-            :allow-url-input-during-playback="allowUrlInputDuringPlayback"
+            :playback-title-mode="playbackTitleMode"
             :compact-mode-enabled="playerHeaderCompactModeEnabled"
             :is-fullscreen="player.state.window.isFullscreen"
             :info="mediaInfo"

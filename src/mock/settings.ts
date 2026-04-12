@@ -59,11 +59,19 @@ export const WALLPAPER_MODE_SETTING_LABEL = "WALLPAPER_MODE";
 export const AUTO_PLAY_ON_OPEN_SETTING_LABEL = "Auto‑Play";
 export const AUTO_PLAY_NEXT_IN_PLAYLIST_SETTING_LABEL =
     "AUTO_PLAY_NEXT_IN_PLAYLIST";
+export const PLAYBACK_TITLE_SETTING_LABEL = "PLAYBACK_TITLE";
 export const ALLOW_URL_INPUT_DURING_PLAYBACK_SETTING_LABEL =
     "ALLOW_URL_INPUT_DURING_PLAYBACK";
 export const DEFAULT_SPEED_SETTING_LABEL = "Default Speed";
 export const IMAGE_DISPLAY_DURATION_SETTING_LABEL = "IMAGE_DISPLAY_DURATION";
 export const SETTINGS_UPDATED_EVENT = "soia:settings-updated";
+
+export type PlaybackTitleMode = "Show" | "Editable" | "Hidden";
+export const PLAYBACK_TITLE_MODE_OPTIONS: PlaybackTitleMode[] = [
+    "Show",
+    "Editable",
+    "Hidden",
+];
 
 export const defaultSettingGroups: SettingGroup[] = [
     {
@@ -89,6 +97,13 @@ export const defaultSettingGroups: SettingGroup[] = [
         title: "Playback",
         items: [
             {
+                label: PLAYBACK_TITLE_SETTING_LABEL,
+                displayLabel: "Playback Title",
+                value: "Show",
+                type: "select",
+                options: [...PLAYBACK_TITLE_MODE_OPTIONS],
+            },
+            {
                 label: AUTO_PLAY_ON_OPEN_SETTING_LABEL,
                 displayLabel: "Auto-Play on Open",
                 value: "On",
@@ -99,14 +114,6 @@ export const defaultSettingGroups: SettingGroup[] = [
             {
                 label: AUTO_PLAY_NEXT_IN_PLAYLIST_SETTING_LABEL,
                 displayLabel: "Auto-Play Next in Playlist",
-                value: "On",
-                type: "toggle",
-                onValue: "On",
-                offValue: "Off",
-            },
-            {
-                label: ALLOW_URL_INPUT_DURING_PLAYBACK_SETTING_LABEL,
-                displayLabel: "Allow URL Input During Playback",
                 value: "On",
                 type: "toggle",
                 onValue: "On",

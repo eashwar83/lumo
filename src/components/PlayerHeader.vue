@@ -2,7 +2,10 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type { MediaInfo } from "../mock/mediaInfo";
-import { SETTINGS_UPDATED_EVENT } from "../mock/settings";
+import {
+    SETTINGS_UPDATED_EVENT,
+    type PlaybackTitleMode,
+} from "../mock/settings";
 import type { MediaTrack } from "../types/media";
 import { applyRenderingSettings, loadUiState } from "../composables/useUiStateStore";
 import { getPathDisplayName } from "../utils/getPathDisplayName";
@@ -17,7 +20,7 @@ const props = defineProps<{
     isInfoOpen: boolean;
     isPlaylistOpen: boolean;
     isLoading: boolean;
-    allowUrlInputDuringPlayback: boolean;
+    playbackTitleMode: PlaybackTitleMode;
     compactModeEnabled: boolean;
     isFullscreen: boolean;
     info: MediaInfo | null;
@@ -143,8 +146,11 @@ onUnmounted(() => {
 const subtitleTracks = computed(() =>
     props.subTracks.filter((track) => Number(track.id) !== 0),
 );
+const isPlaybackTitleHidden = computed(
+    () => props.playbackTitleMode === "Hidden" && props.isFileLoaded,
+);
 const isUrlInputLocked = computed(
-    () => props.isFileLoaded && !props.allowUrlInputDuringPlayback,
+    () => props.isFileLoaded && props.playbackTitleMode !== "Editable",
 );
 const isUrlInputFocused = ref(false);
 
@@ -678,6 +684,7 @@ watch(
                     :class="{
                         'top-bar__input--loading': props.isLoading,
                         'top-bar__input--readonly': isUrlInputLocked,
+                        'top-bar__input--hidden': isPlaybackTitleHidden,
                     }"
                     :value="displayUrlInputValue"
                     :readonly="isUrlInputLocked"
@@ -1078,6 +1085,12 @@ watch(
     -webkit-user-select: none;
     caret-color: transparent;
     cursor: default;
+}
+
+.top-bar__input--hidden {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
 }
 
 @keyframes input-loading {

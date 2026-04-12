@@ -9,9 +9,11 @@ import {
     AUTO_PLAY_ON_OPEN_SETTING_LABEL,
     DEFAULT_SPEED_SETTING_LABEL,
     ENABLE_COMPACT_MODE_SETTING_LABEL,
+    PLAYBACK_TITLE_SETTING_LABEL,
     SETTINGS_UPDATED_EVENT,
     SKIP_INTRO_SECONDS_SETTING_LABEL,
     WALLPAPER_MODE_SETTING_LABEL,
+    type PlaybackTitleMode,
 } from "../mock/settings";
 
 type TracksApi = {
@@ -65,7 +67,7 @@ type PlaybackPreferences = {
     skipIntroSeconds: number;
     defaultSpeed: number;
     autoPlay: boolean;
-    allowUrlInputDuringPlayback: boolean;
+    playbackTitleMode: PlaybackTitleMode;
     compactModeEnabled: boolean;
     wallpaperModeEnabled: boolean;
 };
@@ -74,9 +76,22 @@ const DEFAULT_PLAYBACK_PREFERENCES: PlaybackPreferences = {
     skipIntroSeconds: 0,
     defaultSpeed: 1.0,
     autoPlay: true,
-    allowUrlInputDuringPlayback: true,
+    playbackTitleMode: "Show",
     compactModeEnabled: false,
     wallpaperModeEnabled: false,
+};
+
+const normalizePlaybackTitleMode = (
+    value?: string | null,
+): PlaybackTitleMode => {
+    const normalized = value?.trim().toLowerCase();
+    if (normalized === "editable" || normalized === "on") {
+        return "Editable";
+    }
+    if (normalized === "hidden") {
+        return "Hidden";
+    }
+    return "Show";
 };
 
 const parsePlaybackPreferences = (
@@ -97,8 +112,10 @@ const parsePlaybackPreferences = (
     const defaultSpeedRaw = getValue(DEFAULT_SPEED_SETTING_LABEL) ?? "1.0x";
     const defaultSpeed = Number.parseFloat(defaultSpeedRaw.replace(/x$/i, "").trim());
     const autoPlayValue = getValue(AUTO_PLAY_ON_OPEN_SETTING_LABEL) ?? "On";
-    const allowUrlInputDuringPlaybackValue =
-        getValue(ALLOW_URL_INPUT_DURING_PLAYBACK_SETTING_LABEL) ?? "On";
+    const playbackTitleModeValue = normalizePlaybackTitleMode(
+        getValue(PLAYBACK_TITLE_SETTING_LABEL) ??
+            getValue(ALLOW_URL_INPUT_DURING_PLAYBACK_SETTING_LABEL),
+    );
     const compactModeValue = getValue(ENABLE_COMPACT_MODE_SETTING_LABEL) ?? "On";
     const wallpaperModeValue = getValue(WALLPAPER_MODE_SETTING_LABEL) ?? "Disable";
 
@@ -107,7 +124,7 @@ const parsePlaybackPreferences = (
         defaultSpeed:
             Number.isFinite(defaultSpeed) && defaultSpeed > 0 ? defaultSpeed : 1.0,
         autoPlay: autoPlayValue === "On",
-        allowUrlInputDuringPlayback: allowUrlInputDuringPlaybackValue === "On",
+        playbackTitleMode: playbackTitleModeValue,
         compactModeEnabled: compactModeValue === "On",
         wallpaperModeEnabled: wallpaperModeValue === "Enable",
     };
@@ -361,8 +378,8 @@ export const usePlaybackFlow = ({
     const isLoadingForCurrentUrl = computed(
         () => isLoading.value && loadingUrl.value === player.state.media.url,
     );
-    const allowUrlInputDuringPlayback = computed(
-        () => playbackPreferences.value.allowUrlInputDuringPlayback,
+    const playbackTitleMode = computed(
+        () => playbackPreferences.value.playbackTitleMode,
     );
     const compactModeEnabled = computed(
         () => playbackPreferences.value.compactModeEnabled,
@@ -385,7 +402,7 @@ export const usePlaybackFlow = ({
         onStopPlayback,
         requestOpenFilePicker,
         openSelectedPaths: openWithSelected,
-        allowUrlInputDuringPlayback,
+        playbackTitleMode,
         compactModeEnabled,
         wallpaperModeEnabled,
     };
