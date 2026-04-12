@@ -477,9 +477,6 @@ const onPlaybackShaderToggle = async (event: Event) => {
 };
 
 const shaderLine = computed(() => {
-    if (!configuredActiveShaderNames.value.length) {
-        return "Shader: Off";
-    }
     return `Shader: ${configuredActiveShaderNames.value.join(" + ")}`;
 });
 
@@ -859,11 +856,10 @@ watch(
                     <div class="info-panel__label">Playback</div>
                     <div class="info-panel__value">{{ playbackLine }}</div>
                     <div
+                        v-if="configuredActiveShaderNames.length > 0"
                         class="info-panel__value info-panel__value--shader info-panel__value--shader-row"
                         :class="{
-                            'info-panel__value--shader-disabled':
-                                !isPlaybackShaderEnabled &&
-                                configuredActiveShaderNames.length > 0,
+                            'info-panel__value--shader-disabled': !isPlaybackShaderEnabled,
                         }"
                     >
                         <span>{{ shaderLine }}</span>
