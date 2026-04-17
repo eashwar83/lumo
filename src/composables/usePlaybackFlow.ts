@@ -150,6 +150,8 @@ export const usePlaybackFlow = ({
         compactModeEnabled: true,
         wallpaperModeEnabled: false,
     });
+    const preferredTitleByUrl = new Map<string, string>();
+    const preferredTitleByResourceKey = new Map<string, string>();
     let loadPlaybackPreferencesPromise: Promise<void> | null = null;
 
     const updatePlaybackPreferences = (groups?: StoredSettingGroup[]) => {
@@ -190,14 +192,52 @@ export const usePlaybackFlow = ({
         onPlaybackIntent?.();
     };
 
-    const playPath = async (path: string) => {
+    const resourceKeyFromUrl = (value: string) => {
+        const raw = value.trim();
+        if (!raw) return "";
+        try {
+            const parsed = new URL(raw);
+            const pathname = decodeURIComponent(parsed.pathname || "").trim();
+            if (!pathname) return parsed.origin.toLowerCase();
+            return `${parsed.origin}${pathname}`.toLowerCase();
+        } catch {
+            return raw.toLowerCase();
+        }
+    };
+
+    const rememberPreferredTitle = (url: string, preferredTitle?: string) => {
+        const normalizedPreferredTitle = preferredTitle?.trim() || "";
+        if (!normalizedPreferredTitle) return "";
+        const fileNameFromUrl = (() => {
+            try {
+                const parsed = new URL(url);
+                const pathname = decodeURIComponent(parsed.pathname || "");
+                const segments = pathname.split("/").filter(Boolean);
+                return segments.length ? segments[segments.length - 1] : "";
+            } catch {
+                const segments = url.split("/").filter(Boolean);
+                return segments.length ? segments[segments.length - 1] : "";
+            }
+        })();
+        const extensionMatch = fileNameFromUrl.match(/(\.[a-z0-9]{1,8})$/i);
+        const normalizedWithExtension =
+            !/\.[a-z0-9]{1,8}$/i.test(normalizedPreferredTitle) && extensionMatch
+                ? `${normalizedPreferredTitle}${extensionMatch[1]}`
+                : normalizedPreferredTitle;
+        preferredTitleByUrl.set(url, normalizedWithExtension);
+        const key = resourceKeyFromUrl(url);
+        if (key) preferredTitleByResourceKey.set(key, normalizedWithExtension);
+        return normalizedWithExtension;
+    };
+
+    const playPath = async (path: string, preferredTitle?: string) => {
         if (!path) return;
         triggerPlaybackIntent();
         hideHistory.value = true;
         nowPlaying.clearArtwork();
         tracks.resetTracks();
         player.state.media.url = path;
-        player.state.media.title = "";
+        player.state.media.title = rememberPreferredTitle(path, preferredTitle);
         player.state.playback.isBuffering = false;
         player.state.playback.downloadSpeedBps = 0;
         player.state.playback.hwdecCurrent = "";
@@ -215,13 +255,17 @@ export const usePlaybackFlow = ({
         connectionId: string,
         filePath: string,
         playbackKey: string,
+        preferredTitle?: string,
     ) => {
         triggerPlaybackIntent();
         hideHistory.value = true;
         nowPlaying.clearArtwork();
         tracks.resetTracks();
         player.state.media.url = playbackKey;
-        player.state.media.title = "";
+        player.state.media.title = rememberPreferredTitle(
+            playbackKey,
+            preferredTitle,
+        );
         player.state.playback.isBuffering = false;
         player.state.playback.downloadSpeedBps = 0;
         player.state.playback.hwdecCurrent = "";
@@ -320,19 +364,26 @@ export const usePlaybackFlow = ({
     });
 
     const onPlayHistory = async (entry: HistoryEntry) => {
+        const preferredTitle = entry.title?.trim() || "";
         const source = parsePlaybackSource(entry.path);
         if (source.type === "webdav") {
-            await playWebdav(source.connectionId, source.filePath, source.key);
+            await playWebdav(
+                source.connectionId,
+                source.filePath,
+                source.key,
+                preferredTitle,
+            );
             return;
         }
         hideHistory.value = true;
-        await playPath(source.path);
+        await playPath(source.path, preferredTitle);
     };
 
     const onPlayNetwork = async (payload: NetworkPlayRequest) => {
+        const displayName = payload.displayName?.trim() || "";
         const protocol = payload.protocol.trim().toLowerCase();
         if (protocol === "http-dlna" || protocol === "dlna") {
-            await playPath(payload.playbackKey);
+            await playPath(payload.playbackKey, displayName);
             return;
         }
         if (protocol === "webdav") {
@@ -340,6 +391,7 @@ export const usePlaybackFlow = ({
                 payload.connectionId,
                 payload.filePath,
                 payload.playbackKey,
+                displayName,
             );
             return;
         }
@@ -355,6 +407,17 @@ export const usePlaybackFlow = ({
         player.state.playback.downloadSpeedBps = 0;
         player.state.playback.hwdecCurrent = "";
         nowPlaying.clearArtwork();
+    };
+
+    const resolveMediaTitle = (incomingTitle: string, currentUrl: string) => {
+        const preferred = preferredTitleByUrl.get(currentUrl)?.trim() || "";
+        if (preferred) return preferred;
+        const preferredByKey =
+            preferredTitleByResourceKey
+                .get(resourceKeyFromUrl(currentUrl))
+                ?.trim() || "";
+        if (preferredByKey) return preferredByKey;
+        return incomingTitle.trim();
     };
 
     const onStopPlayback = async () => {
@@ -409,6 +472,7 @@ export const usePlaybackFlow = ({
         onPlayHistory,
         onPlayNetwork,
         onUpdateUrl,
+        resolveMediaTitle,
         onStopPlayback,
         requestOpenFilePicker,
         openSelectedPaths: openWithSelected,

@@ -45,6 +45,7 @@ type AppEventBindingsOptions = {
     onPlaybackRestart?: () => void | Promise<void>;
     onProgress?: (payload: ProgressPayload) => void;
     onEndFile?: (payload: EndFilePayload) => void | Promise<void>;
+    resolveMediaTitle?: (incomingTitle: string, currentUrl: string) => string;
 };
 
 const AUTO_RESIZE_MIN_WIDTH = 720;
@@ -64,6 +65,7 @@ export const useAppEventBindings = ({
     onPlaybackRestart,
     onProgress,
     onEndFile,
+    resolveMediaTitle,
 }: AppEventBindingsOptions) => {
     // 事件监听器引用
     let unlistenProgress: UnlistenFn | null = null;
@@ -151,7 +153,11 @@ export const useAppEventBindings = ({
         });
 
         unlistenMediaTitle = await listen<string>("mpv-media-title", (event) => {
-            const title = typeof event.payload === "string" ? event.payload.trim() : "";
+            const incomingTitle =
+                typeof event.payload === "string" ? event.payload.trim() : "";
+            const title = resolveMediaTitle
+                ? resolveMediaTitle(incomingTitle, player.state.media.url)
+                : incomingTitle;
             player.state.media.title = title;
         });
 

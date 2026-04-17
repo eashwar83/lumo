@@ -37,4 +37,5 @@ export type NetworkPlayRequest = {
     connectionId: string;
     filePath: string;
     playbackKey: string;
+    displayName: string;
 };

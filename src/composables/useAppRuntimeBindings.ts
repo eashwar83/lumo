@@ -40,6 +40,7 @@ export const useAppRuntimeBindings = ({
     onPlaybackRestart,
     onProgress,
     onEndFile,
+    resolveMediaTitle,
     nowPlaying,
     isInfoOpen,
     isPlaylistOpen,
@@ -63,6 +64,7 @@ export const useAppRuntimeBindings = ({
         onPlaybackRestart,
         onProgress,
         onEndFile,
+        resolveMediaTitle,
     });
 
     watch(

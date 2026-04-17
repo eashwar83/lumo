@@ -154,11 +154,36 @@ const isUrlInputLocked = computed(
 );
 const isUrlInputFocused = ref(false);
 
-const displayUrlInputValue = computed(() =>
-    isUrlInputFocused.value
-        ? props.url
-        : getPlaybackDisplayPathWithHomePrefix(props.url),
-);
+const appendUrlExtensionToTitle = (title: string, url: string) => {
+    const normalizedTitle = title.trim();
+    if (!normalizedTitle) return normalizedTitle;
+    if (/\.[a-z0-9]{1,8}$/i.test(normalizedTitle)) return normalizedTitle;
+    const fileName = getPathDisplayName(url, "");
+    const extensionMatch = fileName.match(/(\.[a-z0-9]{1,8})$/i);
+    if (!extensionMatch) return normalizedTitle;
+    return `${normalizedTitle}${extensionMatch[1]}`;
+};
+
+const isNetworkLikeUrl = (value: string) => /^[a-z][a-z0-9+.-]*:\/\//i.test(value.trim());
+
+const displayUrlInputValue = computed(() => {
+    if (isUrlInputFocused.value) return props.url;
+
+    const title = props.mediaTitle?.trim();
+    const usePathDisplay =
+        !isNetworkLikeUrl(props.url) ||
+        props.url.trim().toLowerCase().startsWith("file://");
+
+    if (usePathDisplay) {
+        return getPlaybackDisplayPathWithHomePrefix(props.url);
+    }
+
+    if (props.isFileLoaded && title) {
+        return appendUrlExtensionToTitle(title, props.url);
+    }
+
+    return getPlaybackDisplayPathWithHomePrefix(props.url);
+});
 
 const displayInfoFilePath = computed(() =>
     props.info ? getPlaybackDisplayPathWithHomePrefix(props.info.path) : "",
