@@ -12,106 +12,174 @@ const emit = defineEmits<{
 
 <template>
     <div
-        class="home-panel"
+        class="home-panel panel"
         @mouseenter="emit('update:hover', true)"
         @mouseleave="emit('update:hover', false)"
     >
-        <button
-            class="home-panel__button"
-            :class="{
-                'home-panel__button--hidden':
-                    props.isFileLoaded && !props.hover,
-            }"
-            @click="emit('open-file-picker')"
-        >
-            <svg
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke-width="1.0"
-                stroke="currentColor"
+        <div class="home-panel__body">
+            <button
+                type="button"
+                class="home-panel__dropzone"
+                :class="{
+                    'home-panel__dropzone--hidden':
+                        props.isFileLoaded && !props.hover,
+                }"
+                @click="emit('open-file-picker')"
             >
-                <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    d="M12 4.5v15m7.5-7.5h-15"
-                />
-            </svg>
-            <p>Open a File</p>
-        </button>
+
+                <h2 class="home-panel__headline">
+                    Drag &amp; drop videos to play, or click to browse files
+                </h2>
+                <p class="home-panel__subtext">
+                    Select one or multiple videos from your device.
+                </p>
+                <p class="home-panel__subtext home-panel__subtext--muted">
+                    Selecting multiple files creates a Playlist automatically.
+                    Move your cursor to the right side of the window and click
+                    to view or edit it.
+                </p>
+
+                <span class="home-panel__cta">Choose Files</span>
+            </button>
+        </div>
     </div>
 </template>
 
 <style scoped>
 .home-panel {
-    width: 40%;
-    max-width: 270px;
-    aspect-ratio: 16 / 9;
-    border-radius: 12px;
-    overflow: hidden;
     pointer-events: auto;
 }
 
-.home-panel__button {
-    width: 90%;
-    height: 90%;
-    background-color: transparent;
-    border: 2px dashed gray;
-    border-radius: 8px;
-    color: gray;
+.home-panel__body {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-rows: minmax(0, 2fr) auto minmax(0, 3fr);
+    box-sizing: border-box;
+}
+
+.home-panel__dropzone {
+    width: 60%;
+    grid-row: 2;
+    margin: 0 auto;
+    flex: 0 0 auto;
+    min-height: 270px;
+    max-height: min(52vh, 420px);
+    border: 2px dashed color-mix(in srgb, var(--text-color) 36%, transparent);
+    border-radius: 14px;
+    background:
+        radial-gradient(
+            120% 110% at 100% 0%,
+            color-mix(in srgb, var(--text-color) 10%, transparent),
+            transparent 60%
+        ),
+        color-mix(in srgb, var(--base-color) 82%, transparent);
+    color: color-mix(in srgb, var(--text-color) 84%, transparent);
     cursor: pointer;
     display: flex;
     flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    margin: auto;
+    justify-content: flex-start;
+    align-items: flex-start;
+    text-align: left;
+    gap: 0.72rem;
+    padding: clamp(0.9rem, 1.4vw, 1.2rem) clamp(1.2rem, 2.2vw, 1.9rem);
     opacity: 1;
-    transition: all 0.3s ease;
+    transition:
+        background 0.24s ease,
+        border-color 0.24s ease,
+        color 0.24s ease,
+        box-shadow 0.24s ease,
+        transform 0.24s ease,
+        opacity 0.24s ease;
 }
 
-.home-panel__button--hidden {
+.home-panel__dropzone--hidden {
     opacity: 0;
     pointer-events: none;
     border-color: transparent;
 }
 
-.home-panel__button:not(.home-panel__button--hidden):hover {
-    background-color: rgba(0, 0, 0, 0.4);
-    border-color: var(--text-color);
-    color: var(--text-color);
+.home-panel__dropzone:not(.home-panel__dropzone--hidden):hover {
+    transform: translateY(-2px);
+    border-color: color-mix(in srgb, var(--text-color) 66%, transparent);
+    box-shadow: 0 20px 32px rgba(0, 0, 0, 0.24);
 }
 
-.home-panel__button svg {
-    width: 70px;
-    margin-bottom: 1rem;
-    filter: grayscale(100%) brightness(150%);
+.home-panel__headline {
+    margin: 0.38rem 0 0;
+    max-width: 28ch;
+    font-size: clamp(1.18rem, 1.75vw, 1.5rem);
+    line-height: 1.26;
+    letter-spacing: -0.02em;
 }
 
-.home-panel__button p {
-    font-size: 16px;
-    font-weight: 600;
+.home-panel__subtext {
     margin: 0;
+    max-width: 42ch;
+    font-size: 0.95rem;
+    line-height: 1.45;
+    opacity: 0.78;
 }
 
-:root[data-theme="light"] .home-panel__button:not(.home-panel__button--hidden):hover {
-    background-color: rgba(57, 108, 216, 0.12);
-    border-color: rgba(57, 108, 216, 0.72);
-    color: rgba(25, 43, 74, 0.94);
-    box-shadow: 0 10px 22px rgba(57, 108, 216, 0.16);
+.home-panel__subtext--muted {
+    font-size: 0.88rem;
+    opacity: 0.65;
 }
 
-:root[data-theme="light"] .home-panel__button:not(.home-panel__button--hidden):hover svg {
-    filter: grayscale(30%) brightness(100%);
+.home-panel__cta {
+    margin-top: auto;
+    align-self: flex-end;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem 0.9rem;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--text-color) 24%, transparent);
+    background: color-mix(in srgb, var(--text-color) 12%, transparent);
+    font-size: 0.8rem;
+    font-weight: 600;
 }
 
-:root[data-theme="graphite"] .home-panel__button:not(.home-panel__button--hidden):hover {
-    background-color: rgba(132, 150, 176, 0.2);
-    border-color: rgba(176, 194, 218, 0.72);
+:root[data-theme="light"] .home-panel__dropzone {
+    border-color: rgba(40, 68, 116, 0.26);
+    background:
+        radial-gradient(120% 110% at 100% 0%, rgba(57, 108, 216, 0.12), transparent 60%),
+        linear-gradient(165deg, rgba(255, 255, 255, 0.94), rgba(236, 244, 255, 0.94));
+    color: rgba(20, 34, 61, 0.92);
+}
+
+:root[data-theme="light"] .home-panel__dropzone:not(.home-panel__dropzone--hidden):hover {
+    border-color: rgba(57, 108, 216, 0.74);
+    box-shadow: 0 16px 30px rgba(57, 108, 216, 0.18);
+}
+
+:root[data-theme="light"] .home-panel__cta {
+    background: rgba(57, 108, 216, 0.13);
+    border-color: rgba(57, 108, 216, 0.28);
+}
+
+:root[data-theme="graphite"] .home-panel__dropzone:not(.home-panel__dropzone--hidden):hover {
+    border-color: rgba(180, 198, 221, 0.72);
     color: #e8eef8;
     box-shadow: 0 12px 24px rgba(0, 0, 0, 0.24);
 }
 
-:root[data-theme="graphite"] .home-panel__button:not(.home-panel__button--hidden):hover svg {
-    filter: grayscale(30%) brightness(120%);
+@media (max-width: 820px) {
+    .home-panel {
+        min-height: 0;
+    }
+
+    .home-panel__dropzone {
+        min-height: 240px;
+        max-height: 340px;
+    }
+
+    .home-panel__headline {
+        font-size: 1.16rem;
+    }
+
+    .home-panel__subtext {
+        font-size: 0.9rem;
+    }
 }
 </style>

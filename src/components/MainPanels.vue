@@ -34,7 +34,11 @@ const showPanels = () => !props.isFileLoaded;
             :class="[
                 'main-panels__content',
                 { 'main-panels__content--history': props.mode === 'history' },
-                { 'main-panels__content--settings': props.mode === 'settings' },
+                {
+                    'main-panels__content--aligned-panel':
+                        props.mode === 'network' ||
+                        props.mode === 'settings',
+                },
             ]"
         >
             <HomePanel
@@ -103,7 +107,7 @@ const showPanels = () => !props.isFileLoaded;
     padding-top: 0;
 }
 
-.main-panels__content--settings {
+.main-panels__content--aligned-panel {
     justify-content: flex-start;
     padding-top: 6px;
 }

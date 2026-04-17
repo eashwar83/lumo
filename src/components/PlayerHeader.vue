@@ -713,7 +713,7 @@ watch(
                     }"
                     :value="displayUrlInputValue"
                     :readonly="isUrlInputLocked"
-                    placeholder="Enter a url or select a file..."
+                    placeholder="Enter a video URL or select files..."
                     @mousedown="onUrlInputMouseDown"
                     @focus="onUrlInputFocus"
                     @blur="onUrlInputBlur"
