@@ -16,6 +16,8 @@ const {
     activeConnectionLabel,
     networkConnections,
     networkEntries,
+    pathCrumbs,
+    parentPath,
     selectedConnection,
     selectedConnectionConfig,
     networkPath,
@@ -202,40 +204,14 @@ const onOpenConnectionBrowser = async (connectionId: string) => {
     }
 };
 
-type PathCrumb = {
-    label: string;
-    path: string;
-};
-
-const pathCrumbs = computed<PathCrumb[]>(() => {
-    const normalized = networkPath.value || "/";
-    if (normalized === "/") return [];
-    const segments = normalized.split("/").filter(Boolean);
-    const crumbs: PathCrumb[] = [];
-    let current = "";
-    for (const segment of segments) {
-        current += `/${segment}`;
-        crumbs.push({ label: segment, path: current });
-    }
-    return crumbs;
-});
-
-const parentFolderPath = computed(() => {
-    const currentPath = networkPath.value || "/";
-    if (currentPath === "/") return null;
-    const index = currentPath.lastIndexOf("/");
-    if (index <= 0) return "/";
-    return currentPath.slice(0, index);
-});
-
 const visibleNetworkEntries = computed(() =>
     networkEntries.value.filter((entry) => !entry.isParent),
 );
 
 const onBackFolderClick = async () => {
     if (isLoading.value) return;
-    if (!parentFolderPath.value) return;
-    await onBrowsePath(parentFolderPath.value);
+    if (!parentPath.value) return;
+    await onBrowsePath(parentPath.value);
 };
 
 const onPathCrumbClick = async (path: string) => {
@@ -450,7 +426,7 @@ const formatProtocolLabel = (protocol: string) =>
                     :title="networkPath"
                 >
                         <button
-                            v-if="parentFolderPath"
+                            v-if="parentPath"
                             class="network-title__back-btn"
                             type="button"
                         :disabled="isLoading"

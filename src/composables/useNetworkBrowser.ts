@@ -7,6 +7,16 @@ import type {
     NetworkConnection,
 } from "../types/network";
 
+type PathCrumb = {
+    label: string;
+    path: string;
+};
+
+type DlnaNavigationState = {
+    parentById: Map<string, string>;
+    nameById: Map<string, string>;
+};
+
 const normalizePath = (path: string) => {
     const trimmed = path.trim();
     if (!trimmed || trimmed === "/") return "/";
@@ -26,7 +36,7 @@ const getParentPath = (path: string) => {
 
 const normalizeObjectId = (value: string) => {
     const trimmed = value.trim();
-    return trimmed || "0";
+    return (trimmed.replace(/^\/+/, "") || "0");
 };
 
 const formatSize = (bytes: number | null) => {
@@ -60,6 +70,7 @@ export const useNetworkBrowser = (
     const isLoading = ref(false);
     const errorMessage = ref("");
     const browseCache = new Map<string, Map<string, NetworkFileRow[]>>();
+    const dlnaNavigationByConnection = new Map<string, DlnaNavigationState>();
 
     const getConnectionCache = (connectionId: string) => {
         let cache = browseCache.get(connectionId);
@@ -79,6 +90,35 @@ export const useNetworkBrowser = (
     const writeCache = (connectionId: string, path: string, entries: NetworkFileRow[]) => {
         const cache = getConnectionCache(connectionId);
         cache.set(path, entries);
+    };
+
+    const getDlnaNavigation = (connectionId: string) => {
+        let state = dlnaNavigationByConnection.get(connectionId);
+        if (!state) {
+            state = {
+                parentById: new Map(),
+                nameById: new Map([["0", "Root"]]),
+            };
+            dlnaNavigationByConnection.set(connectionId, state);
+        }
+        return state;
+    };
+
+    const trackDlnaNavigation = (
+        connectionId: string,
+        currentId: string,
+        entries: NetworkBrowseEntry[],
+    ) => {
+        const state = getDlnaNavigation(connectionId);
+        if (!state.nameById.has(currentId)) {
+            state.nameById.set(currentId, currentId === "0" ? "Root" : currentId);
+        }
+        for (const entry of entries) {
+            if (entry.entryType !== "dir") continue;
+            const childId = normalizeObjectId(entry.path);
+            state.parentById.set(childId, currentId);
+            state.nameById.set(childId, entry.name);
+        }
     };
 
     const browse = async (
@@ -128,6 +168,9 @@ export const useNetworkBrowser = (
             networkPath.value = isDlna
                 ? normalizeObjectId(result.path)
                 : normalizePath(result.path);
+            if (isDlna) {
+                trackDlnaNavigation(connectionId, networkPath.value, result.entries);
+            }
             currentFiles.value = result.entries.map(mapBrowseEntry);
             writeCache(connectionId, networkPath.value, currentFiles.value);
         } catch (error) {
@@ -158,7 +201,51 @@ export const useNetworkBrowser = (
         await browse(path, "browse", { allowCache: true });
     };
 
-    const parentPath = computed(() => getParentPath(networkPath.value));
+    const parentPath = computed(() => {
+        const connectionId = selectedConnectionId.value;
+        if (!connectionId) return null;
+        const protocol = selectedConnection.value?.protocol?.toLowerCase() ?? "webdav";
+        const isDlna = protocol === "http-dlna" || protocol === "dlna";
+        if (!isDlna) {
+            return getParentPath(networkPath.value);
+        }
+        const state = getDlnaNavigation(connectionId);
+        return state.parentById.get(normalizeObjectId(networkPath.value)) ?? null;
+    });
+
+    const pathCrumbs = computed<PathCrumb[]>(() => {
+        const connectionId = selectedConnectionId.value;
+        if (!connectionId) return [];
+        const protocol = selectedConnection.value?.protocol?.toLowerCase() ?? "webdav";
+        const isDlna = protocol === "http-dlna" || protocol === "dlna";
+        if (!isDlna) {
+            const normalized = networkPath.value || "/";
+            if (normalized === "/") return [];
+            const segments = normalized.split("/").filter(Boolean);
+            const crumbs: PathCrumb[] = [];
+            let current = "";
+            for (const segment of segments) {
+                current += `/${segment}`;
+                crumbs.push({ label: segment, path: current });
+            }
+            return crumbs;
+        }
+
+        const state = getDlnaNavigation(connectionId);
+        const currentId = normalizeObjectId(networkPath.value);
+        if (currentId === "0") return [];
+        const chain: string[] = [];
+        let cursor: string | undefined = currentId;
+        while (cursor && cursor !== "0") {
+            chain.push(cursor);
+            cursor = state.parentById.get(cursor);
+        }
+        chain.reverse();
+        return chain.map((id) => ({
+            label: state.nameById.get(id) ?? id,
+            path: id,
+        }));
+    });
 
     const networkEntries = computed(() => {
         const entries = [...currentFiles.value];
@@ -181,6 +268,8 @@ export const useNetworkBrowser = (
         networkPath,
         currentFiles,
         networkEntries,
+        pathCrumbs,
+        parentPath,
         isLoading,
         errorMessage,
         hasFiles,

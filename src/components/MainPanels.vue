@@ -60,7 +60,7 @@ const showPanels = () => !props.isFileLoaded;
             />
 
             <NetworkPanel
-                v-if="showPanels() && props.mode === 'network'"
+                v-show="showPanels() && props.mode === 'network'"
                 @play-network="emit('play-network', $event)"
             />
 

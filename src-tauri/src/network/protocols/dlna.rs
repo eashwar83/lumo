@@ -339,7 +339,7 @@ fn parse_browse_result(object_id: &str, didl_xml: &str) -> Result<DlnaBrowseResu
     let doc = Document::parse(didl_xml).map_err(|e| format!("Invalid DIDL-Lite XML: {}", e))?;
     let mut entries: Vec<DlnaBrowseEntry> = Vec::new();
 
-    for node in doc.descendants().filter(|n| n.is_element()) {
+    for node in doc.root_element().children().filter(|n| n.is_element()) {
         let name = node.tag_name().name();
         if name.eq_ignore_ascii_case("container") {
             let id = node.attribute("id").unwrap_or("").trim();

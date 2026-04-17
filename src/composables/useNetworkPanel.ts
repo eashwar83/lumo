@@ -49,10 +49,12 @@ export const useNetworkPanel = () => {
     };
 
     const saveUiState = () => {
+        const protocol = selectedConnection.value?.protocol?.toLowerCase() ?? "webdav";
+        const isDlna = protocol === "http-dlna" || protocol === "dlna";
         uiStateSaver.saveDebounced({
             network: {
                 selectedConnection: selectedConnectionId.value,
-                path: browser.networkPath.value,
+                path: isDlna ? "0" : browser.networkPath.value,
             },
         });
     };
@@ -66,7 +68,7 @@ export const useNetworkPanel = () => {
         if (network?.path) {
             browser.networkPath.value =
                 selectedConnection.value?.protocol === "http-dlna"
-                    ? network.path.trim().replace(/^\/+/, "") || "0"
+                    ? "0"
                     : browser.normalizePath(network.path);
         }
     };
@@ -93,7 +95,7 @@ export const useNetworkPanel = () => {
         if (!connection) return;
         browser.networkPath.value =
             connection.protocol === "http-dlna"
-                ? connection.defaultPath || "0"
+                ? "0"
                 : browser.normalizePath(connection.defaultPath || "/");
         viewMode.value = "browser";
         await onConnect();
@@ -195,6 +197,7 @@ export const useNetworkPanel = () => {
         () => browser.networkPath.value,
         (path) => {
             if (!selectedConnection.value) return;
+            if (selectedConnection.value.protocol === "http-dlna") return;
             selectedConnection.value.defaultPath = path;
         },
     );
@@ -219,6 +222,8 @@ export const useNetworkPanel = () => {
         selectedConnection: selectedConnectionId,
         selectedConnectionConfig: selectedConnection,
         networkEntries: browser.networkEntries,
+        pathCrumbs: browser.pathCrumbs,
+        parentPath: browser.parentPath,
         networkPath: browser.networkPath,
         isLoading: browser.isLoading,
         connectionStatus,
