@@ -66,8 +66,47 @@
     font-weight: 600;
 }
 
+.network-title--browser .network-title__label {
+    position: relative;
+    top: 1px;
+    font-size: 15px;
+}
+
 .network-title__label {
     min-width: 0;
+}
+
+.network-title__home-btn,
+.network-title__home-btn:hover,
+.network-title__home-btn:active {
+    border: none;
+    background: transparent;
+    box-shadow: none;
+    transform: none;
+}
+
+.network-title__home-btn svg {
+    width: 24px;
+    height: 24px;
+    transition: transform 0.16s ease;
+}
+
+.network-icon-btn.network-title__home-btn,
+.network-icon-btn.network-title__home-btn:hover,
+.network-icon-btn.network-title__home-btn:active {
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    transform: none !important;
+}
+
+.network-icon-btn.network-title__home-btn:hover svg {
+    transform: scale(1.08);
+}
+
+.network-icon-btn.network-title__home-btn svg {
+    width: 22px !important;
+    height: 22px !important;
 }
 
 .network-title__error {

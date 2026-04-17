@@ -234,6 +234,10 @@ const onConnectionsRefreshClick = async () => {
     }
 };
 
+const shouldShowPathBar = computed(
+    () => Boolean(parentPath.value) || pathCrumbs.value.length > 0,
+);
+
 const toErrorMessage = (error: unknown, fallback: string) => {
     if (error instanceof Error && error.message) return error.message;
     if (typeof error === "string" && error) return error;
@@ -399,6 +403,23 @@ const formatProtocolLabel = (protocol: string) =>
                         Network
                     </template>
                     <template v-else>
+                        <button
+                            class="network-icon-btn network-icon-btn--close network-title__home-btn"
+                            type="button"
+                            aria-label="Home"
+                            title="Home"
+                            @click="onBackToConnections"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                viewBox="0 -960 960 960"
+                                fill="#e3e3e3"
+                            >
+                                <path
+                                    d="M240-200h120v-240h240v240h120v-360L480-740 240-560v360Zm-80 80v-480l320-240 320 240v480H520v-240h-80v240H160Zm320-350Z"
+                                />
+                            </svg>
+                        </button>
                         <span class="network-title__label">
                             {{ activeConnectionLabel }}
                         </span>
@@ -421,7 +442,7 @@ const formatProtocolLabel = (protocol: string) =>
                     {{ `${networkConnections.length} connections` }}
                 </div>
                 <div
-                    v-else
+                    v-else-if="shouldShowPathBar"
                     class="network-title__path"
                     :title="networkPath"
                 >
@@ -527,23 +548,6 @@ const formatProtocolLabel = (protocol: string) =>
                         >
                             <path d="M21 12a9 9 0 1 1-2.64-6.36" />
                             <path d="M21 3v6h-6" />
-                        </svg>
-                    </button>
-                    <button
-                        class="network-icon-btn network-icon-btn--close"
-                        type="button"
-                        aria-label="Close browser"
-                        title="Close"
-                        @click="onBackToConnections"
-                    >
-                        <svg
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            stroke-linecap="round"
-                        >
-                            <path d="M6 6l12 12M18 6l-12 12" />
                         </svg>
                     </button>
                 </template>
