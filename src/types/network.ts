@@ -33,6 +33,7 @@ export type NetworkFileRow = {
 };
 
 export type NetworkPlayRequest = {
+    protocol: string;
     connectionId: string;
     filePath: string;
     playbackKey: string;

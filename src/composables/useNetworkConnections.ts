@@ -5,6 +5,35 @@ import type { NetworkConnection } from "../types/network";
 const shouldUseMockConnections = import.meta.env.DEV;
 
 const createConnectionId = () => `webdav-${Date.now()}`;
+const createDlnaConnectionId = (usn: string, index: number) =>
+    `dlna-${usn.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || index}`;
+
+type DiscoveredNetworkConnection = {
+    protocol: string;
+    usn: string | null;
+    location: string;
+    server: string | null;
+    st: string | null;
+};
+
+const toConnectionFromDiscovery = (
+    connection: DiscoveredNetworkConnection,
+    index: number,
+): NetworkConnection | null => {
+    const protocol = connection.protocol.trim().toLowerCase();
+    if (protocol === "http-dlna" || protocol === "dlna") {
+        return {
+            id: createDlnaConnectionId(connection.usn || connection.location, index),
+            label: connection.server?.split("/")[0]?.trim() || `DLNA ${index + 1}`,
+            protocol: "http-dlna",
+            baseUrl: connection.location,
+            username: "",
+            password: "",
+            defaultPath: "0",
+        };
+    }
+    return null;
+};
 
 const cloneConnection = (connection: NetworkConnection): NetworkConnection => ({
     ...connection,
@@ -162,8 +191,39 @@ export const useNetworkConnections = () => {
         ensureSelection();
     };
 
-    const discoverConnections = () => {
-        if (!shouldUseMockConnections) return 0;
+    const discoverConnections = async () => {
+        try {
+            const discoveredConnections = await invoke<DiscoveredNetworkConnection[]>(
+                "discover_network_connections",
+                {
+                    payload: {
+                        protocol: "all",
+                    },
+                },
+            );
+            if (!discoveredConnections.length) return 0;
+            const existingBaseUrls = new Set(
+                connections.value.map((connection) => connection.baseUrl.trim()),
+            );
+            const discovered = discoveredConnections
+                .filter(
+                    (connection) =>
+                        !existingBaseUrls.has(connection.location.trim()),
+                )
+                .map((connection, index) =>
+                    toConnectionFromDiscovery(connection, index),
+                )
+                .filter((item): item is NetworkConnection => Boolean(item));
+            if (!discovered.length) return 0;
+            connections.value = [...connections.value, ...discovered];
+            ensureSelection();
+            return discovered.length;
+        } catch (error) {
+            if (!shouldUseMockConnections) {
+                throw error;
+            }
+        }
+
         const existingIds = new Set(
             connections.value.map((connection) => connection.id),
         );

@@ -61,14 +61,16 @@ export const usePlaybackCommands = (
     return openVideoPicker();
   };
 
-  const loadWebdavFile = async (
+  const loadNetworkFile = async (
+    protocol: string,
     connectionId: string,
     filePath: string,
     resumePosition?: number,
     autoPlay = true,
   ): Promise<void> => {
-    await invoke("load_webdav_file", {
+    await invoke("load_network_file", {
       payload: {
+        protocol,
         connectionId,
         filePath,
         resumePosition,
@@ -118,7 +120,7 @@ export const usePlaybackCommands = (
 
   return {
     loadFile,
-    loadWebdavFile,
+    loadNetworkFile,
     pickMediaPathsAuto,
     pickFiles,
     togglePlayPause,

@@ -26,7 +26,7 @@ export const useNetworkPanel = () => {
         deleteSelectedConnection,
         discoverConnections,
     } = useNetworkConnections();
-    const browser = useNetworkBrowser(selectedConnectionId);
+    const browser = useNetworkBrowser(selectedConnectionId, selectedConnection);
     const viewMode = ref<NetworkPanelViewMode>("connections");
     const hasConnected = ref(false);
     const activeConnectionLabel = computed(
@@ -64,7 +64,10 @@ export const useNetworkPanel = () => {
             selectedConnectionId.value = network.selectedConnection;
         }
         if (network?.path) {
-            browser.networkPath.value = browser.normalizePath(network.path);
+            browser.networkPath.value =
+                selectedConnection.value?.protocol === "http-dlna"
+                    ? network.path.trim().replace(/^\/+/, "") || "0"
+                    : browser.normalizePath(network.path);
         }
     };
 
@@ -77,7 +80,7 @@ export const useNetworkPanel = () => {
             hasConnected.value = false;
             browser.errorMessage.value = toErrorMessage(
                 error,
-                "Failed to connect WebDAV",
+                "Failed to connect network server",
             );
         }
     };
@@ -88,9 +91,10 @@ export const useNetworkPanel = () => {
         }
         const connection = selectedConnection.value;
         if (!connection) return;
-        browser.networkPath.value = browser.normalizePath(
-            connection.defaultPath || "/",
-        );
+        browser.networkPath.value =
+            connection.protocol === "http-dlna"
+                ? connection.defaultPath || "0"
+                : browser.normalizePath(connection.defaultPath || "/");
         viewMode.value = "browser";
         await onConnect();
     };
@@ -144,7 +148,7 @@ export const useNetworkPanel = () => {
     };
 
     const onDiscoverConnections = async () => {
-        discoverConnections();
+        await discoverConnections();
     };
 
     const openEntry = async (entry: NetworkFileRow) => {
@@ -157,12 +161,13 @@ export const useNetworkPanel = () => {
     };
 
     const buildPlayRequest = (entry: NetworkFileRow): NetworkPlayRequest => ({
+        protocol: selectedConnection.value?.protocol || "webdav",
         connectionId: selectedConnectionId.value,
         filePath: entry.path,
-        playbackKey: createWebdavPlaybackKey(
-            selectedConnectionId.value,
-            entry.path,
-        ),
+        playbackKey:
+            selectedConnection.value?.protocol === "http-dlna"
+                ? entry.path
+                : createWebdavPlaybackKey(selectedConnectionId.value, entry.path),
     });
 
     watch([selectedConnectionId, browser.networkPath], saveUiState);
@@ -172,7 +177,8 @@ export const useNetworkPanel = () => {
         (connection) => {
             if (!connection) return;
             if (!connection.defaultPath) {
-                connection.defaultPath = "/";
+                connection.defaultPath =
+                    connection.protocol === "http-dlna" ? "0" : "/";
             }
         },
         { immediate: true },
@@ -196,6 +202,11 @@ export const useNetworkPanel = () => {
     onMounted(async () => {
         await loadConnections();
         await loadStoredUiState();
+        try {
+            await onDiscoverConnections();
+        } catch {
+            // Keep startup non-blocking even when discovery fails.
+        }
         if (!selectedConnection.value && connections.value.length > 0) {
             selectedConnectionId.value = connections.value[0].id;
         }

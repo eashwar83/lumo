@@ -238,7 +238,8 @@ export const usePlaybackFlow = ({
             url: playbackKey,
             position: resumePosition,
         };
-        await player.loadWebdavFile(
+        await player.loadNetworkFile(
+            "webdav",
             connectionId,
             filePath,
             resumePosition,
@@ -329,11 +330,20 @@ export const usePlaybackFlow = ({
     };
 
     const onPlayNetwork = async (payload: NetworkPlayRequest) => {
-        await playWebdav(
-            payload.connectionId,
-            payload.filePath,
-            payload.playbackKey,
-        );
+        const protocol = payload.protocol.trim().toLowerCase();
+        if (protocol === "http-dlna" || protocol === "dlna") {
+            await playPath(payload.playbackKey);
+            return;
+        }
+        if (protocol === "webdav") {
+            await playWebdav(
+                payload.connectionId,
+                payload.filePath,
+                payload.playbackKey,
+            );
+            return;
+        }
+        throw new Error(`Unsupported network protocol for playback: ${payload.protocol}`);
     };
 
     const onUpdateUrl = (value: string) => {

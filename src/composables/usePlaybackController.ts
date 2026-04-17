@@ -32,7 +32,8 @@ export type PlayerApi = {
   isUrlModified: { value: boolean };
   formatTime: (seconds: number) => string;
   loadFile: (resumePosition?: number, autoPlay?: boolean) => Promise<void>;
-  loadWebdavFile: (
+  loadNetworkFile: (
+    protocol: string,
     connectionId: string,
     filePath: string,
     resumePosition?: number,

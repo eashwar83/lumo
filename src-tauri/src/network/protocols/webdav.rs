@@ -1,6 +1,5 @@
 use crate::store::network_connection_store::NetworkConnectionRecord;
 use percent_encoding::percent_decode_str;
-use reqwest::blocking::Client;
 use reqwest::Method;
 use std::cmp::Ordering;
 use std::time::Duration;
@@ -107,9 +106,9 @@ fn build_target_url(base: &Url, root_segments: &[String], path: &str) -> Result<
 }
 
 fn apply_auth(
-    request: reqwest::blocking::RequestBuilder,
+    request: reqwest::RequestBuilder,
     connection: &NetworkConnectionRecord,
-) -> reqwest::blocking::RequestBuilder {
+) -> reqwest::RequestBuilder {
     let username = connection.username.trim();
     if username.is_empty() {
         return request;
@@ -156,7 +155,7 @@ fn to_connection_path(root_segments: &[String], url: &Url) -> Option<String> {
     Some(format!("/{}", relative.join("/")))
 }
 
-pub fn list_directory(
+pub async fn list_directory(
     connection: &NetworkConnectionRecord,
     path: &str,
 ) -> Result<WebdavBrowseResult, String> {
@@ -165,7 +164,7 @@ pub fn list_directory(
     let normalized_path = normalize_path(path);
     let target_url = build_target_url(&base_url, &root_segments, &normalized_path)?;
 
-    let client = Client::builder()
+    let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
         .build()
         .map_err(|e| e.to_string())?;
@@ -177,6 +176,7 @@ pub fn list_directory(
         .body(PROPFIND_BODY.to_string());
     let response = apply_auth(request, connection)
         .send()
+        .await
         .map_err(|e| e.to_string())?;
 
     let status = response.status();
@@ -184,7 +184,7 @@ pub fn list_directory(
         return Err(format!("WebDAV browse failed: {}", status));
     }
 
-    let body = response.text().map_err(|e| e.to_string())?;
+    let body = response.text().await.map_err(|e| e.to_string())?;
     let document = roxmltree::Document::parse(&body).map_err(|e| e.to_string())?;
 
     let mut entries: Vec<WebdavBrowseEntry> = Vec::new();

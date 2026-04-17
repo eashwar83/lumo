@@ -4,6 +4,7 @@ import type {
     NetworkBrowseEntry,
     NetworkBrowseResult,
     NetworkFileRow,
+    NetworkConnection,
 } from "../types/network";
 
 const normalizePath = (path: string) => {
@@ -14,11 +15,18 @@ const normalizePath = (path: string) => {
 };
 
 const getParentPath = (path: string) => {
+    if (!path.startsWith("/")) return null;
     const normalized = normalizePath(path);
     if (normalized === "/") return null;
     const index = normalized.lastIndexOf("/");
-    if (index <= 0) return "/";
+    if (index < 0) return null;
+    if (index === 0) return "/";
     return normalized.slice(0, index);
+};
+
+const normalizeObjectId = (value: string) => {
+    const trimmed = value.trim();
+    return trimmed || "0";
 };
 
 const formatSize = (bytes: number | null) => {
@@ -43,7 +51,10 @@ const mapBrowseEntry = (entry: NetworkBrowseEntry): NetworkFileRow => ({
     modified: formatModified(entry.modifiedAt),
 });
 
-export const useNetworkBrowser = (selectedConnectionId: Ref<string>) => {
+export const useNetworkBrowser = (
+    selectedConnectionId: Ref<string>,
+    selectedConnection: Ref<NetworkConnection | null>,
+) => {
     const networkPath = ref("/");
     const currentFiles = ref<NetworkFileRow[]>([]);
     const isLoading = ref(false);
@@ -72,12 +83,14 @@ export const useNetworkBrowser = (selectedConnectionId: Ref<string>) => {
 
     const browse = async (
         path: string,
-        command: "connect_webdav" | "browse_webdav",
+        mode: "connect" | "browse",
         options: { allowCache?: boolean } = {},
     ) => {
         const connectionId = selectedConnectionId.value;
         if (!connectionId) return;
-        const targetPath = normalizePath(path);
+        const protocol = selectedConnection.value?.protocol?.toLowerCase() ?? "webdav";
+        const isDlna = protocol === "http-dlna" || protocol === "dlna";
+        const targetPath = isDlna ? normalizeObjectId(path) : normalizePath(path);
         const allowCache = Boolean(options.allowCache);
         if (allowCache) {
             const cached = readCache(connectionId, targetPath);
@@ -90,8 +103,8 @@ export const useNetworkBrowser = (selectedConnectionId: Ref<string>) => {
         }
         const previousPath = networkPath.value;
         const previousFiles = [...currentFiles.value];
-        const isDirectoryBrowse = command === "browse_webdav";
-        const isConnect = command === "connect_webdav";
+        const isDirectoryBrowse = mode === "browse";
+        const isConnect = mode === "connect";
         const shouldOptimisticNavigate = isDirectoryBrowse || isConnect;
 
         if (shouldOptimisticNavigate) {
@@ -104,13 +117,17 @@ export const useNetworkBrowser = (selectedConnectionId: Ref<string>) => {
         errorMessage.value = "";
         await nextTick();
         try {
-            const result = await invoke<NetworkBrowseResult>(command, {
+            const result = await invoke<NetworkBrowseResult>("browse_network_connection", {
                 payload: {
                     connectionId,
+                    mode,
+                    protocol,
                     path: targetPath,
                 },
             });
-            networkPath.value = normalizePath(result.path);
+            networkPath.value = isDlna
+                ? normalizeObjectId(result.path)
+                : normalizePath(result.path);
             currentFiles.value = result.entries.map(mapBrowseEntry);
             writeCache(connectionId, networkPath.value, currentFiles.value);
         } catch (error) {
@@ -133,12 +150,12 @@ export const useNetworkBrowser = (selectedConnectionId: Ref<string>) => {
         }
     };
 
-    const connect = async () => browse(networkPath.value, "connect_webdav");
+    const connect = async () => browse(networkPath.value, "connect");
 
-    const refresh = async () => browse(networkPath.value, "browse_webdav");
+    const refresh = async () => browse(networkPath.value, "browse");
 
     const openDirectory = async (path: string) => {
-        await browse(path, "browse_webdav", { allowCache: true });
+        await browse(path, "browse", { allowCache: true });
     };
 
     const parentPath = computed(() => getParentPath(networkPath.value));

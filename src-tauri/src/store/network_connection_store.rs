@@ -36,7 +36,7 @@ fn normalize_connection(
 
     let base_url = connection.base_url.trim();
     if base_url.is_empty() {
-        return Err("WebDAV server URL is required".into());
+        return Err("Server URL is required".into());
     }
 
     let protocol = if connection.protocol.trim().is_empty() {

@@ -28,6 +28,7 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 roxmltree = "0.20"
 url = "2.5"
 percent-encoding = "2.3"
+tokio = { version = "1", features = ["net", "time"] }
 libc = "0.2"
 cfg-if = "1.0"
 log = "0.4"

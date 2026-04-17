@@ -49,7 +49,7 @@ const pendingDeleteConnection = ref<NetworkConnection | null>(null);
 const isSwitchingView = ref(false);
 const isDiscovering = ref(false);
 const editingConnectionId = ref<string | null>(null);
-const canDiscoverConnections = import.meta.env.DEV;
+const canDiscoverConnections = true;
 
 type SupportedProtocol = "webdav" | "smb" | "ftp" | "http-dlna";
 

@@ -1,70 +1,26 @@
-use serde::{Deserialize, Serialize};
-
+use crate::network::types::{
+    BrowseNetworkPayload, DiscoverNetworkPayload, DiscoveredNetworkConnection,
+    LoadNetworkFilePayload, NetworkBrowseResult,
+};
 use crate::store::network_connection_store::NetworkConnectionRecord;
 use crate::{build_load_file_command_args, mpv_command_checked, with_mpv, AppState};
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct WebdavBrowseEntry {
-    name: String,
-    path: String,
-    entry_type: String,
-    size: Option<u64>,
-    modified_at: Option<String>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct WebdavBrowseResult {
-    path: String,
-    entries: Vec<WebdavBrowseEntry>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct WebdavBrowsePayload {
-    connection_id: String,
-    path: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct LoadWebdavFilePayload {
-    connection_id: String,
-    file_path: String,
-    resume_position: Option<f64>,
-    auto_play: Option<bool>,
-}
-
-fn to_browse_result(
-    result: crate::network::webdav_client::WebdavBrowseResult,
-) -> WebdavBrowseResult {
-    let entries = result
-        .entries
-        .into_iter()
-        .map(|entry| WebdavBrowseEntry {
-            name: entry.name,
-            path: entry.path,
-            entry_type: if entry.is_dir {
-                "dir".into()
-            } else {
-                "file".into()
-            },
-            size: entry.size,
-            modified_at: entry.modified_at,
-        })
-        .collect();
-    WebdavBrowseResult {
-        path: result.path,
-        entries,
-    }
-}
 
 #[tauri::command]
 pub(crate) fn list_network_connections(
     app: tauri::AppHandle,
 ) -> Result<Vec<NetworkConnectionRecord>, String> {
     crate::store::network_connection_store::list_network_connections(&app)
+}
+
+#[tauri::command]
+pub(crate) async fn discover_network_connections(
+    payload: Option<DiscoverNetworkPayload>,
+) -> Result<Vec<DiscoveredNetworkConnection>, String> {
+    crate::network::service::discover_connections(
+        payload.as_ref().and_then(|item| item.protocol.as_deref()),
+        payload.as_ref().and_then(|item| item.timeout_secs),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -84,54 +40,46 @@ pub(crate) fn delete_network_connection(
 }
 
 #[tauri::command]
-pub(crate) async fn connect_webdav(
+pub(crate) async fn browse_network_connection(
     app: tauri::AppHandle,
-    payload: WebdavBrowsePayload,
-) -> Result<WebdavBrowseResult, String> {
-    let connection_id = payload.connection_id;
-    let requested_path = payload.path;
+    payload: BrowseNetworkPayload,
+) -> Result<NetworkBrowseResult, String> {
+    crate::network::service::validate_mode(&payload.mode)?;
 
-    tauri::async_runtime::spawn_blocking(move || {
-        let connection =
-            crate::store::network_connection_store::find_network_connection(&app, &connection_id)?;
-        let path = requested_path.unwrap_or_else(|| connection.default_path.clone());
-        let result = crate::network::webdav_client::list_directory(&connection, &path)?;
-        Ok(to_browse_result(result))
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    let connection = crate::store::network_connection_store::find_network_connection(
+        &app,
+        &payload.connection_id,
+    )?;
+    let protocol = crate::network::service::resolve_protocol_with_hint(
+        &connection,
+        payload.protocol.as_deref(),
+    )?;
+
+    let path = crate::network::service::resolve_browse_path(
+        &connection,
+        protocol,
+        payload.path,
+        &payload.mode,
+    );
+    crate::network::service::browse_connection(&connection, &path, protocol).await
 }
 
 #[tauri::command]
-pub(crate) async fn browse_webdav(
-    app: tauri::AppHandle,
-    payload: WebdavBrowsePayload,
-) -> Result<WebdavBrowseResult, String> {
-    let connection_id = payload.connection_id;
-    let requested_path = payload.path.unwrap_or_else(|| "/".to_string());
-
-    tauri::async_runtime::spawn_blocking(move || {
-        let connection =
-            crate::store::network_connection_store::find_network_connection(&app, &connection_id)?;
-        let result = crate::network::webdav_client::list_directory(&connection, &requested_path)?;
-        Ok(to_browse_result(result))
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-pub(crate) fn load_webdav_file(
+pub(crate) fn load_network_file(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
-    payload: LoadWebdavFilePayload,
+    payload: LoadNetworkFilePayload,
 ) -> Result<(), String> {
     let connection = crate::store::network_connection_store::find_network_connection(
         &app,
         &payload.connection_id,
     )?;
-    let playback_url =
-        crate::network::webdav_client::build_playback_url(&connection, &payload.file_path)?;
+    let playback_url = crate::network::service::resolve_webdav_playback_url(
+        &connection,
+        payload.protocol.as_deref(),
+        &payload.file_path,
+    )?;
+
     let resume_position = payload.resume_position.unwrap_or(0.0);
     let auto_play = payload.auto_play.unwrap_or(true);
     let command_args = build_load_file_command_args(&playback_url, resume_position);
