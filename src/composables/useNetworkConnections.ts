@@ -236,14 +236,16 @@ export const useNetworkConnections = () => {
                 }
             }
 
-            const existingBaseUrls = new Set(
+            const seenBaseUrls = new Set(
                 connections.value.map((connection) => connection.baseUrl.trim()),
             );
             const discovered = discoveredConnections
-                .filter(
-                    (connection) =>
-                        !existingBaseUrls.has(connection.location.trim()),
-                )
+                .filter((connection) => {
+                    const location = connection.location.trim();
+                    if (!location || seenBaseUrls.has(location)) return false;
+                    seenBaseUrls.add(location);
+                    return true;
+                })
                 .map((connection, index) =>
                     toConnectionFromDiscovery(connection, index),
                 )
