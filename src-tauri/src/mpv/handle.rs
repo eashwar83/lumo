@@ -62,11 +62,7 @@ fn release_soia_utils(utils_ptr: *mut SoiaUtils) {
     }
 }
 
-fn shutdown_mpv_and_soia(
-    ctx: &AtomicPtr<c_void>,
-    utils: &AtomicPtr<SoiaUtils>,
-    terminate: bool,
-) {
+fn shutdown_mpv_and_soia(ctx: &AtomicPtr<c_void>, utils: &AtomicPtr<SoiaUtils>, terminate: bool) {
     // Acquire ownership once to avoid load-then-destroy races with concurrent shutdown paths.
     let utils_ptr = utils.swap(std::ptr::null_mut(), Ordering::AcqRel);
     let uses_render_context = if utils_ptr.is_null() {
@@ -186,17 +182,16 @@ impl MpvHandle {
         let auth_signature_hex_ptr = auth_signature_hex
             .as_ref()
             .map_or(std::ptr::null(), |value| value.as_ptr());
-        let soia_utils: *mut SoiaUtils =
-            unsafe {
-                soia_utils_create(
-                    ctx,
-                    window,
-                    display_ptr,
-                    mode,
-                    auth_payload_ptr,
-                    auth_signature_hex_ptr,
-                )
-            };
+        let soia_utils: *mut SoiaUtils = unsafe {
+            soia_utils_create(
+                ctx,
+                window,
+                display_ptr,
+                mode,
+                auth_payload_ptr,
+                auth_signature_hex_ptr,
+            )
+        };
         if soia_utils.is_null() {
             unsafe { mpv_destroy(ctx) };
             return Err("Failed to create SoiaUtils instance".to_string());

@@ -23,6 +23,7 @@ pub(crate) struct DiscoveredNetworkConnection {
     pub protocol: String,
     pub usn: Option<String>,
     pub location: String,
+    pub friendly_name: Option<String>,
     pub server: Option<String>,
     pub st: Option<String>,
 }

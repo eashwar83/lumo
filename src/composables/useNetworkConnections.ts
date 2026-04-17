@@ -12,8 +12,18 @@ type DiscoveredNetworkConnection = {
     protocol: string;
     usn: string | null;
     location: string;
+    friendlyName: string | null;
     server: string | null;
     st: string | null;
+};
+
+const hostFromLocation = (location: string) => {
+    try {
+        const url = new URL(location);
+        return url.hostname || null;
+    } catch {
+        return null;
+    }
 };
 
 const toConnectionFromDiscovery = (
@@ -22,9 +32,14 @@ const toConnectionFromDiscovery = (
 ): NetworkConnection | null => {
     const protocol = connection.protocol.trim().toLowerCase();
     if (protocol === "http-dlna" || protocol === "dlna") {
+        const host = hostFromLocation(connection.location);
         return {
             id: createDlnaConnectionId(connection.usn || connection.location, index),
-            label: connection.server?.split("/")[0]?.trim() || `DLNA ${index + 1}`,
+            label:
+                connection.friendlyName?.trim() ||
+                host ||
+                connection.server?.split("/")[0]?.trim() ||
+                `DLNA ${index + 1}`,
             protocol: "http-dlna",
             baseUrl: connection.location,
             username: "",
@@ -202,6 +217,25 @@ export const useNetworkConnections = () => {
                 },
             );
             if (!discoveredConnections.length) return 0;
+            let updatedCount = 0;
+            for (const discoveredConnection of discoveredConnections) {
+                const mapped = toConnectionFromDiscovery(discoveredConnection, updatedCount);
+                if (!mapped) continue;
+                const existing = connections.value.find(
+                    (connection) =>
+                        connection.baseUrl.trim() === mapped.baseUrl.trim(),
+                );
+                if (!existing) continue;
+                if (
+                    existing.label !== mapped.label ||
+                    existing.protocol !== mapped.protocol
+                ) {
+                    existing.label = mapped.label;
+                    existing.protocol = mapped.protocol;
+                    updatedCount += 1;
+                }
+            }
+
             const existingBaseUrls = new Set(
                 connections.value.map((connection) => connection.baseUrl.trim()),
             );
@@ -217,7 +251,7 @@ export const useNetworkConnections = () => {
             if (!discovered.length) return 0;
             connections.value = [...connections.value, ...discovered];
             ensureSelection();
-            return discovered.length;
+            return discovered.length + updatedCount;
         } catch (error) {
             if (!shouldUseMockConnections) {
                 throw error;

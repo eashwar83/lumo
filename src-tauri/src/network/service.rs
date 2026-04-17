@@ -153,6 +153,7 @@ pub(crate) async fn discover_connections(
             protocol: "http-dlna".to_string(),
             usn: Some(item.usn),
             location: item.location,
+            friendly_name: item.friendly_name,
             server: item.server,
             st: Some(item.st),
         }));

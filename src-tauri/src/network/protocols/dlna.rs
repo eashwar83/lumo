@@ -15,6 +15,7 @@ const SSDP_ST_MEDIA_SERVER: &str = "urn:schemas-upnp-org:device:MediaServer:1";
 pub struct DlnaDevice {
     pub usn: String,
     pub location: String,
+    pub friendly_name: Option<String>,
     pub server: Option<String>,
     pub st: String,
 }
@@ -133,10 +134,16 @@ pub async fn discover_devices(timeout_secs: u64) -> Result<Vec<DlnaDevice>, Stri
         found.push(DlnaDevice {
             usn,
             location,
+            friendly_name: None,
             server,
             st,
         });
     }
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+        .map_err(|e| format!("Failed to create DLNA discovery HTTP client: {}", e))?;
 
     log::info!(
         "SSDP scan finished: discovered={}, responses={}, duplicates={}, ignored_no_location={}",
@@ -145,6 +152,18 @@ pub async fn discover_devices(timeout_secs: u64) -> Result<Vec<DlnaDevice>, Stri
         duplicate_count,
         ignored_no_location
     );
+
+    for device in &mut found {
+        let friendly_name = fetch_device_friendly_name(&client, &device.location).await;
+        if let Some(name) = friendly_name.as_ref() {
+            log::info!(
+                "DLNA device name resolved: usn={}, friendly_name={}",
+                device.usn,
+                name
+            );
+        }
+        device.friendly_name = friendly_name;
+    }
 
     Ok(found)
 }
@@ -226,6 +245,22 @@ async fn fetch_content_directory_service(
         service_type,
         control_url,
     })
+}
+
+async fn fetch_device_friendly_name(client: &reqwest::Client, location: &str) -> Option<String> {
+    let response = client.get(location).send().await.ok()?;
+    let response = response.error_for_status().ok()?;
+    let body = response.text().await.ok()?;
+    let doc = Document::parse(&body).ok()?;
+    find_doc_text(&doc, "friendlyName")
+}
+
+fn find_doc_text(doc: &Document<'_>, name: &str) -> Option<String> {
+    doc.descendants()
+        .find(|child| child.is_element() && child.tag_name().name().eq_ignore_ascii_case(name))
+        .and_then(|child| child.text())
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty())
 }
 
 fn child_text(node: roxmltree::Node<'_, '_>, child_name: &str) -> Option<String> {

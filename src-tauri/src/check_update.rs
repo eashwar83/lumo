@@ -264,8 +264,8 @@ pub(crate) fn check_update_now(app_handle: tauri::AppHandle) {
 
 #[cfg(desktop)]
 async fn run_tauri_updater_check(app_handle: tauri::AppHandle) {
-    use tauri_plugin_updater::UpdaterExt;
     use tauri::Emitter;
+    use tauri_plugin_updater::UpdaterExt;
 
     let updater = match app_handle.updater_builder().build() {
         Ok(updater) => updater,

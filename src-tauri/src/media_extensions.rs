@@ -43,9 +43,7 @@ pub(crate) fn media_association_extensions() -> &'static [String] {
                     .filter(|value| !value.is_empty())
                     .collect(),
                 Err(error) => {
-                    error!(
-                        "Failed to parse media extensions JSON for media association: {error}"
-                    );
+                    error!("Failed to parse media extensions JSON for media association: {error}");
                     Vec::new()
                 }
             }

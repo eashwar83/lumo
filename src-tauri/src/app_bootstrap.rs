@@ -42,7 +42,7 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
         app.handle().clone(),
         host_auth_token,
     )
-        .map_err(|e| Box::new(io::Error::other(e)) as Box<dyn Error>)?;
+    .map_err(|e| Box::new(io::Error::other(e)) as Box<dyn Error>)?;
 
     app.manage(build_app_state(mpv_player_handle));
     app.manage(crate::platform::new_platform_state());

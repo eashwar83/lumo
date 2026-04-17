@@ -194,7 +194,10 @@ pub fn factory_reset(app: &tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-fn check_daily_field(app: &tauri::AppHandle, select_sql: &str) -> Result<DailyActionResult, String> {
+fn check_daily_field(
+    app: &tauri::AppHandle,
+    select_sql: &str,
+) -> Result<DailyActionResult, String> {
     let today = media_db::today_utc_date();
     let conn = media_db::open_db(app)?;
     let current: Option<String> = conn
