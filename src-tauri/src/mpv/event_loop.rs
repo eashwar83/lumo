@@ -11,6 +11,64 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 
+use keepawake::{Builder, KeepAwake};
+
+pub struct WakeLockManager {
+    lock: Option<KeepAwake>,
+    is_active: bool,
+}
+
+impl WakeLockManager {
+    pub fn new() -> Self {
+        Self {
+            lock: None,
+            is_active: false,
+        }
+    }
+
+    pub fn update(&mut self, should_keep_awake: bool) {
+        if should_keep_awake && !self.is_active {
+            self.enable();
+        } else if !should_keep_awake && self.is_active {
+            self.disable();
+        }
+    }
+
+    fn enable(&mut self) {
+        match Builder::default()
+            .display(true)
+            .idle(false)
+            .create()
+        {
+            Ok(lock) => {
+                self.lock = Some(lock);
+                self.is_active = true;
+                #[cfg(debug_assertions)]
+                println!("[WakeLock] enabled");
+            }
+            Err(e) => {
+                self.lock = None;
+                self.is_active = false;
+                warn!("MPV Event Loop: failed to acquire wakelock: {}", e);
+            }
+        }
+    }
+
+    fn disable(&mut self) {
+        self.lock.take(); // drop 自动释放
+        self.is_active = false;
+
+        #[cfg(debug_assertions)]
+        println!("[WakeLock] disabled");
+    }
+}
+
+impl Drop for WakeLockManager {
+    fn drop(&mut self) {
+        self.disable();
+    }
+}
+
 #[derive(Serialize, Clone)]
 struct ProgressPayload {
     time_pos: f64,
@@ -378,6 +436,8 @@ pub(super) fn mpv_event_loop(
         };
     }
 
+    let mut wake_lock_manager = WakeLockManager::new();
+
     const TIME_POS_ID: u64 = 1;
     const DURATION_ID: u64 = 2;
     const PAUSE_ID: u64 = 3;
@@ -560,6 +620,7 @@ pub(super) fn mpv_event_loop(
                         emit_event(&app_handle, "file_loaded", ());
                     }
                     emit_event(&app_handle, "mpv-playback-restart", ());
+                    wake_lock_manager.update(true);
                 }
                 mpv_event_id::MPV_EVENT_SEEK => {
                     #[cfg(debug_assertions)]
@@ -577,6 +638,7 @@ pub(super) fn mpv_event_loop(
                     eof_reached.store(false, Ordering::SeqCst);
                 }
                 mpv_event_id::MPV_EVENT_SHUTDOWN => {
+                    wake_lock_manager.update(false);
                     #[cfg(debug_assertions)]
                     debug!("MPV Event Loop: MPV_EVENT_SHUTDOWN received. Exiting.");
                     break;
@@ -677,6 +739,13 @@ pub(super) fn mpv_event_loop(
                                             &mut last_pip_paused,
                                         );
                                     }
+                                    if last_is_paused {
+                                        is_playing.store(false, Ordering::Relaxed);
+                                        wake_lock_manager.update(false);
+                                    } else {
+                                        is_playing.store(true, Ordering::Relaxed);
+                                        wake_lock_manager.update(true);
+                                    }
                                 }
                             }
                             VIDEO_BITRATE_ID => {
@@ -775,6 +844,7 @@ pub(super) fn mpv_event_loop(
                                             end_file_emitted_for_current_item = true;
                                             should_emit_progress = false;
                                         }
+                                        wake_lock_manager.update(false);
                                     } else {
                                         eof_reached.store(false, Ordering::SeqCst);
                                         end_file_emitted_for_current_item = false;
@@ -1034,6 +1104,7 @@ pub(super) fn mpv_event_loop(
                         );
                     }
                     end_file_emitted_for_current_item = reason == 0;
+                    wake_lock_manager.update(false);
                 }
                 _ => {}
             }
