@@ -6,7 +6,7 @@
 </h1>
 
 <p align="center">
-⚡ mpv-based · 🎬 HDR & Dolby Vision · 🌐 WebDAV Streaming · 🖥 Cross-platform
+⚡ mpv-based · 🎬 HDR & Dolby Vision · 🌐 WebDAV + DLNA Streaming · 🖥 Cross-platform
 </p>
 
 <p align="center">
@@ -16,7 +16,7 @@
 ![Soia App Preview](https://github.com/user-attachments/assets/9896ae38-d082-413e-8a01-bdb28e687bf7)
 > A modern mpv frontend focused on performance and clean design.
 
-**Soia** is a high-performance video player built on mpv, designed for smooth playback of everything from local Dolby Vision content to remote WebDAV streams — all in one fast, elegant, cross-platform experience.
+**Soia** is a high-performance video player built on mpv, designed for smooth playback of everything from local Dolby Vision content to remote WebDAV and DLNA streams — all in one fast, elegant, cross-platform experience.
 
 ## ✨ Key Features
 
@@ -24,17 +24,19 @@
 
 - **mpv-powered playback** with hardware acceleration (4K, HDR, Dolby Vision*)
 - Picture in Picture (PiP) on macOS and Windows
-- Custom shaders for high-quality scaling and rendering
 - Dual subtitles for bilingual viewing
+- Custom shaders for high-quality scaling and rendering
+- Anime mode with auto-detection and shader auto-apply
 
 <sub style="padding-left: 2em;">*Dolby Vision is not currently supported on Linux*</sub>
 
 ### Streaming & Remote Media
 
-- Stream media via WebDAV with smooth playback
+- Discover, browse, and play media from DLNA devices
+- WebDAV browsing and streaming
 - Smart buffering with real-time speed indicators
-- Resume playback with history tracking
 - Multiple playlists with sort, loop, and shuffle
+- Resume playback with history tracking
 
 ### Native Experience
 
@@ -129,8 +131,8 @@ App data is stored in Tauri's local app data directory and includes:
 
 ## Network Notes
 
-- WebDAV browse/playback is implemented in the Rust backend.
-- UI options for SMB/FTP/HTTP-DLNA exist, but backend browsing/streaming currently targets WebDAV.
+- WebDAV and DLNA browse/playback are implemented in the Rust backend.
+- SMB and FTP entries are visible in the UI, but backend browse/playback support is currently focused on WebDAV and DLNA.
 
 ## Security Note
 

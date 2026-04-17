@@ -19,16 +19,16 @@ You can also go to System Settings > Privacy & Security and click "Open Anyway" 
 
 The app is open-source and its code is publicly available for anyone to inspect.
 
-## [0.1.5] - 2026-04-11
+## [0.1.6] - 2026-04-18
+
+This release focuses on network playback experience and overall stability.
 
 ### Highlights
 
-- Added experimental support for Windows Portable and Linux AppImage builds.
-- Improved Custom Shader settings with mode-aware behavior and cleaner controls.
-- Added Anime-specialized mode with automatic detection and automatic shader application.
-- Added Factory Reset to quickly clear local data and restore default state.
+- Added **DLNA support**: discover devices, browse media, and play DLNA streams.
+- Added **Playback Title display modes**, including the option to hide the top title bar for a cleaner playback UI.
 
-### Improvements
+### Fixes
 
-- Added per-playback shader toggle and active shader display.
-- On Windows, Update now uses different behavior for Portable vs Setup installs.
+- Fixed an issue where the screen could sleep during active video playback.
+- Improved robustness of the update check process and fixed update flow issues.

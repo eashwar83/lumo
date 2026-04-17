@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.1.6] - 2026-04-18
+
+### Features
+
+- Added DLNA support for device discovery, media browsing, and stream playback.
+- Added Playback Title display modes, including the option to hide the top title bar for a cleaner playback UI.
+
+### Improvements
+
+- Improved network browser header with Home navigation and better DLNA browsing paths.
+- Redesigned the Home panel UI.
+- Modularized protocol stack and unified browse/load command flow.
+
+### Fixes
+
+- Fixed an issue where the screen could sleep during active video playback.
+- Improved robustness of the update check process and fixed update flow issues.
+
 ## [0.1.5] - 2026-04-11
 
 ### Features
