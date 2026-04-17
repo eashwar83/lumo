@@ -7,7 +7,7 @@ use super::ffi::{
     mpv_terminate_destroy, soia_utils_create, soia_utils_destroy, soia_utils_render_context_update,
     soia_utils_render_target_resize, soia_utils_uses_render_context, SoiaUtils,
 };
-use crate::check_update::HostAuthToken;
+use crate::check_update::SoiaAuthToken;
 use log::info;
 use std::ffi::{c_void, CStr, CString};
 use std::os::raw::{c_char, c_int};
@@ -103,7 +103,7 @@ impl MpvHandle {
         window: *const c_void,
         display: Option<*const c_void>,
         app_handle: AppHandle,
-        host_auth_token: Option<HostAuthToken>,
+        auth_token: Option<SoiaAuthToken>,
     ) -> Result<Self, String> {
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         ensure_numeric_locale_for_mpv();
@@ -161,7 +161,7 @@ impl MpvHandle {
 
         let display_ptr = display.unwrap_or(std::ptr::null());
         #[cfg(target_os = "macos")]
-        let auth_payload = host_auth_token
+        let auth_payload = auth_token
             .as_ref()
             .map(|token| token.payload.clone())
             .or_else(|| std::env::var("SOIA_AUTH_PAYLOAD").ok())
@@ -172,7 +172,7 @@ impl MpvHandle {
             .as_ref()
             .map_or(std::ptr::null(), |value| value.as_ptr());
         #[cfg(target_os = "macos")]
-        let auth_signature_hex = host_auth_token
+        let auth_signature_hex = auth_token
             .as_ref()
             .map(|token| token.signature_hex.clone())
             .or_else(|| std::env::var("SOIA_AUTH_SIGNATURE_HEX").ok())

@@ -76,7 +76,7 @@ jobs:
     if: ${{ needs.changes.outputs.frontend == 'true' }}
     timeout-minutes: 15
     env:
-      SOIA_API_URL: ${{ secrets.SOIA_API_URL }}
+      SOIA_API: ${{ secrets.SOIA_API }}
     steps:
       - uses: actions/checkout@v6
 
@@ -106,7 +106,7 @@ jobs:
     timeout-minutes: 20
     env:
       MACOSX_DEPLOYMENT_TARGET: "15.0"
-      SOIA_API_URL: ${{ secrets.SOIA_API_URL }}
+      SOIA_API: ${{ secrets.SOIA_API }}
     steps:
       - uses: actions/checkout@v6
 
@@ -139,7 +139,7 @@ jobs:
     timeout-minutes: 40
     env:
       MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deployment_target }}
-      SOIA_API_URL: ${{ secrets.SOIA_API_URL }}
+      SOIA_API: ${{ secrets.SOIA_API }}
     strategy:
       fail-fast: false
       matrix:

@@ -16,7 +16,7 @@ const WINDOWS_PORTABLE_MARKER_FILE: &str = "marker.dll";
 const WINDOWS_UNINSTALLER_FILE: &str = "uninstall.exe";
 
 #[derive(Clone, Debug)]
-pub(crate) struct HostAuthToken {
+pub(crate) struct SoiaAuthToken {
     pub payload: String,
     pub signature_hex: String,
     pub expire_at: i64,
@@ -100,7 +100,7 @@ fn parse_payload_expire_at(payload: &str) -> Option<i64> {
     })
 }
 
-fn parse_host_auth_from_json(value: &serde_json::Value) -> Option<HostAuthToken> {
+fn parse_soia_auth_from_json(value: &serde_json::Value) -> Option<SoiaAuthToken> {
     let payload = value
         .get("auth_payload")
         .and_then(|v| v.as_str())
@@ -121,24 +121,24 @@ fn parse_host_auth_from_json(value: &serde_json::Value) -> Option<HostAuthToken>
         .get("expire_at")
         .and_then(|v| v.as_i64())
         .or_else(|| parse_payload_expire_at(&payload))?;
-    Some(HostAuthToken {
+    Some(SoiaAuthToken {
         payload,
         signature_hex,
         expire_at,
     })
 }
 
-fn read_cached_host_auth(app_handle: &tauri::AppHandle) -> Option<HostAuthToken> {
+fn read_cached_soia_auth(app_handle: &tauri::AppHandle) -> Option<SoiaAuthToken> {
     let state = crate::store::installation_store::get_installation_state(app_handle).ok()?;
     let token = state
         .uuid_update_data
         .get(HOST_AUTH_CACHE_KEY)
-        .and_then(parse_host_auth_from_json)?;
+        .and_then(parse_soia_auth_from_json)?;
     let now = Utc::now().timestamp();
     (token.expire_at > now + HOST_AUTH_EXPIRY_SKEW_SECS).then_some(token)
 }
 
-fn persist_host_auth(app_handle: &tauri::AppHandle, token: &HostAuthToken) {
+fn persist_host_auth(app_handle: &tauri::AppHandle, token: &SoiaAuthToken) {
     let state = match crate::store::installation_store::get_installation_state(app_handle) {
         Ok(state) => state,
         Err(err) => {
@@ -167,9 +167,9 @@ fn persist_host_auth(app_handle: &tauri::AppHandle, token: &HostAuthToken) {
     }
 }
 
-fn request_host_auth_from_server(app_handle: &tauri::AppHandle) -> Option<HostAuthToken> {
-    let state = crate::store::installation_store::get_installation_state(app_handle).ok()?;
-    let base_url = option_env!("SOIA_API_URL").unwrap_or("").trim();
+fn request_soia_auth_from_server(app_handle: &tauri::AppHandle) -> Option<SoiaAuthToken> {
+    let state: crate::store::installation_store::InstallationState = crate::store::installation_store::get_installation_state(app_handle).ok()?;
+    let base_url = option_env!("SOIA_API").unwrap_or("").trim();
     if base_url.is_empty() {
         return None;
     }
@@ -192,11 +192,11 @@ fn request_host_auth_from_server(app_handle: &tauri::AppHandle) -> Option<HostAu
 
     let body = response.text().ok()?;
     let payload: serde_json::Value = serde_json::from_str(&body).ok()?;
-    let token = parse_host_auth_from_json(&payload).or_else(|| {
+    let token = parse_soia_auth_from_json(&payload).or_else(|| {
         payload
             .get("data")
-            .and_then(parse_host_auth_from_json)
-            .or_else(|| payload.get("result").and_then(parse_host_auth_from_json))
+            .and_then(parse_soia_auth_from_json)
+            .or_else(|| payload.get("result").and_then(parse_soia_auth_from_json))
     })?;
 
     persist_host_auth(app_handle, &token);
@@ -206,23 +206,24 @@ fn request_host_auth_from_server(app_handle: &tauri::AppHandle) -> Option<HostAu
     Some(token)
 }
 
-pub(crate) fn run_daily_signal_ping(app_handle: &tauri::AppHandle) -> Option<HostAuthToken> {
-    if let Some(token) = read_cached_host_auth(app_handle) {
-        return Some(token);
-    }
+pub(crate) fn run_daily_signal_ping(app_handle: &tauri::AppHandle) -> Option<SoiaAuthToken> {
+    let cached_token = read_cached_soia_auth(app_handle);
 
     let daily = match crate::store::installation_store::mark_daily_signal(app_handle) {
         Ok(result) => result,
         Err(err) => {
             warn!("mark_daily_signal failed, skip daily signal ping: {err}");
-            return None;
+            return cached_token;
         }
     };
+
     if !daily.should_run {
-        return None;
+        return cached_token;
     }
 
-    request_host_auth_from_server(app_handle)
+    let new_token = request_soia_auth_from_server(app_handle);
+
+    new_token.or(cached_token)
 }
 
 fn run_daily_update_check(app_handle: &tauri::AppHandle) {
@@ -243,15 +244,11 @@ fn run_daily_update_check(app_handle: &tauri::AppHandle) {
     }
 }
 
-pub(crate) fn check_update(app_handle: tauri::AppHandle) -> Option<HostAuthToken> {
+pub(crate) fn check_update(app_handle: tauri::AppHandle) -> Option<SoiaAuthToken> {
     set_update_available_state(false);
-    let daily_signal_result = run_daily_signal_ping(&app_handle);
-    #[cfg(target_os = "macos")]
-    let host_auth = daily_signal_result;
-    #[cfg(not(target_os = "macos"))]
-    let host_auth = None;
+    let result = run_daily_signal_ping(&app_handle);
     run_daily_update_check(&app_handle);
-    host_auth
+    result
 }
 
 #[cfg(desktop)]

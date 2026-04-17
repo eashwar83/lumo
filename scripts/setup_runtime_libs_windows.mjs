@@ -313,6 +313,12 @@ function copyArtifactsToRuntimeDir(sourceDir, outputDir) {
     }
 
     const artifacts = listFilesRecursive(effectiveSource).filter(isRuntimeArtifact);
+    const runtimeArtifact =
+      sourceArtifacts.find((filePath) => basename(filePath).toLowerCase().includes("mpv")) ||
+      sourceArtifacts[0] ||
+      "";
+    const runtimeDir = runtimeArtifact ? dirname(runtimeArtifact) : sourceDir;
+    const configSource = resolve(runtimeDir, "config.data");
     ensureHasMpvDll(artifacts);
 
     const existing = readdirSync(outputDir, { withFileTypes: true });
@@ -340,6 +346,12 @@ function copyArtifactsToRuntimeDir(sourceDir, outputDir) {
 
     if (copied === 0) {
       throw new Error("[ERROR] No runtime artifacts copied.");
+    }
+
+    if (existsSync(configSource)) {
+      copyFileSync(configSource, resolve(outputDir, "config.data"));
+    } else {
+      console.log("[INFO] config.data not found in runtime bundle, skipped.");
     }
 
     ensureWindowsImportLibrary(outputDir);

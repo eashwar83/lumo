@@ -74,17 +74,12 @@ fn soia_windows_link_name(dir: &Path) -> Option<String> {
 }
 
 fn main() {
-    println!("cargo:rerun-if-env-changed=SOIA_API_URL");
-    let soia_api_url = env::var("SOIA_API_URL")
-        .ok()
-        .map(|v| v.trim().to_string())
-        .unwrap_or_default();
-    println!("cargo:rustc-env=SOIA_API_URL={}", soia_api_url);
-
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+    let mpv_lib_dir = PathBuf::from(manifest_dir.clone()).join("libs").join("mpv");
+    let config_file = mpv_lib_dir.join("config.data");
+
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let target_triple = env::var("TARGET").unwrap_or_default();
-    let mpv_lib_dir = PathBuf::from(manifest_dir.clone()).join("libs").join("mpv");
 
     let windows_link_name = if mpv_lib_dir.join("mpv.lib").exists() {
         Some("mpv")
@@ -123,6 +118,29 @@ fn main() {
             target_triple
         );
     }
+
+    println!("cargo:rerun-if-env-changed=SOIA_API");
+    println!("cargo:rerun-if-changed={}", config_file.display());
+    let api = env::var("SOIA_API")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .or_else(|| {
+            fs::read(&config_file)
+                .ok()
+                .and_then(|bytes| {
+                    let data: Vec<u8> = bytes
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, b)| b ^ b"HTUA_AI0S"[i % 9])
+                        .collect();
+                    String::from_utf8(data).ok()
+                })
+        })
+        .unwrap_or_else(|| {
+            String::new()
+        }).replace('\r', "");
+    println!("cargo:rustc-env=SOIA_API={}", api);
 
     println!("cargo:rustc-link-search=native={}", mpv_lib_dir.display());
     if target_os == "windows" {

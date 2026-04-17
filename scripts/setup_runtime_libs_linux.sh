@@ -276,6 +276,32 @@ copy_shared_objects_to_dir() {
   rm -rf "$staging_dir" 2>/dev/null || true
 }
 
+copy_config_data_to_dir() {
+  local source_dir="$1"
+  local output_dir="$2"
+  local config_source="$source_dir/config.data"
+
+  if [[ ! -f "$config_source" ]]; then
+    echo "[INFO] config.data not found in runtime bundle, skipped."
+    return
+  fi
+
+  cp -f "$config_source" "$output_dir/config.data"
+}
+
+resolve_runtime_dir_from_shared_objects() {
+  local source_dir="$1"
+  local runtime_so=""
+
+  runtime_so="$(find "$source_dir" -type f -name '*.so*' | head -n 1 || true)"
+  if [[ -z "$runtime_so" ]]; then
+    echo "$source_dir"
+    return
+  fi
+
+  dirname "$runtime_so"
+}
+
 is_excluded_runtime_so() {
   local so_name="$1"
   case "$so_name" in
@@ -318,7 +344,10 @@ install_mpv_from_local_bundle() {
   fi
 
   echo "📦 Using local mpv bundle: $local_bundle_dir"
+  local runtime_dir
+  runtime_dir="$(resolve_runtime_dir_from_shared_objects "$local_bundle_dir")"
   copy_shared_objects_to_dir "$local_bundle_dir" "$output_dir" "libmpv.so.2" "libmpv.so"
+  copy_config_data_to_dir "$runtime_dir" "$output_dir"
   sync_tauri_linux_manifest
   echo "✅ mpv local bundle installed: $output_dir"
 }
@@ -375,7 +404,10 @@ download_mpv() {
   extract_asset "$asset_file" "$extract_dir"
 
   echo "🧩 Installing shared objects to $output_dir"
+  local runtime_dir
+  runtime_dir="$(resolve_runtime_dir_from_shared_objects "$extract_dir")"
   copy_shared_objects_to_dir "$extract_dir" "$output_dir" "libmpv.so.2" "libmpv.so"
+  copy_config_data_to_dir "$runtime_dir" "$output_dir"
   sync_tauri_linux_manifest
   echo "✅ mpv completed: $output_dir"
 }

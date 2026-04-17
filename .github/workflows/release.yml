@@ -21,7 +21,7 @@ jobs:
       contents: read
     env:
       MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deployment_target }}
-      SOIA_API_URL: ${{ secrets.SOIA_API_URL }}
+      SOIA_API: ${{ secrets.SOIA_API }}
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     strategy:
@@ -91,7 +91,7 @@ jobs:
     permissions:
       contents: read
     env:
-      SOIA_API_URL: ${{ secrets.SOIA_API_URL }}
+      SOIA_API: ${{ secrets.SOIA_API }}
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     steps:
@@ -196,7 +196,7 @@ jobs:
           - runner: ubuntu-24.04-arm
             package_arch: arm64
     env:
-      SOIA_API_URL: ${{ secrets.SOIA_API_URL }}
+      SOIA_API: ${{ secrets.SOIA_API }}
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     steps:
@@ -263,7 +263,7 @@ jobs:
     permissions:
       contents: write
     env:
-      SOIA_API_URL: ${{ secrets.SOIA_API_URL }}
+      SOIA_API: ${{ secrets.SOIA_API }}
     needs:
       - macos-release
       - windows-release

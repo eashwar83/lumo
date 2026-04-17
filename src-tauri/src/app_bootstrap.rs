@@ -13,34 +13,37 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
+use tokio::time::{interval, Duration};
 
 const LOG_LEVEL_SETTING_LABEL: &str = "SOIA_LOG_LEVEL";
 const YTDL_PATH_SETTING_LABEL: &str = "SOIA_YTDL_PATH";
 const DEFAULT_LOG_LEVEL: &str = "Info";
+const UPDATE_CHECK_INTERVAL_SECS: u64 = 24 * 60 * 60;
 
 pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
     let window = app
         .get_webview_window("main")
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Failed to get main window"))?;
 
-    #[cfg(target_os = "macos")]
-    let host_auth_token = crate::check_update::check_update(app.handle().clone());
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = crate::check_update::check_update(app.handle().clone());
-    }
+    let app_handle = app.handle().clone();
+    let auth_token = crate::check_update::check_update(app_handle.clone());
+    tauri::async_runtime::spawn(async move {
+        let mut interval = interval(Duration::from_secs(UPDATE_CHECK_INTERVAL_SECS));
+        interval.tick().await;
+        loop {
+            interval.tick().await;
+            let _ = crate::check_update::check_update(app_handle.clone());
+        }
+    });
 
     let initial_scale_factor = window.scale_factor()?;
     let (render_target, display) = resolve_render_target(&window)?;
-
-    #[cfg(not(target_os = "macos"))]
-    let host_auth_token = None;
 
     let mpv_player_handle = MpvHandle::new(
         render_target,
         display,
         app.handle().clone(),
-        host_auth_token,
+        auth_token,
     )
     .map_err(|e| Box::new(io::Error::other(e)) as Box<dyn Error>)?;
 
@@ -240,6 +243,11 @@ fn configure_mpv_startup(app: &tauri::App) -> Result<(), Box<dyn Error>> {
     //     "ytdl-raw-options",
     //     // "format-sort=+codec:avc:m4a"
     //     "format-sort=vcodec:h265+acodec:opus/best",
+    // );
+
+    // mpv_guard.set_option_string(
+    //     "ytdl-raw-options",
+    //     "write-auto-subs",
     // );
 
     mpv_guard.set_option_string("cache", "auto");

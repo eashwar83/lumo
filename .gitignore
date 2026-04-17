@@ -23,6 +23,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+*.data
+*.bin
 
 # Vendor binaries
 */vendor/mpv
