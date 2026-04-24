@@ -60,7 +60,7 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
 
 fn build_app_state(mpv_player_handle: MpvHandle) -> AppState {
     AppState {
-        mpv_player: Mutex::new(mpv_player_handle),
+        mpv_player: Arc::new(Mutex::new(mpv_player_handle)),
         now_playing: Mutex::new(Default::default()),
     }
 }

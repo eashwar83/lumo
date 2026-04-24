@@ -1,7 +1,7 @@
 // Tauri imports
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 mod app_bootstrap;
 mod check_update;
@@ -15,7 +15,7 @@ use tauri::{Emitter, Manager};
 mod store;
 
 pub struct AppState {
-    pub mpv_player: Mutex<MpvHandle>,
+    pub mpv_player: Arc<Mutex<MpvHandle>>,
     now_playing: Mutex<NowPlayingState>,
 }
 
@@ -80,7 +80,7 @@ fn with_mpv<R>(
     state: &tauri::State<'_, AppState>,
     f: impl FnOnce(&MpvHandle) -> AppResult<R>,
 ) -> AppResult<R> {
-    let mpv_guard = lock_mutex(&state.mpv_player)?;
+    let mpv_guard = lock_mutex(state.mpv_player.as_ref())?;
     f(&mpv_guard)
 }
 
