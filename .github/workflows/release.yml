@@ -31,12 +31,12 @@ jobs:
           - runner: macos-15
             runner_label: macos-15
             arch: arm64
-            deployment_target: "15.0"
+            deployment_target: "13.0"
             package_suffix: macOS-arm64
-          - runner: macos-15-intel
-            runner_label: macos-15-intel
+          - runner: macos-15
+            runner_label: macos-15 (x64-cross)
             arch: x64
-            deployment_target: "15.0"
+            deployment_target: "13.0"
             package_suffix: macOS-x64
     steps:
       - uses: actions/checkout@v6

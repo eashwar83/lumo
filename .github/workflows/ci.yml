@@ -147,11 +147,11 @@ jobs:
           - runner: macos-15
             runner_label: macos-15
             arch: arm64
-            deployment_target: "15.0"
-          - runner: macos-15-intel
-            runner_label: macos-15-intel
+            deployment_target: "13.0"
+          - runner: macos-15
+            runner_label: macos-15 (x64-cross)
             arch: x64
-            deployment_target: "15.0"
+            deployment_target: "13.0"
     steps:
       - uses: actions/checkout@v6
 

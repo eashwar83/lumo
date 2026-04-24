@@ -34,6 +34,11 @@ runs:
     - name: Setup Rust toolchain
       uses: dtolnay/rust-toolchain@stable
 
+    - name: Add Rust target for x64 cross build
+      if: ${{ inputs.arch == 'x64' }}
+      shell: bash
+      run: rustup target add x86_64-apple-darwin
+
     - name: Cache Rust build
       uses: Swatinem/rust-cache@v2
       with:
@@ -54,4 +59,17 @@ runs:
       shell: bash
       env:
         MACOSX_DEPLOYMENT_TARGET: ${{ inputs.deployment_target }}
-      run: pnpm bundle:mac:release
+      run: |
+        set -euo pipefail
+        if [ "${{ inputs.arch }}" = "x64" ]; then
+          MPV_TARGET_ARCH=x86_64 pnpm tauri build --target x86_64-apple-darwin --bundles app
+          ./scripts/bundle_runtime_libs_macos.sh ./src-tauri/target/x86_64-apple-darwin/release/bundle/macos/Soia.app
+          ./scripts/bundle_dmg_macos.sh ./src-tauri/target/x86_64-apple-darwin/release/bundle/macos/Soia.app
+
+          mkdir -p src-tauri/target/release/bundle
+          rm -rf src-tauri/target/release/bundle/macos src-tauri/target/release/bundle/dmg
+          cp -R src-tauri/target/x86_64-apple-darwin/release/bundle/macos src-tauri/target/release/bundle/macos
+          cp -R src-tauri/target/x86_64-apple-darwin/release/bundle/dmg src-tauri/target/release/bundle/dmg
+        else
+          pnpm bundle:mac:release
+        fi
