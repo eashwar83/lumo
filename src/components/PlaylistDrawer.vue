@@ -865,7 +865,10 @@ watch(
                             @keydown.space.prevent="emit('play', entry)"
                         >
                             <div class="playlist-drawer__item-title">
-                                {{ getPathDisplayName(entry.path, "Untitled") }}
+                                {{
+                                    entry.title?.trim() ||
+                                    getPathDisplayName(entry.path, "Untitled")
+                                }}
                             </div>
                             <div class="playlist-drawer__item-sub">
                                 {{ formatPathForDrawerDisplay(entry.path) }}

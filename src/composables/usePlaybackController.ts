@@ -1,6 +1,6 @@
 import { computed, reactive } from "vue";
 import { Window } from "@tauri-apps/api/window";
-import { usePlaybackCommands } from "./usePlaybackCommands";
+import { usePlaybackCommands, type ParsedPlaylistEntry } from "./usePlaybackCommands";
 import { formatTime } from "../utils/formatTime";
 
 type PlayerState = {
@@ -39,6 +39,8 @@ export type PlayerApi = {
     resumePosition?: number,
     autoPlay?: boolean,
   ) => Promise<void>;
+  parsePlaylistFile: (path: string) => Promise<ParsedPlaylistEntry[]>;
+  parsePlaylistSource: (source: string) => Promise<ParsedPlaylistEntry[]>;
   pickMediaPathsAuto: () => Promise<string[]>;
   pickFiles: () => Promise<string[]>;
   togglePlayPause: () => Promise<void>;

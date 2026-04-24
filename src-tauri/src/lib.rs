@@ -289,6 +289,8 @@ pub fn run() {
             commands::platform::set_native_pip_enabled,
             commands::playback::get_runtime_versions,
             commands::playback::get_media_file_size,
+            commands::playback::parse_playlist_file,
+            commands::playback::parse_playlist_source,
             commands::network::list_network_connections,
             commands::network::save_network_connection,
             commands::network::delete_network_connection,

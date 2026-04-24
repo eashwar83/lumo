@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::{
     build_load_file_command_args, json_value_to_string, mpv_command_checked,
@@ -178,4 +179,185 @@ pub(crate) fn consume_pending_open_files(
 ) -> Result<Vec<String>, String> {
     let mut pending = state.pending_paths.lock().map_err(|e| e.to_string())?;
     Ok(std::mem::take(&mut *pending))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ParsePlaylistFilePayload {
+    path: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ParsePlaylistSourcePayload {
+    source: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ParsedPlaylistEntry {
+    path: String,
+    title: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ParsedPlaylistFile {
+    entries: Vec<ParsedPlaylistEntry>,
+}
+
+enum PlaylistBase<'a> {
+    Local(&'a Path),
+    Remote(url::Url),
+}
+
+fn is_absolute_local_path(candidate: &str) -> bool {
+    let path = Path::new(candidate);
+    if path.is_absolute() {
+        return true;
+    }
+    let bytes = candidate.as_bytes();
+    bytes.len() >= 3
+        && bytes[1] == b':'
+        && (bytes[2] == b'\\' || bytes[2] == b'/')
+        && bytes[0].is_ascii_alphabetic()
+}
+
+fn resolve_playlist_entry_path(base: &PlaylistBase<'_>, raw: &str) -> Option<String> {
+    let candidate = raw.trim();
+    if candidate.is_empty() {
+        return None;
+    }
+    if let Ok(parsed) = url::Url::parse(candidate) {
+        if !parsed.scheme().is_empty() {
+            return Some(candidate.to_string());
+        }
+    }
+    if is_absolute_local_path(candidate) {
+        return Some(candidate.to_string());
+    }
+    match base {
+        PlaylistBase::Local(base_dir) => Some(base_dir.join(candidate).to_string_lossy().into_owned()),
+        PlaylistBase::Remote(base_url) => base_url.join(candidate).ok().map(|item| item.to_string()),
+    }
+}
+
+fn parse_extinf_title(line: &str) -> Option<String> {
+    let comma_index = line.find(',')?;
+    let title = line[(comma_index + 1)..].trim();
+    if title.is_empty() {
+        None
+    } else {
+        Some(title.to_string())
+    }
+}
+
+fn parse_m3u_playlist(content: &str, base: &PlaylistBase<'_>) -> Vec<ParsedPlaylistEntry> {
+    let mut entries = Vec::new();
+    let mut pending_title: Option<String> = None;
+
+    for (index, line) in content.lines().enumerate() {
+        let trimmed = line.trim().trim_start_matches('\u{feff}');
+        if trimmed.is_empty() {
+            log::debug!("playlist parse: skip empty line {}", index + 1);
+            continue;
+        }
+        if let Some(stripped) = trimmed.strip_prefix("#EXTINF:") {
+            pending_title = parse_extinf_title(stripped);
+            log::debug!(
+                "playlist parse: line {} extinf title={:?}",
+                index + 1,
+                pending_title
+            );
+            continue;
+        }
+        if trimmed.starts_with('#') {
+            log::debug!("playlist parse: line {} comment/metadata", index + 1);
+            continue;
+        }
+
+        let Some(path) = resolve_playlist_entry_path(base, trimmed) else {
+            log::debug!("playlist parse: line {} unresolved entry", index + 1);
+            continue;
+        };
+        let title = pending_title.take();
+        log::debug!(
+            "playlist parse: line {} entry path={} title={:?}",
+            index + 1,
+            path,
+            title
+        );
+        entries.push(ParsedPlaylistEntry {
+            path,
+            title,
+        });
+    }
+
+    entries
+}
+
+fn parse_playlist_source_inner(source: &str) -> Result<ParsedPlaylistFile, String> {
+    let trimmed = source.trim();
+    if trimmed.is_empty() {
+        return Err("Playlist source is empty".to_string());
+    }
+
+    if let Ok(url) = url::Url::parse(trimmed) {
+        if matches!(url.scheme(), "http" | "https") {
+            log::info!("playlist parse: start url={}", url);
+            let client = reqwest::blocking::Client::builder()
+                .timeout(Duration::from_secs(20))
+                .build()
+                .map_err(|e| e.to_string())?;
+            let response = client.get(url.clone()).send().map_err(|e| e.to_string())?;
+            let status = response.status();
+            if !status.is_success() {
+                log::warn!("playlist parse: fetch failed url={} status={}", url, status);
+                return Err(format!("Playlist request failed: {}", status));
+            }
+            let content = response.text().map_err(|e| e.to_string())?;
+            log::debug!("playlist parse: loaded {} bytes from {}", content.len(), url);
+            let entries = parse_m3u_playlist(&content, &PlaylistBase::Remote(url.clone()));
+            log::info!("playlist parse: done url={} entries={}", url, entries.len());
+            return Ok(ParsedPlaylistFile { entries });
+        }
+    }
+
+    let input_path = PathBuf::from(trimmed);
+    log::info!("playlist parse: start path={}", input_path.to_string_lossy());
+    if !input_path.is_file() {
+        log::warn!(
+            "playlist parse: file not found path={}",
+            input_path.to_string_lossy()
+        );
+        return Err("Playlist file not found".to_string());
+    }
+    let content = std::fs::read_to_string(&input_path).map_err(|e| e.to_string())?;
+    log::debug!(
+        "playlist parse: loaded {} bytes from {}",
+        content.len(),
+        input_path.to_string_lossy()
+    );
+    let base_dir = input_path.parent().unwrap_or_else(|| Path::new(""));
+    let entries = parse_m3u_playlist(&content, &PlaylistBase::Local(base_dir));
+    log::info!(
+        "playlist parse: done path={} entries={}",
+        input_path.to_string_lossy(),
+        entries.len()
+    );
+    Ok(ParsedPlaylistFile { entries })
+}
+
+#[tauri::command]
+pub(crate) fn parse_playlist_file(
+    payload: ParsePlaylistFilePayload,
+) -> Result<ParsedPlaylistFile, String> {
+    parse_playlist_source_inner(&payload.path)
+}
+
+#[tauri::command]
+pub(crate) fn parse_playlist_source(
+    payload: ParsePlaylistSourcePayload,
+) -> Result<ParsedPlaylistFile, String> {
+    parse_playlist_source_inner(&payload.source)
 }

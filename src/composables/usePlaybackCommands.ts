@@ -16,6 +16,11 @@ type CurrentWindow = {
   setFullscreen: (value: boolean) => Promise<void>;
 };
 
+export type ParsedPlaylistEntry = {
+  path: string;
+  title?: string | null;
+};
+
 export const usePlaybackCommands = (
   state: PlayerEffectState,
   currentWindow: CurrentWindow,
@@ -79,6 +84,24 @@ export const usePlaybackCommands = (
     });
   };
 
+  const parsePlaylistFile = async (path: string): Promise<ParsedPlaylistEntry[]> => {
+    const response = await invoke<{ entries?: ParsedPlaylistEntry[] }>(
+      "parse_playlist_file",
+      { payload: { path } },
+    );
+    return Array.isArray(response?.entries) ? response.entries : [];
+  };
+
+  const parsePlaylistSource = async (
+    source: string,
+  ): Promise<ParsedPlaylistEntry[]> => {
+    const response = await invoke<{ entries?: ParsedPlaylistEntry[] }>(
+      "parse_playlist_source",
+      { payload: { source } },
+    );
+    return Array.isArray(response?.entries) ? response.entries : [];
+  };
+
   const togglePlayPause = async (): Promise<void> => {
     await invoke("cycle_pause");
   };
@@ -121,6 +144,8 @@ export const usePlaybackCommands = (
   return {
     loadFile,
     loadNetworkFile,
+    parsePlaylistFile,
+    parsePlaylistSource,
     pickMediaPathsAuto,
     pickFiles,
     togglePlayPause,

@@ -20,6 +20,11 @@ type CreatePlaylistOptions = {
     setAsPlayback?: boolean;
 };
 
+type CreatePlaylistEntryInput = {
+    path: string;
+    title?: string;
+};
+
 const isValidSortMode = (value: unknown): value is PlaylistSortMode =>
     value === "name" || value === "added";
 
@@ -88,8 +93,10 @@ const normalizePlaylistEntries = (entries: PlaylistEntry[]): PlaylistEntry[] => 
     entries.forEach((entry) => {
         const path = entry?.path?.trim();
         if (!path) return;
+        const title = entry?.title?.trim() || undefined;
         unique.set(path, {
             path,
+            title,
             addedAt:
                 typeof entry.addedAt === "number" ? entry.addedAt : Date.now(),
         });
@@ -109,8 +116,8 @@ const sortEntries = (
     const list = [...entries];
     if (mode === "name") {
         list.sort((a, b) =>
-            getPathDisplayName(a.path).localeCompare(
-                getPathDisplayName(b.path),
+            (a.title?.trim() || getPathDisplayName(a.path)).localeCompare(
+                b.title?.trim() || getPathDisplayName(b.path),
                 undefined,
                 { numeric: true, sensitivity: "base" },
             ),
@@ -185,16 +192,20 @@ export const usePlaylistState = () => {
         playlists.value = nextPlaylists;
     };
 
-    const createPlaylistWithPaths = (
-        paths: string[],
+    const createPlaylistWithEntries = (
+        items: CreatePlaylistEntryInput[],
         options: CreatePlaylistOptions = {},
     ): string | null => {
         const timestamp = Date.now();
-        const dedupedPaths = Array.from(
-            new Set(paths.map((item) => item.trim()).filter(Boolean)),
-        );
-        const entries = dedupedPaths.map((path, index) => ({
-            path,
+        const normalizedItems = items
+            .map((item) => ({
+                path: item.path?.trim() ?? "",
+                title: item.title?.trim() || undefined,
+            }))
+            .filter((item) => !!item.path);
+        const entries = normalizedItems.map((item, index) => ({
+            path: item.path,
+            title: item.title,
             addedAt: timestamp + index,
         }));
         const normalizedEntries = normalizePlaylistEntries(entries);
@@ -202,7 +213,10 @@ export const usePlaylistState = () => {
 
         const playlistId = createPlaylistId();
         const fallbackName = `Playlist ${playlists.value.length + 1}`;
-        const derivedName = derivePlaylistNameFromPaths(dedupedPaths, fallbackName);
+        const derivedName = derivePlaylistNameFromPaths(
+            normalizedEntries.map((item) => item.path),
+            fallbackName,
+        );
         const newPlaylist: Playlist = {
             id: playlistId,
             name: normalizePlaylistName(options.name, derivedName),
@@ -219,6 +233,15 @@ export const usePlaylistState = () => {
         }
         return playlistId;
     };
+
+    const createPlaylistWithPaths = (
+        paths: string[],
+        options: CreatePlaylistOptions = {},
+    ): string | null =>
+        createPlaylistWithEntries(
+            paths.map((path) => ({ path })),
+            options,
+        );
 
     const applyPersistedState = (stored: PersistedPlaylistState) => {
         if (stored.playlists) {
@@ -437,6 +460,7 @@ export const usePlaylistState = () => {
         applyPersistedState,
         toPersistedState,
         createPlaylistWithPaths,
+        createPlaylistWithEntries,
         addFromDrawerSelection,
         clearActivePlaylist,
         removeFromActivePlaylist,
