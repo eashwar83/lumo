@@ -3,7 +3,8 @@ use crate::network::types::{
     LoadNetworkFilePayload, NetworkBrowseResult,
 };
 use crate::store::network_connection_store::NetworkConnectionRecord;
-use crate::{build_load_file_command_args, mpv_command_checked, with_mpv, AppState};
+use crate::{build_load_file_command_args_with_options, mpv_command_checked, with_mpv, AppState};
+use base64::{engine::general_purpose::STANDARD, Engine};
 
 #[tauri::command]
 pub(crate) fn list_network_connections(
@@ -79,10 +80,21 @@ pub(crate) fn load_network_file(
         payload.protocol.as_deref(),
         &payload.file_path,
     )?;
-
+    let mut load_options: Vec<String> = Vec::new();
+    let username = connection.username.trim();
+    if !username.is_empty() {
+        let auth_value = STANDARD.encode(format!("{}:{}", username, connection.password));
+        load_options.push(format!(
+            "http-header-fields=Authorization: Basic {}",
+            auth_value
+        ));
+    }
+    // WebDAV URLs should not trigger yt-dlp probing on failure.
+    load_options.push("ytdl=no".to_string());
     let resume_position = payload.resume_position.unwrap_or(0.0);
     let auto_play = payload.auto_play.unwrap_or(true);
-    let command_args = build_load_file_command_args(&playback_url, resume_position);
+    let command_args =
+        build_load_file_command_args_with_options(&playback_url, resume_position, &load_options);
     let command_refs: Vec<&str> = command_args.iter().map(String::as_str).collect();
 
     with_mpv(&state, |mpv_guard| {

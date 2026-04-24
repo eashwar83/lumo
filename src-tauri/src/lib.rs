@@ -146,6 +146,30 @@ fn build_load_file_command_args(url: &str, resume_position: f64) -> Vec<String> 
     }
 }
 
+fn build_load_file_command_args_with_options(
+    url: &str,
+    resume_position: f64,
+    load_options: &[String],
+) -> Vec<String> {
+    if load_options.is_empty() {
+        return build_load_file_command_args(url, resume_position);
+    }
+
+    let mut options = Vec::new();
+    if resume_position > 0.0 {
+        options.push(format!("start={resume_position}"));
+    }
+    options.extend(load_options.iter().cloned());
+
+    vec![
+        "loadfile".to_string(),
+        url.to_string(),
+        "replace".to_string(),
+        "0".to_string(),
+        options.join(","),
+    ]
+}
+
 fn normalize_open_media_path(path: &Path) -> Option<String> {
     if path.as_os_str().is_empty() || path.is_dir() {
         return None;

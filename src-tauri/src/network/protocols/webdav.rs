@@ -1,5 +1,5 @@
 use crate::store::network_connection_store::NetworkConnectionRecord;
-use percent_encoding::percent_decode_str;
+use percent_encoding::{percent_decode_str, utf8_percent_encode, AsciiSet, CONTROLS};
 use reqwest::Method;
 use std::cmp::Ordering;
 use std::time::Duration;
@@ -14,6 +14,21 @@ const PROPFIND_BODY: &str = r#"<?xml version="1.0" encoding="utf-8"?>
     <d:getlastmodified/>
   </d:prop>
 </d:propfind>"#;
+
+// URL path segment encoding set for playback URLs.
+// Keep this strict enough for WebDAV servers that reject reserved chars like '[' and ']'.
+const PLAYBACK_PATH_SEGMENT_ENCODE_SET: &AsciiSet = &CONTROLS
+    .add(b' ')
+    .add(b'"')
+    .add(b'#')
+    .add(b'<')
+    .add(b'>')
+    .add(b'?')
+    .add(b'`')
+    .add(b'{')
+    .add(b'}')
+    .add(b'[')
+    .add(b']');
 
 #[derive(Clone)]
 pub struct WebdavBrowseEntry {
@@ -57,6 +72,25 @@ fn decode_path_segments(url: &Url) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn encode_segment_for_playback(segment: &str) -> String {
+    let decoded = percent_decode_str(segment).decode_utf8_lossy();
+    utf8_percent_encode(decoded.as_ref(), PLAYBACK_PATH_SEGMENT_ENCODE_SET).to_string()
+}
+
+fn normalize_playback_url_path(url: &mut Url) {
+    let encoded_segments: Vec<String> = url
+        .path_segments()
+        .map(|segments| segments.map(encode_segment_for_playback).collect())
+        .unwrap_or_default();
+
+    let encoded_path = if encoded_segments.is_empty() {
+        "/".to_string()
+    } else {
+        format!("/{}", encoded_segments.join("/"))
+    };
+    url.set_path(&encoded_path);
 }
 
 fn parse_base_url(connection: &NetworkConnectionRecord) -> Result<Url, String> {
@@ -251,22 +285,6 @@ pub fn build_playback_url(
     let base_url = parse_base_url(connection)?;
     let root_segments = decode_path_segments(&base_url);
     let mut target_url = build_target_url(&base_url, &root_segments, file_path)?;
-
-    let username = connection.username.trim();
-    if !username.is_empty() {
-        target_url
-            .set_username(username)
-            .map_err(|_| "Invalid username".to_string())?;
-        if connection.password.is_empty() {
-            target_url
-                .set_password(None)
-                .map_err(|_| "Invalid password".to_string())?;
-        } else {
-            target_url
-                .set_password(Some(&connection.password))
-                .map_err(|_| "Invalid password".to_string())?;
-        }
-    }
-
+    normalize_playback_url_path(&mut target_url);
     Ok(target_url.to_string())
 }

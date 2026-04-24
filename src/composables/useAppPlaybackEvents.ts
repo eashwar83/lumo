@@ -145,6 +145,8 @@ export const useAppPlaybackEvents = ({
 
     const onEndFile = ({ reason }: EndFilePayload) => {
         if (reason !== "eof") return;
+        isLoading.value = false;
+        loadingUrl.value = "";
         void handleEndFile();
     };
 
