@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.1.7] - 2026-04-24
+
+### Features
+
+- Added M3U playlist parsing support.
+
+### Improvements
+
+- Expanded macOS compatibility and now support macOS 13+.
+- Stabilized WebDAV playback authentication and URL handling.
+
 ## [0.1.6] - 2026-04-18
 
 ### Features

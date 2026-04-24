@@ -49,7 +49,7 @@
 
 Download from the [release page](https://github.com/FengZeng/soia/releases).
 
-Or you can build it yourself. Support macOS 10.15+, Windows, and Linux(Ubuntu).
+Or you can build it yourself. Support macOS 13+, Windows, and Linux(Ubuntu).
 Current Linux builds target Ubuntu Wayland sessions only (`X11` is not supported at this time).
 
 ## FAQ

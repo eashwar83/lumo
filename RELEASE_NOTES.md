@@ -19,16 +19,12 @@ You can also go to System Settings > Privacy & Security and click "Open Anyway" 
 
 The app is open-source and its code is publicly available for anyone to inspect.
 
-## [0.1.6] - 2026-04-18
+## [0.1.7] - 2026-04-24
 
-This release focuses on network playback experience and overall stability.
+This release improves macOS compatibility and stream playback reliability.
 
 ### Highlights
 
-- Added **DLNA support**: discover devices, browse media, and play DLNA streams.
-- Added **Playback Title display modes**, including the option to hide the top title bar for a cleaner playback UI.
-
-### Fixes
-
-- Fixed an issue where the screen could sleep during active video playback.
-- Improved robustness of the update check process and fixed update flow issues.
+- Expanded **macOS compatibility** and now support **macOS 13+**.
+- Stabilized **WebDAV playback authentication** and **URL handling**.
+- Added **M3U playlist parsing** support.
