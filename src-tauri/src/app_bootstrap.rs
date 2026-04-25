@@ -25,6 +25,11 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
         .get_webview_window("main")
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Failed to get main window"))?;
 
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    {
+        let _ = window.set_decorations(false);
+    }
+
     let app_handle = app.handle().clone();
     let auth_token = crate::check_update::check_update(app_handle.clone());
     tauri::async_runtime::spawn(async move {

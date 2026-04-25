@@ -194,7 +194,7 @@ mod imp {
         let default_snapshot = WindowSnapshot {
             inner_size: None,
             outer_position: None,
-            was_decorated: true,
+            was_decorated: false,
             was_resizable: true,
             was_always_on_top: false,
             was_fullscreen: false,

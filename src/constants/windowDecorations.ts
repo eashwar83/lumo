@@ -7,31 +7,33 @@ type StoredSettingGroupLike = { title?: string; items?: StoredSettingItemLike[] 
 const WINDOW_DECORATIONS_ENABLED = true;
 const WINDOW_DECORATIONS_DISABLED = false;
 const COMPACT_MODE_CORNER_RADIUS = 0;
+const DEFAULT_COMPACT_MODE_ENABLED = true;
 
-const isCompactModeEnabled = (
-    groups?: StoredSettingGroupLike[],
-): boolean =>
-    groups
+const isCompactModeEnabled = (groups?: StoredSettingGroupLike[]): boolean => {
+    const value = groups
         ?.flatMap((group) => group.items ?? [])
-        .find((item) => item.label === ENABLE_COMPACT_MODE_SETTING_LABEL)?.value ===
-    "On";
+        .find((item) => item.label === ENABLE_COMPACT_MODE_SETTING_LABEL)
+        ?.value?.trim();
+    if (value === "On") return true;
+    if (value === "Off") return false;
+    return DEFAULT_COMPACT_MODE_ENABLED;
+};
 
 export const applyWindowDecorationsFromSettingGroups = async (
     groups?: StoredSettingGroupLike[],
 ) => {
     if (typeof window === "undefined") return;
     const compactModeEnabled = isCompactModeEnabled(groups);
+    const isMacPlatform =
+        typeof navigator !== "undefined" && /mac|darwin/i.test(navigator.userAgent);
     const isLinuxPlatform =
         typeof navigator !== "undefined" && /\blinux\b/i.test(navigator.userAgent);
-    const isDesktopCustomChromePlatform =
-        typeof navigator !== "undefined" &&
-        /\b(windows|linux)\b/i.test(navigator.userAgent);
-    const shouldEnableDecorations =
-        isDesktopCustomChromePlatform && compactModeEnabled
-            ? WINDOW_DECORATIONS_DISABLED
-            : WINDOW_DECORATIONS_ENABLED;
-    const shouldForceLinuxDecorationRestore =
-        isLinuxPlatform && !compactModeEnabled;
+    const shouldEnableDecorations = compactModeEnabled
+        ? WINDOW_DECORATIONS_DISABLED
+        : WINDOW_DECORATIONS_ENABLED;
+    const effectiveShouldEnableDecorations = isLinuxPlatform
+        ? WINDOW_DECORATIONS_DISABLED
+        : shouldEnableDecorations;
 
     const currentWindow = getCurrentWindow();
     let alreadyEnabled: boolean | null = null;
@@ -42,34 +44,21 @@ export const applyWindowDecorationsFromSettingGroups = async (
         console.warn("[windowDecorations] Failed to query decoration state", {
             compactModeEnabled,
             shouldEnableDecorations,
-            isLinuxPlatform,
             error,
         });
     }
 
-    if (shouldForceLinuxDecorationRestore) {
+    if (!isMacPlatform && alreadyEnabled !== effectiveShouldEnableDecorations) {
         try {
-            await currentWindow.setDecorations(WINDOW_DECORATIONS_ENABLED);
-        } catch (error) {
-            console.warn(
-                "[windowDecorations] Linux non-compact: forced setDecorations(true) failed",
-                {
-                    compactModeEnabled,
-                    alreadyEnabled,
-                    shouldEnableDecorations,
-                    error,
-                },
-            );
-        }
-    } else if (alreadyEnabled !== shouldEnableDecorations) {
-        try {
-            await currentWindow.setDecorations(shouldEnableDecorations);
+            await currentWindow.setDecorations(effectiveShouldEnableDecorations);
         } catch (error) {
             console.warn("[windowDecorations] Failed to toggle window decorations", {
                 compactModeEnabled,
                 alreadyEnabled,
                 shouldEnableDecorations,
+                effectiveShouldEnableDecorations,
                 isLinuxPlatform,
+                isMacPlatform,
                 error,
             });
         }
@@ -83,7 +72,6 @@ export const applyWindowDecorationsFromSettingGroups = async (
     } catch (error) {
         console.warn("[windowDecorations] Failed to apply window appearance", {
             compactModeEnabled,
-            isLinuxPlatform,
             error,
         });
     }
