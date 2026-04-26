@@ -28,6 +28,7 @@ const props = defineProps<{
     saturation: number;
     gamma: number;
     hue: number;
+    globalColorAdjustmentsEnabled: boolean;
     isLoopOne: boolean;
     audioTracks: MediaTrack[];
     showAudioMenu: boolean;
@@ -57,6 +58,7 @@ const emit = defineEmits<{
     (e: "set-saturation", value: number): void;
     (e: "set-gamma", value: number): void;
     (e: "set-hue", value: number): void;
+    (e: "set-global-color-adjustments-enabled", enabled: boolean): void;
     (e: "select-audio", track: MediaTrack): void;
     (e: "select-sub-track", payload: { target: SubtitleTarget; track: MediaTrack }): void;
     (e: "set-active-sub-target", target: SubtitleTarget): void;
@@ -231,6 +233,9 @@ onUnmounted(() => {
                         :saturation="saturation"
                         :gamma="gamma"
                         :hue="hue"
+                        :global-color-adjustments-enabled="
+                            globalColorAdjustmentsEnabled
+                        "
                         :is-loop-one="isLoopOne"
                         :audio-tracks="audioTracks"
                         :show-audio-menu="showAudioMenu"
@@ -254,6 +259,9 @@ onUnmounted(() => {
                         @set-saturation="emit('set-saturation', $event)"
                         @set-gamma="emit('set-gamma', $event)"
                         @set-hue="emit('set-hue', $event)"
+                        @set-global-color-adjustments-enabled="
+                            emit('set-global-color-adjustments-enabled', $event)
+                        "
                         @select-audio="emit('select-audio', $event)"
                         @select-sub-track="emit('select-sub-track', $event)"
                         @set-active-sub-target="emit('set-active-sub-target', $event)"

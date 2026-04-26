@@ -529,7 +529,12 @@ const { hasLoadedPanel, loadActivePanel } = useAppUiPersistence({
     normalizeStoredPanel,
 });
 
-const { onFileLoaded, onPlaybackRestart, onProgress, onEndFile } =
+const {
+    onFileLoaded: onFileLoadedBase,
+    onPlaybackRestart,
+    onProgress,
+    onEndFile,
+} =
     useAppPlaybackEvents({
         player,
         tracks,
@@ -542,6 +547,11 @@ const { onFileLoaded, onPlaybackRestart, onProgress, onEndFile } =
         loadingUrl,
         playPath,
     });
+
+const onFileLoaded = async () => {
+    await onFileLoadedBase();
+    await adjustments.applyColorAdjustmentsForMedia(player.state.media.url);
+};
 
 useAppRuntimeBindings({
     player,
@@ -796,6 +806,9 @@ function onWindowFocusDrainPendingFiles() {
             :saturation="adjustments.saturation.value"
             :gamma="adjustments.gamma.value"
             :hue="adjustments.hue.value"
+            :global-color-adjustments-enabled="
+                adjustments.globalColorAdjustmentsEnabled.value
+            "
             :is-loop-one="isLoopOne"
             :audio-tracks="tracks.audioTracks.value"
             :show-audio-menu="tracks.showAudioMenu.value"
@@ -822,6 +835,9 @@ function onWindowFocusDrainPendingFiles() {
             @set-saturation="adjustments.setSaturation"
             @set-gamma="adjustments.setGamma"
             @set-hue="adjustments.setHue"
+            @set-global-color-adjustments-enabled="
+                adjustments.setGlobalColorAdjustmentsEnabled
+            "
             @select-audio="tracks.selectAudio"
             @select-sub-track="tracks.selectSubTrack"
             @set-active-sub-target="tracks.setActiveSubTarget"

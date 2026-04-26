@@ -35,6 +35,8 @@ pub struct UiState {
     #[serde(default)]
     pub rendering: Option<RenderingState>,
     #[serde(default)]
+    pub playback_adjustments: Option<PlaybackAdjustmentsState>,
+    #[serde(default)]
     pub playlist: Option<Vec<PlaylistEntry>>,
     #[serde(default)]
     pub playlists: Option<Vec<Playlist>>,
@@ -53,6 +55,7 @@ impl Default for UiState {
             network: None,
             settings: None,
             rendering: None,
+            playback_adjustments: None,
             playlist: None,
             playlists: None,
             active_playlist_id: None,
@@ -69,6 +72,9 @@ impl UiState {
             network: incoming.network.or(self.network),
             settings: incoming.settings.or(self.settings),
             rendering: incoming.rendering.or(self.rendering),
+            playback_adjustments: incoming
+                .playback_adjustments
+                .or(self.playback_adjustments),
             playlist: incoming.playlist.or(self.playlist),
             playlists: incoming.playlists.or(self.playlists),
             active_playlist_id: incoming.active_playlist_id.or(self.active_playlist_id),
@@ -76,6 +82,30 @@ impl UiState {
             playlist_sort_mode: incoming.playlist_sort_mode.or(self.playlist_sort_mode),
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaybackAdjustmentsState {
+    #[serde(default)]
+    pub global_color_adjustments_enabled: Option<bool>,
+    #[serde(default)]
+    pub global_color_adjustments: Option<ColorAdjustmentsState>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ColorAdjustmentsState {
+    #[serde(default)]
+    pub brightness: Option<f64>,
+    #[serde(default)]
+    pub contrast: Option<f64>,
+    #[serde(default)]
+    pub saturation: Option<f64>,
+    #[serde(default)]
+    pub gamma: Option<f64>,
+    #[serde(default)]
+    pub hue: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

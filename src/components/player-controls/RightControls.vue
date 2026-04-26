@@ -19,6 +19,7 @@ const props = defineProps<{
     saturation: number;
     gamma: number;
     hue: number;
+    globalColorAdjustmentsEnabled: boolean;
     isLoopOne: boolean;
     audioTracks: MediaTrack[];
     showAudioMenu: boolean;
@@ -43,6 +44,7 @@ const emit = defineEmits<{
     (e: "set-saturation", value: number): void;
     (e: "set-gamma", value: number): void;
     (e: "set-hue", value: number): void;
+    (e: "set-global-color-adjustments-enabled", enabled: boolean): void;
     (e: "select-audio", track: MediaTrack): void;
     (e: "select-sub-track", payload: { target: SubtitleTarget; track: MediaTrack }): void;
     (e: "set-active-sub-target", target: SubtitleTarget): void;
@@ -443,7 +445,7 @@ onUnmounted(() => {
             <button
                 class="icon-button icon-button--player"
                 @click.stop="emit('toggle-menu', 'settings')"
-                title="Playback Settings"
+                title="Video"
             >
                 <svg
                     xmlns="http://www.w3.org/2000/svg"
@@ -462,7 +464,36 @@ onUnmounted(() => {
             <transition name="fade-up">
                 <div v-if="showSettingsMenu" class="track-menu track-menu--settings">
                     <div class="track-menu__header">
-                        <span>Playback Settings</span>
+                        <span>Video</span>
+                        <div class="track-menu__header-actions">
+                            <button
+                                class="track-menu__mode-toggle"
+                                type="button"
+                                :aria-pressed="globalColorAdjustmentsEnabled"
+                                :title="
+                                    globalColorAdjustmentsEnabled
+                                        ? 'Global apply enabled'
+                                        : 'Enable global apply'
+                                "
+                                @click.stop="
+                                    emit(
+                                        'set-global-color-adjustments-enabled',
+                                        !globalColorAdjustmentsEnabled,
+                                    )
+                                "
+                            >
+                                <span class="track-menu__mode-label">Global</span>
+                                <span
+                                    class="track-menu__mode-switch"
+                                    :class="{
+                                        'track-menu__mode-switch--on':
+                                            globalColorAdjustmentsEnabled,
+                                    }"
+                                >
+                                    <span class="track-menu__mode-thumb"></span>
+                                </span>
+                            </button>
+                        </div>
                     </div>
                     <div class="track-menu__list track-menu__list--settings">
                         <ControlSlider
