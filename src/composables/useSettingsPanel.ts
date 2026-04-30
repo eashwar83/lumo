@@ -168,6 +168,7 @@ export const useSettingsPanel = () => {
         setMediaAssociationToSoia: mediaAssociation.setMediaAssociationToSoia,
         installUpdate: update.installUpdate,
         openProjectGithub: about.openProjectGithub,
+        openSubreddit: about.openSubreddit,
         resetAllSettings,
         factoryReset,
         isFactoryResetInProgress,

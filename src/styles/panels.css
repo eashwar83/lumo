@@ -1039,7 +1039,7 @@
     border: none;
     padding: 0;
     background: transparent;
-    color: #1e6fff;
+    color: #6096f4;
     text-decoration: underline;
     text-underline-offset: 4px;
     text-decoration-skip-ink: auto;
@@ -1051,7 +1051,7 @@
 }
 
 .panel__link-button:hover {
-    color: #165fd8;
+    color: #2873ed;
 }
 
 .panel__link-button:focus-visible {
@@ -1060,7 +1060,7 @@
     border-radius: 4px;
 }
 
-.panel__github-actions {
+.panel__social-actions {
     display: inline-flex;
     align-items: center;
     gap: 8px;

@@ -3,6 +3,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { ref } from "vue";
 
 const PROJECT_GITHUB_URL = "https://github.com/FengZeng/soia";
+const PROJECT_SUBREDDIT_URL = "https://www.reddit.com/r/soia/";
 
 export type RuntimeVersions = {
     soiaVersion: string;
@@ -34,9 +35,21 @@ export const useAboutSection = () => {
         }
     };
 
+    const openSubreddit = async () => {
+        try {
+            await openUrl(PROJECT_SUBREDDIT_URL);
+            return;
+        } catch {
+            if (typeof window !== "undefined") {
+                window.open(PROJECT_SUBREDDIT_URL, "_blank", "noopener,noreferrer");
+            }
+        }
+    };
+
     return {
         runtimeVersions,
         loadRuntimeVersions,
         openProjectGithub,
+        openSubreddit,
     };
 };
