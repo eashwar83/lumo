@@ -64,6 +64,7 @@ export const ALLOW_URL_INPUT_DURING_PLAYBACK_SETTING_LABEL =
     "ALLOW_URL_INPUT_DURING_PLAYBACK";
 export const DEFAULT_SPEED_SETTING_LABEL = "Default Speed";
 export const IMAGE_DISPLAY_DURATION_SETTING_LABEL = "IMAGE_DISPLAY_DURATION";
+export const DISABLE_SUBTITLES_SETTING_LABEL = "DISABLE_SUBTITLES";
 export const SETTINGS_UPDATED_EVENT = "soia:settings-updated";
 
 export type PlaybackTitleMode = "Show" | "Editable" | "Hidden";
@@ -102,6 +103,14 @@ export const defaultSettingGroups: SettingGroup[] = [
                 value: "Show",
                 type: "select",
                 options: [...PLAYBACK_TITLE_MODE_OPTIONS],
+            },
+            {
+                label: DISABLE_SUBTITLES_SETTING_LABEL,
+                displayLabel: "Disable Subtitles",
+                value: "Off",
+                type: "toggle",
+                onValue: "On",
+                offValue: "Off",
             },
             {
                 label: AUTO_PLAY_ON_OPEN_SETTING_LABEL,

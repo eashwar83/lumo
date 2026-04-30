@@ -8,6 +8,7 @@ import {
     ALLOW_URL_INPUT_DURING_PLAYBACK_SETTING_LABEL,
     AUTO_PLAY_ON_OPEN_SETTING_LABEL,
     DEFAULT_SPEED_SETTING_LABEL,
+    DISABLE_SUBTITLES_SETTING_LABEL,
     ENABLE_COMPACT_MODE_SETTING_LABEL,
     PLAYBACK_TITLE_SETTING_LABEL,
     SETTINGS_UPDATED_EVENT,
@@ -84,6 +85,7 @@ type PlaybackPreferences = {
     playbackTitleMode: PlaybackTitleMode;
     compactModeEnabled: boolean;
     wallpaperModeEnabled: boolean;
+    subtitlesDisabled: boolean;
 };
 
 const DEFAULT_PLAYBACK_PREFERENCES: PlaybackPreferences = {
@@ -93,6 +95,7 @@ const DEFAULT_PLAYBACK_PREFERENCES: PlaybackPreferences = {
     playbackTitleMode: "Show",
     compactModeEnabled: false,
     wallpaperModeEnabled: false,
+    subtitlesDisabled: false,
 };
 
 const normalizePlaybackTitleMode = (
@@ -132,6 +135,8 @@ const parsePlaybackPreferences = (
     );
     const compactModeValue = getValue(ENABLE_COMPACT_MODE_SETTING_LABEL) ?? "On";
     const wallpaperModeValue = getValue(WALLPAPER_MODE_SETTING_LABEL) ?? "Disable";
+    const subtitlesDisabledValue =
+        getValue(DISABLE_SUBTITLES_SETTING_LABEL) ?? "Off";
 
     return {
         skipIntroSeconds,
@@ -141,6 +146,7 @@ const parsePlaybackPreferences = (
         playbackTitleMode: playbackTitleModeValue,
         compactModeEnabled: compactModeValue === "On",
         wallpaperModeEnabled: wallpaperModeValue === "Enable",
+        subtitlesDisabled: subtitlesDisabledValue === "On",
     };
 };
 
@@ -574,6 +580,9 @@ export const usePlaybackFlow = ({
     const wallpaperModeEnabled = computed(
         () => playbackPreferences.value.wallpaperModeEnabled,
     );
+    const subtitlesDisabled = computed(
+        () => playbackPreferences.value.subtitlesDisabled,
+    );
 
     return {
         isLoading,
@@ -593,5 +602,6 @@ export const usePlaybackFlow = ({
         playbackTitleMode,
         compactModeEnabled,
         wallpaperModeEnabled,
+        subtitlesDisabled,
     };
 };

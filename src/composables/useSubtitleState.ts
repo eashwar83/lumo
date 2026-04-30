@@ -104,6 +104,21 @@ export const useSubtitleState = (
         }
     };
 
+    const disableAllSubtitles = async () => {
+        dualSubEnabled.value = false;
+        activeSubTarget.value = "primary";
+        secondarySubId.value = 0;
+        subTracks.value.forEach((track) => {
+            track.selected = false;
+        });
+        await invoke("mpv_set_option_string", { name: "secondary-sid", value: "no" });
+        await invoke("mpv_set_option_string", { name: "sid", value: "no" });
+    };
+
+    const enableAutoSubtitleSelection = async () => {
+        await invoke("mpv_set_option_string", { name: "sid", value: "auto" });
+    };
+
     const resetSubtitleState = () => {
         dualSubEnabled.value = false;
         secondarySubId.value = 0;
@@ -119,7 +134,8 @@ export const useSubtitleState = (
         setActiveSubTarget,
         selectSubTrack,
         reconcileSubtitleState,
+        disableAllSubtitles,
+        enableAutoSubtitleSelection,
         resetSubtitleState,
     };
 };
-

@@ -101,6 +101,7 @@ const {
     playbackTitleMode,
     compactModeEnabled,
     wallpaperModeEnabled,
+    subtitlesDisabled,
 } = playbackFlow;
 
 const isWindowsPlatform =
@@ -488,6 +489,14 @@ watch(shouldShowPlaybackLoadingOverlay, (shouldShow) => {
     }, 500);
 });
 
+watch(
+    subtitlesDisabled,
+    (disabled) => {
+        void tracks.setSubtitlesDisabled(disabled);
+    },
+    { immediate: true },
+);
+
 const mediaInfo = computed(() => {
     if (!player.state.media.isFileLoaded) return null;
     return getMockMediaInfo(player.state.media.url, {
@@ -550,6 +559,9 @@ const {
 
 const onFileLoaded = async () => {
     await onFileLoadedBase();
+    if (subtitlesDisabled.value) {
+        await tracks.setSubtitlesDisabled(true);
+    }
     await adjustments.applyColorAdjustmentsForMedia(player.state.media.url);
 };
 

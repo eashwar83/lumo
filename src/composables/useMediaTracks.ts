@@ -180,6 +180,17 @@ export const useMediaTracks = (
         subtitleState.resetSubtitleState();
     };
 
+    const setSubtitlesDisabled = async (disabled: boolean) => {
+        if (disabled) {
+            await subtitleState.disableAllSubtitles();
+            subTracks.value.forEach((track) => {
+                track.selected = String(track.id) === "0";
+            });
+            return;
+        }
+        await subtitleState.enableAutoSubtitleSelection();
+    };
+
     return {
         videoTracks,
         audioTracks,
@@ -197,6 +208,7 @@ export const useMediaTracks = (
         addExternalAudioTrack,
         addExternalSubtitleTrack,
         applyExternalTracksForUrl,
+        setSubtitlesDisabled,
         resetTracks,
     };
 };
