@@ -25,8 +25,12 @@ type PlayerApi = {
         playback: {
             duration: number;
         };
+        window: {
+            isFullscreen: boolean;
+        };
     };
     setLoopFile: (enabled: boolean) => Promise<void>;
+    syncMpvRenderTarget: () => Promise<void>;
 };
 
 type PlaylistApi = {
@@ -219,6 +223,9 @@ export const useAppPlaybackEvents = ({
         nowPlaying.updateNowPlayingStatus(resumePosition);
         void nowPlaying.captureNowPlayingArtwork();
         void tracks.applyExternalTracksForUrl(player.state.media.url);
+        if (player.state.window.isFullscreen) {
+            void player.syncMpvRenderTarget();
+        }
     };
 
     const onProgress = (payload: ProgressPayload) => {

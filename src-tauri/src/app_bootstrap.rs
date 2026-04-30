@@ -104,6 +104,9 @@ fn apply_mpv_resize(
     }
 
     if let Ok(mut mpv_guard) = state.mpv_player.lock() {
+        if mpv_guard.should_ignore_resize() {
+            return;
+        }
         mpv_guard.render_target_resize(
             #[cfg(target_os = "macos")]
             {
@@ -130,6 +133,22 @@ fn apply_mpv_resize(
             );
         }
     };
+}
+
+pub(crate) fn sync_mpv_render_target_to_window(
+    window: &tauri::WebviewWindow,
+) -> Result<(), String> {
+    let state: tauri::State<'_, AppState> = window.state();
+    let inner_size = window.inner_size().map_err(|e| e.to_string())?;
+    let scale_factor = window.scale_factor().map_err(|e| e.to_string())?;
+    apply_mpv_resize(
+        window,
+        &state,
+        inner_size.width,
+        inner_size.height,
+        scale_factor,
+    );
+    Ok(())
 }
 
 fn install_window_event_handlers(window: tauri::WebviewWindow, initial_scale_factor: f64) {

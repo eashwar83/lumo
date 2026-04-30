@@ -29,6 +29,8 @@ pub struct UiState {
     #[serde(default)]
     pub active_panel: Option<String>,
     #[serde(default)]
+    pub window_state: Option<ManualWindowState>,
+    #[serde(default)]
     pub network: Option<NetworkState>,
     #[serde(default)]
     pub settings: Option<SettingsState>,
@@ -52,6 +54,7 @@ impl Default for UiState {
     fn default() -> Self {
         Self {
             active_panel: Some("home".into()),
+            window_state: None,
             network: None,
             settings: None,
             rendering: None,
@@ -69,6 +72,7 @@ impl UiState {
     fn merge(self, incoming: UiState) -> UiState {
         UiState {
             active_panel: incoming.active_panel.or(self.active_panel),
+            window_state: incoming.window_state.or(self.window_state),
             network: incoming.network.or(self.network),
             settings: incoming.settings.or(self.settings),
             rendering: incoming.rendering.or(self.rendering),
@@ -82,6 +86,21 @@ impl UiState {
             playlist_sort_mode: incoming.playlist_sort_mode.or(self.playlist_sort_mode),
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ManualWindowState {
+    #[serde(default)]
+    pub width: Option<u32>,
+    #[serde(default)]
+    pub height: Option<u32>,
+    #[serde(default)]
+    pub x: Option<i32>,
+    #[serde(default)]
+    pub y: Option<i32>,
+    #[serde(default)]
+    pub is_maximized: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]

@@ -136,6 +136,10 @@ export const usePlaybackCommands = (
     state.window.isFullscreen = await currentWindow.isFullscreen();
   };
 
+  const syncMpvRenderTarget = async (): Promise<void> => {
+    await invoke("sync_mpv_render_target");
+  };
+
   const seek = async (position: number): Promise<void> => {
     await invoke("seek_video", { position });
   };
@@ -164,6 +168,7 @@ export const usePlaybackCommands = (
     toggleFullscreen,
     stopPlayback,
     syncFullscreen,
+    syncMpvRenderTarget,
     seek,
     seekRelative,
     setLoopFile,

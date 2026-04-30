@@ -25,6 +25,7 @@ const WALLPAPER_MODE_ENABLED_VALUE: &str = "Enable";
 pub struct MpvHandle {
     ctx: AtomicPtr<c_void>,
     is_playing: Arc<AtomicBool>,
+    is_rendering: Arc<AtomicBool>,
     eof_reached: Arc<AtomicBool>,
     app_handle: AppHandle,
     event_loop_stop: Arc<AtomicBool>,
@@ -200,6 +201,7 @@ impl MpvHandle {
         let handle = MpvHandle {
             ctx: AtomicPtr::new(ctx),
             is_playing: Arc::new(AtomicBool::new(false)),
+            is_rendering: Arc::new(AtomicBool::new(false)),
             eof_reached: Arc::new(AtomicBool::new(false)),
             soia_utils: AtomicPtr::new(soia_utils),
             app_handle,
@@ -225,6 +227,10 @@ impl MpvHandle {
         } else {
             Ok(client_ctx)
         }
+    }
+
+    pub fn should_ignore_resize(&self) -> bool {
+        !self.is_rendering.load(Ordering::Acquire)
     }
 
     pub fn render_target_resize(&mut self, width: u32, height: u32) {
@@ -339,9 +345,10 @@ impl MpvHandle {
         let app_handle_clone = self.app_handle.clone();
         let stop_flag = self.event_loop_stop.clone();
         let is_playing = self.is_playing.clone();
+        let is_rendering = self.is_rendering.clone();
         let eof_reached = self.eof_reached.clone();
         let handle = std::thread::spawn(move || {
-            mpv_event_loop(app_handle_clone, stop_flag, is_playing, eof_reached)
+            mpv_event_loop(app_handle_clone, stop_flag, is_playing, is_rendering, eof_reached)
         });
         if let Ok(mut guard) = self.event_loop_handle.lock() {
             *guard = Some(handle);

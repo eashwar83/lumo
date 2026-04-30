@@ -414,6 +414,7 @@ pub(super) fn mpv_event_loop(
     app_handle: AppHandle,
     stop_flag: Arc<AtomicBool>,
     is_playing: Arc<AtomicBool>,
+    is_rendering: Arc<AtomicBool>,
     eof_reached: Arc<AtomicBool>,
 ) {
     eof_reached.store(false, Ordering::SeqCst);
@@ -586,6 +587,7 @@ pub(super) fn mpv_event_loop(
                     }
                 }
                 mpv_event_id::MPV_EVENT_FILE_LOADED => {
+                    is_rendering.store(true, Ordering::Relaxed);
                     #[cfg(debug_assertions)]
                     info!("MPV Event Loop: MPV_EVENT_FILE_LOADED received.");
                     notify_start = true;
@@ -1104,6 +1106,7 @@ pub(super) fn mpv_event_loop(
                         );
                     }
                     end_file_emitted_for_current_item = reason == 0;
+                    is_rendering.store(false, Ordering::Relaxed);
                     wake_lock_manager.update(false);
                 }
                 _ => {}

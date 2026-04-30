@@ -52,6 +52,7 @@ export type PlayerApi = {
   toggleFullscreen: () => Promise<void>;
   stopPlayback: () => Promise<void>;
   syncFullscreen: () => Promise<void>;
+  syncMpvRenderTarget: () => Promise<void>;
   seek: (position: number) => Promise<void>;
   seekRelative: (position: number) => Promise<void>;
   setLoopFile: (enabled: boolean) => Promise<void>;

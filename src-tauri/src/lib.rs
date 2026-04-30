@@ -285,6 +285,7 @@ pub fn run() {
             commands::playback::seek_video,
             commands::window::set_window_controls_visible,
             commands::window::apply_window_appearance,
+            commands::window::sync_mpv_render_target,
             commands::platform::is_native_pip_enabled,
             commands::platform::set_native_pip_enabled,
             commands::playback::get_runtime_versions,

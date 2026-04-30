@@ -69,7 +69,7 @@ type UsePlaybackFlowOptions = {
     nowPlaying: NowPlayingApi;
     hideAllMenus: () => void;
     isInfoOpen: Ref<boolean>;
-    onPlaybackIntent?: () => void;
+    onPlaybackIntent?: () => void | Promise<void>;
 };
 
 type StoredSettingGroup = {
@@ -219,8 +219,8 @@ export const usePlaybackFlow = ({
         return skipIntroSeconds > 0 ? skipIntroSeconds : resumePosition;
     };
 
-    const triggerPlaybackIntent = () => {
-        onPlaybackIntent?.();
+    const triggerPlaybackIntent = async () => {
+        await onPlaybackIntent?.();
     };
 
     const resourceKeyFromUrl = (value: string) => {
@@ -263,7 +263,7 @@ export const usePlaybackFlow = ({
 
     const playLocalPath = async (path: string, preferredTitle?: string) => {
         if (!path) return;
-        triggerPlaybackIntent();
+        await triggerPlaybackIntent();
         hideHistory.value = true;
         nowPlaying.clearArtwork();
         tracks.resetTracks();
@@ -288,7 +288,7 @@ export const usePlaybackFlow = ({
         playbackKey: string,
         preferredTitle?: string,
     ) => {
-        triggerPlaybackIntent();
+        await triggerPlaybackIntent();
         hideHistory.value = true;
         nowPlaying.clearArtwork();
         tracks.resetTracks();
@@ -327,7 +327,7 @@ export const usePlaybackFlow = ({
         playbackKey: string,
         preferredTitle?: string,
     ) => {
-        triggerPlaybackIntent();
+        await triggerPlaybackIntent();
         hideHistory.value = true;
         nowPlaying.clearArtwork();
         tracks.resetTracks();
