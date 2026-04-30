@@ -56,7 +56,6 @@ export const SKIP_INTRO_SECONDS_SETTING_LABEL = "SKIP_INTRO_SECONDS";
 export const SEEK_STEP_SETTING_LABEL = "Skip Step";
 export const ENABLE_COMPACT_MODE_SETTING_LABEL = "ENABLE_COMPACT_MODE";
 export const WALLPAPER_MODE_SETTING_LABEL = "WALLPAPER_MODE";
-export const AUTO_PLAY_ON_OPEN_SETTING_LABEL = "Auto‑Play";
 export const AUTO_PLAY_NEXT_IN_PLAYLIST_SETTING_LABEL =
     "AUTO_PLAY_NEXT_IN_PLAYLIST";
 export const PLAYBACK_TITLE_SETTING_LABEL = "PLAYBACK_TITLE";
@@ -105,25 +104,17 @@ export const defaultSettingGroups: SettingGroup[] = [
                 options: [...PLAYBACK_TITLE_MODE_OPTIONS],
             },
             {
+                label: AUTO_PLAY_NEXT_IN_PLAYLIST_SETTING_LABEL,
+                displayLabel: "Auto-Play Next",
+                value: "On",
+                type: "toggle",
+                onValue: "On",
+                offValue: "Off",
+            },
+            {
                 label: DISABLE_SUBTITLES_SETTING_LABEL,
                 displayLabel: "Disable Subtitles",
                 value: "Off",
-                type: "toggle",
-                onValue: "On",
-                offValue: "Off",
-            },
-            {
-                label: AUTO_PLAY_ON_OPEN_SETTING_LABEL,
-                displayLabel: "Auto-Play on Open",
-                value: "On",
-                type: "toggle",
-                onValue: "On",
-                offValue: "Off",
-            },
-            {
-                label: AUTO_PLAY_NEXT_IN_PLAYLIST_SETTING_LABEL,
-                displayLabel: "Auto-Play Next in Playlist",
-                value: "On",
                 type: "toggle",
                 onValue: "On",
                 offValue: "Off",

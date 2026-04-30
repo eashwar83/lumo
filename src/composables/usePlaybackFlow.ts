@@ -6,7 +6,6 @@ import type { PlayerApi } from "./usePlaybackController";
 import { loadUiState } from "./useUiStateStore";
 import {
     ALLOW_URL_INPUT_DURING_PLAYBACK_SETTING_LABEL,
-    AUTO_PLAY_ON_OPEN_SETTING_LABEL,
     DEFAULT_SPEED_SETTING_LABEL,
     DISABLE_SUBTITLES_SETTING_LABEL,
     ENABLE_COMPACT_MODE_SETTING_LABEL,
@@ -128,7 +127,6 @@ const parsePlaybackPreferences = (
 
     const defaultSpeedRaw = getValue(DEFAULT_SPEED_SETTING_LABEL) ?? "1.0x";
     const defaultSpeed = Number.parseFloat(defaultSpeedRaw.replace(/x$/i, "").trim());
-    const autoPlayValue = getValue(AUTO_PLAY_ON_OPEN_SETTING_LABEL) ?? "On";
     const playbackTitleModeValue = normalizePlaybackTitleMode(
         getValue(PLAYBACK_TITLE_SETTING_LABEL) ??
             getValue(ALLOW_URL_INPUT_DURING_PLAYBACK_SETTING_LABEL),
@@ -142,7 +140,7 @@ const parsePlaybackPreferences = (
         skipIntroSeconds,
         defaultSpeed:
             Number.isFinite(defaultSpeed) && defaultSpeed > 0 ? defaultSpeed : 1.0,
-        autoPlay: autoPlayValue === "On",
+        autoPlay: true,
         playbackTitleMode: playbackTitleModeValue,
         compactModeEnabled: compactModeValue === "On",
         wallpaperModeEnabled: wallpaperModeValue === "Enable",

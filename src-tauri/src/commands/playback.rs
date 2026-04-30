@@ -150,7 +150,8 @@ fn resolve_local_media_path(path: &str) -> Option<PathBuf> {
     if trimmed.is_empty() {
         return None;
     }
-    if let Ok(parsed) = url::Url::parse(trimmed) {
+    if trimmed.starts_with("file://") {
+        let parsed = url::Url::parse(trimmed).ok()?;
         if parsed.scheme() == "file" {
             return parsed.to_file_path().ok();
         }
@@ -171,6 +172,45 @@ pub(crate) fn get_media_file_size(path: String) -> Result<Option<u64>, String> {
         Ok(metadata) => Ok(Some(metadata.len())),
         Err(_) => Ok(None),
     }
+}
+
+#[tauri::command]
+pub(crate) fn list_local_media_siblings(path: String) -> Result<Vec<String>, String> {
+    let Some(local_path) = resolve_local_media_path(&path) else {
+        return Ok(Vec::new());
+    };
+    if !local_path.is_file() {
+        return Ok(Vec::new());
+    }
+    let Some(parent) = local_path.parent() else {
+        return Ok(Vec::new());
+    };
+
+    let mut files: Vec<PathBuf> = std::fs::read_dir(parent)
+        .map_err(|error| error.to_string())?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|entry_path| entry_path.is_file())
+        .collect();
+
+    files.sort_by(|left, right| {
+        let left_name = left
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_lowercase();
+        let right_name = right
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_lowercase();
+        left_name.cmp(&right_name)
+    });
+
+    Ok(files
+        .into_iter()
+        .map(|entry_path| entry_path.to_string_lossy().into_owned())
+        .collect())
 }
 
 #[tauri::command]
