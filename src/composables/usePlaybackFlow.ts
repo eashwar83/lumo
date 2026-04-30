@@ -261,7 +261,7 @@ export const usePlaybackFlow = ({
         return normalizedWithExtension;
     };
 
-    const playPath = async (path: string, preferredTitle?: string) => {
+    const playLocalPath = async (path: string, preferredTitle?: string) => {
         if (!path) return;
         triggerPlaybackIntent();
         hideHistory.value = true;
@@ -357,6 +357,25 @@ export const usePlaybackFlow = ({
             resumePosition,
             preferences.autoPlay,
         );
+    };
+
+    const playPath = async (path: string, preferredTitle?: string) => {
+        if (!path) return;
+        const source = parsePlaybackSource(path);
+        if (source.type === "webdav") {
+            await playWebdav(
+                source.connectionId,
+                source.filePath,
+                source.key,
+                preferredTitle,
+            );
+            return;
+        }
+        if (source.type === "dlna") {
+            await playDlna(source.resourceUrl, source.key, preferredTitle);
+            return;
+        }
+        await playLocalPath(source.path, preferredTitle);
     };
 
     const openWithSelected = async (selected: string[]) => {
