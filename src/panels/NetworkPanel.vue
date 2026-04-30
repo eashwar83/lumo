@@ -1,15 +1,25 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref } from "vue";
+import type { HistoryEntry } from "../types/history";
 import type {
     NetworkConnection,
     NetworkFileRow,
     NetworkPlayRequest,
 } from "../types/network";
+import {
+    normalizePlaybackKey,
+    parsePlaybackSource,
+} from "../utils/playbackSource";
 import { useNetworkPanel } from "../composables/useNetworkPanel";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
 import NetworkConnectionsView from "../components/network/NetworkConnectionsView.vue";
 import NetworkBrowserView from "../components/network/NetworkBrowserView.vue";
 import NetworkConnectionModal from "../components/network/NetworkConnectionModal.vue";
+
+const props = defineProps<{
+    history: HistoryEntry[];
+    currentUrl: string;
+}>();
 
 const {
     viewMode,
@@ -34,6 +44,7 @@ const {
     onBackToConnections,
     onBrowsePath,
     buildPlayRequest,
+    getAncestorPaths,
     hasFiles,
 } = useNetworkPanel();
 
@@ -66,6 +77,18 @@ const protocolOptions: ProtocolOption[] = [
     { value: "ftp", label: "FTP" },
     { value: "http-dlna", label: "HTTP DLNA" },
 ];
+
+const formatPlaybackTime = (value: number) => {
+    const totalSeconds = Math.max(0, Math.floor(value || 0));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    if (hours > 0) {
+        return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    }
+    return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+};
 
 const createForm = reactive({
     label: "",
@@ -205,7 +228,68 @@ const onOpenConnectionBrowser = async (connectionId: string) => {
 };
 
 const visibleNetworkEntries = computed(() =>
-    networkEntries.value.filter((entry) => !entry.isParent),
+    {
+        const historyByPath = new Map(
+            props.history.map((entry) => [normalizePlaybackKey(entry.path), entry]),
+        );
+        const normalizedCurrentUrl = normalizePlaybackKey(props.currentUrl);
+        const currentSource = parsePlaybackSource(normalizedCurrentUrl);
+        const selectedProtocol =
+            selectedConnectionConfig.value?.protocol?.trim().toLowerCase() ?? "";
+        const activeFolderPaths = new Set<string>();
+
+        if (currentSource.type === "webdav") {
+            const selectedConnectionId = selectedConnectionConfig.value?.id ?? "";
+            if (
+                selectedProtocol === "webdav" &&
+                currentSource.connectionId === selectedConnectionId
+            ) {
+                getAncestorPaths(currentSource.filePath).forEach((path) =>
+                    activeFolderPaths.add(path),
+                );
+            }
+        } else if (currentSource.type === "dlna") {
+            const selectedConnectionId = selectedConnectionConfig.value?.id ?? "";
+            if (
+                (selectedProtocol === "http-dlna" || selectedProtocol === "dlna") &&
+                currentSource.connectionId === selectedConnectionId
+            ) {
+                getAncestorPaths(currentSource.resourceUrl).forEach((path) =>
+                    activeFolderPaths.add(path),
+                );
+            }
+        }
+
+        return networkEntries.value
+            .filter((entry) => !entry.isParent)
+            .map((entry) => {
+                if (entry.type !== "FILE") {
+                    return {
+                        ...entry,
+                        playbackProgressText: "",
+                        containsActive: activeFolderPaths.has(entry.path),
+                    };
+                }
+                const playbackKey = buildPlayRequest(entry).playbackKey;
+                const historyEntry = historyByPath.get(playbackKey);
+                const duration = historyEntry?.duration ?? 0;
+                const position = historyEntry?.lastPosition ?? 0;
+                const progressText =
+                    Number.isFinite(duration) && duration > 0
+                        ? `${formatPlaybackTime(position)}/${formatPlaybackTime(duration)}`
+                        : "";
+                const playbackProgressText = progressText
+                    ? `${progressText} | ${entry.size}`
+                    : "";
+                const isActive = normalizedCurrentUrl === playbackKey;
+                return {
+                    ...entry,
+                    playbackProgressText,
+                    isActive,
+                    containsActive: false,
+                };
+            });
+    },
 );
 
 const onBackFolderClick = async () => {

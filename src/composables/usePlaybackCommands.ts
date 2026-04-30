@@ -57,6 +57,17 @@ export const usePlaybackCommands = (
     }
   };
 
+  const loadFileAtUrl = async (
+    url: string,
+    resumePosition?: number,
+    autoPlay = true,
+  ): Promise<void> => {
+    if (!url) return;
+    await invoke("load_file", {
+      payload: { url, resumePosition, autoPlay },
+    });
+  };
+
   const pickMediaPathsAuto = async (): Promise<string[]> => {
     const selected = await invoke<string[]>("pick_media_paths_native");
     return Array.isArray(selected) ? selected : [];
@@ -143,6 +154,7 @@ export const usePlaybackCommands = (
 
   return {
     loadFile,
+    loadFileAtUrl,
     loadNetworkFile,
     parsePlaylistFile,
     parsePlaylistSource,

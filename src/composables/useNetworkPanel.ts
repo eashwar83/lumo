@@ -1,6 +1,9 @@
 import { computed, onMounted, ref, watch } from "vue";
 import type { NetworkFileRow, NetworkPlayRequest } from "../types/network";
-import { createWebdavPlaybackKey } from "../utils/playbackSource";
+import {
+    createDlnaPlaybackKey,
+    createWebdavPlaybackKey,
+} from "../utils/playbackSource";
 import { useNetworkConnections } from "./useNetworkConnections";
 import { useNetworkBrowser } from "./useNetworkBrowser";
 import {
@@ -168,7 +171,7 @@ export const useNetworkPanel = () => {
         filePath: entry.path,
         playbackKey:
             selectedConnection.value?.protocol === "http-dlna"
-                ? entry.path
+                ? createDlnaPlaybackKey(selectedConnectionId.value, entry.path)
                 : createWebdavPlaybackKey(selectedConnectionId.value, entry.path),
         displayName: entry.name,
     });
@@ -241,5 +244,6 @@ export const useNetworkPanel = () => {
         onOpenBrowser,
         onBackToConnections,
         buildPlayRequest,
+        getAncestorPaths: browser.getAncestorPaths,
     };
 };

@@ -32,6 +32,11 @@ export type PlayerApi = {
   isUrlModified: { value: boolean };
   formatTime: (seconds: number) => string;
   loadFile: (resumePosition?: number, autoPlay?: boolean) => Promise<void>;
+  loadFileAtUrl: (
+    url: string,
+    resumePosition?: number,
+    autoPlay?: boolean,
+  ) => Promise<void>;
   loadNetworkFile: (
     protocol: string,
     connectionId: string,

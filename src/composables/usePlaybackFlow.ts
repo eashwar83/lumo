@@ -322,6 +322,43 @@ export const usePlaybackFlow = ({
         );
     };
 
+    const playDlna = async (
+        resourceUrl: string,
+        playbackKey: string,
+        preferredTitle?: string,
+    ) => {
+        triggerPlaybackIntent();
+        hideHistory.value = true;
+        nowPlaying.clearArtwork();
+        tracks.resetTracks();
+        player.state.media.url = playbackKey;
+        player.state.media.title = rememberPreferredTitle(
+            playbackKey,
+            preferredTitle,
+        );
+        player.state.playback.isBuffering = false;
+        player.state.playback.downloadSpeedBps = 0;
+        player.state.playback.hwdecCurrent = "";
+        loadingUrl.value = playbackKey;
+        isLoading.value = true;
+        await ensurePlaybackPreferencesLoaded();
+        const preferences = playbackPreferences.value;
+        await player.setPlaybackSpeed(preferences.defaultSpeed);
+        const resumePosition = getStartPosition(
+            playbackKey,
+            preferences.skipIntroSeconds,
+        );
+        pendingResume.value = {
+            url: playbackKey,
+            position: resumePosition,
+        };
+        await player.loadFileAtUrl(
+            resourceUrl,
+            resumePosition,
+            preferences.autoPlay,
+        );
+    };
+
     const openWithSelected = async (selected: string[]) => {
         if (!selected.length) {
             hideHistory.value = false;
@@ -493,6 +530,14 @@ export const usePlaybackFlow = ({
             );
             return;
         }
+        if (source.type === "dlna") {
+            await playDlna(
+                source.resourceUrl,
+                source.key,
+                preferredTitle,
+            );
+            return;
+        }
         hideHistory.value = true;
         await playPath(source.path, preferredTitle);
     };
@@ -501,7 +546,11 @@ export const usePlaybackFlow = ({
         const displayName = payload.displayName?.trim() || "";
         const protocol = payload.protocol.trim().toLowerCase();
         if (protocol === "http-dlna" || protocol === "dlna") {
-            await playPath(payload.playbackKey, displayName);
+            await playDlna(
+                payload.filePath,
+                payload.playbackKey,
+                displayName,
+            );
             return;
         }
         if (protocol === "webdav") {
@@ -551,7 +600,6 @@ export const usePlaybackFlow = ({
         await player.stopPlayback();
         hideHistory.value = false;
         player.state.media.isFileLoaded = false;
-        player.state.media.lastLoadedUrl = "";
         player.state.media.title = "";
         player.state.playback.isPlaying = false;
         player.state.playback.isBuffering = false;

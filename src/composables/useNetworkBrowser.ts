@@ -114,7 +114,6 @@ export const useNetworkBrowser = (
             state.nameById.set(currentId, currentId === "0" ? "Root" : currentId);
         }
         for (const entry of entries) {
-            if (entry.entryType !== "dir") continue;
             const childId = normalizeObjectId(entry.path);
             state.parentById.set(childId, currentId);
             state.nameById.set(childId, entry.name);
@@ -201,6 +200,32 @@ export const useNetworkBrowser = (
         await browse(path, "browse", { allowCache: true });
     };
 
+    const getAncestorPaths = (path: string) => {
+        const connectionId = selectedConnectionId.value;
+        if (!connectionId) return [] as string[];
+        const protocol = selectedConnection.value?.protocol?.toLowerCase() ?? "webdav";
+        const isDlna = protocol === "http-dlna" || protocol === "dlna";
+
+        if (!isDlna) {
+            const ancestors: string[] = [];
+            let cursor = getParentPath(path);
+            while (cursor) {
+                ancestors.push(cursor);
+                cursor = getParentPath(cursor);
+            }
+            return ancestors;
+        }
+
+        const state = getDlnaNavigation(connectionId);
+        const ancestors: string[] = [];
+        let cursor = state.parentById.get(normalizeObjectId(path));
+        while (cursor) {
+            ancestors.push(cursor);
+            cursor = state.parentById.get(cursor);
+        }
+        return ancestors;
+    };
+
     const parentPath = computed(() => {
         const connectionId = selectedConnectionId.value;
         if (!connectionId) return null;
@@ -276,6 +301,7 @@ export const useNetworkBrowser = (
         connect,
         refresh,
         openDirectory,
+        getAncestorPaths,
         normalizePath,
         getParentPath,
     };

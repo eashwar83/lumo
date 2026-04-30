@@ -13,6 +13,7 @@ const props = defineProps<{
     historyReady: boolean;
     hideHistory: boolean;
     mode: "home" | "history" | "network" | "settings";
+    currentUrl: string;
 }>();
 
 const emit = defineEmits<{
@@ -65,6 +66,8 @@ const showPanels = () => !props.isFileLoaded;
 
             <NetworkPanel
                 v-show="showPanels() && props.mode === 'network'"
+                :history="props.history"
+                :current-url="props.currentUrl"
                 @play-network="emit('play-network', $event)"
             />
 

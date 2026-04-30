@@ -506,6 +506,9 @@ const mediaInfo = computed(() => {
 });
 
 const statusBadges = computed(() => mediaInfo.value?.badges ?? []);
+const currentOrLastPlaybackUrl = computed(
+    () => player.state.media.url || player.state.media.lastLoadedUrl,
+);
 const playlistEntriesWithProgress = computed(() => {
     const ratioByPath = new Map<string, number>();
     history.history.value.forEach((entry) => {
@@ -756,6 +759,7 @@ function onWindowFocusDrainPendingFiles() {
             :history-ready="history.isReady.value"
             :hide-history="hideHistory"
             :mode="activePanel"
+            :current-url="currentOrLastPlaybackUrl"
             @update:hover="ui.hoverFilePicker.value = $event"
             @open-file-picker="requestOpenFilePicker"
             @play-history="onPlayHistory"

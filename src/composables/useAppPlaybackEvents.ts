@@ -162,6 +162,9 @@ export const useAppPlaybackEvents = ({
         if (source.type === "local") {
             return resolveNextPathInLocalDirectory(source.path);
         }
+        if (source.type === "dlna") {
+            return null;
+        }
         return resolveNextPathInWebdavDirectory(source.connectionId, source.filePath);
     };
 

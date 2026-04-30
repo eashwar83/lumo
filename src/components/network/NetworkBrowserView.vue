@@ -36,6 +36,9 @@ const emit = defineEmits<{
                             :class="{
                                 'network-entry--dir': file.type === 'DIR',
                                 'network-entry--parent': file.isParent,
+                                'network-entry--active': file.isActive,
+                                'network-entry--contains-active':
+                                    file.containsActive,
                             }"
                             type="button"
                             @click="emit('entry-click', file)"
@@ -97,7 +100,7 @@ const emit = defineEmits<{
                                             ? file.isParent
                                                 ? "Parent folder"
                                                 : "Folder"
-                                            : file.size
+                                            : file.playbackProgressText || file.size
                                     }}</span>
                                     <span>{{ file.modified || "—" }}</span>
                                 </div>

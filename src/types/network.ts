@@ -30,6 +30,9 @@ export type NetworkFileRow = {
     size: string;
     modified: string;
     isParent?: boolean;
+    playbackProgressText?: string;
+    isActive?: boolean;
+    containsActive?: boolean;
 };
 
 export type NetworkPlayRequest = {

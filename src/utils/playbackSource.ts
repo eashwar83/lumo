@@ -1,4 +1,5 @@
 export const SOIA_WEBDAV_KEY_PREFIX = "soia-webdav://";
+export const SOIA_DLNA_KEY_PREFIX = "soia-dlna://";
 
 export type PlaybackSource =
     | {
@@ -11,6 +12,12 @@ export type PlaybackSource =
           key: string;
           connectionId: string;
           filePath: string;
+      }
+    | {
+          type: "dlna";
+          key: string;
+          connectionId: string;
+          resourceUrl: string;
       };
 
 const normalizeFilePath = (path: string) => {
@@ -37,6 +44,29 @@ const parseWebdavKey = (
     return { connectionId, filePath };
 };
 
+const parseDlnaKey = (
+    key: string,
+): {
+    connectionId: string;
+    resourceUrl: string;
+} | null => {
+    if (!key.startsWith(SOIA_DLNA_KEY_PREFIX)) return null;
+    const value = key.slice(SOIA_DLNA_KEY_PREFIX.length);
+    const slashIndex = value.indexOf("/");
+    if (slashIndex <= 0) return null;
+    const encodedConnectionId = value.slice(0, slashIndex);
+    const encodedResourceUrl = value.slice(slashIndex + 1);
+    if (!encodedConnectionId || !encodedResourceUrl) return null;
+    try {
+        return {
+            connectionId: decodeURIComponent(encodedConnectionId),
+            resourceUrl: decodeURIComponent(encodedResourceUrl),
+        };
+    } catch {
+        return null;
+    }
+};
+
 const toWebdavKeyConnectionId = (connectionId: string): string =>
     connectionId.trim().replace(/^webdav-(?=\d+$)/i, "");
 
@@ -51,6 +81,12 @@ export const createWebdavPlaybackKey = (
 ): string =>
     `${SOIA_WEBDAV_KEY_PREFIX}${toWebdavKeyConnectionId(connectionId)}${normalizeFilePath(filePath)}`;
 
+export const createDlnaPlaybackKey = (
+    connectionId: string,
+    resourceUrl: string,
+): string =>
+    `${SOIA_DLNA_KEY_PREFIX}${encodeURIComponent(connectionId.trim())}/${encodeURIComponent(resourceUrl.trim())}`;
+
 export const parsePlaybackSource = (key: string): PlaybackSource => {
     const soiaWebdav = parseWebdavKey(key, SOIA_WEBDAV_KEY_PREFIX);
     if (soiaWebdav) {
@@ -59,6 +95,16 @@ export const parsePlaybackSource = (key: string): PlaybackSource => {
             key,
             connectionId: toRuntimeWebdavConnectionId(soiaWebdav.connectionId),
             filePath: soiaWebdav.filePath,
+        };
+    }
+
+    const soiaDlna = parseDlnaKey(key);
+    if (soiaDlna) {
+        return {
+            type: "dlna",
+            key,
+            connectionId: soiaDlna.connectionId,
+            resourceUrl: soiaDlna.resourceUrl,
         };
     }
 
@@ -95,6 +141,9 @@ export const getPlaybackDisplayPath = (key: string): string => {
         return normalizedPath
             ? `webdav://${host}/${normalizedPath}`
             : `webdav://${host}`;
+    }
+    if (source.type === "dlna") {
+        return source.resourceUrl;
     }
     return source.path;
 };

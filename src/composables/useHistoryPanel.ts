@@ -14,6 +14,7 @@ type ProtocolBadge = {
 const PROTOCOL_BADGE_LIST: ProtocolBadge[] = [
     { id: "local", label: "Local" },
     { id: "webdav", label: "WebDAV" },
+    { id: "dlna", label: "DLNA" },
     { id: "smb", label: "SMB" },
     { id: "ftp", label: "FTP" },
     { id: "ftps", label: "FTPS" },
@@ -36,6 +37,9 @@ export const useHistoryPanel = () => {
         if (source.type === "webdav") {
             return getPathDisplayName(source.filePath, source.filePath);
         }
+        if (source.type === "dlna") {
+            return getPathDisplayName(source.resourceUrl, source.resourceUrl);
+        }
         return getPathDisplayName(source.path, source.path);
     };
 
@@ -47,6 +51,9 @@ export const useHistoryPanel = () => {
         const source = parsePlaybackSource(path);
         if (source.type === "webdav") {
             return [getProtocolBadge("webdav")];
+        }
+        if (source.type === "dlna") {
+            return [getProtocolBadge("dlna")];
         }
 
         const normalized = source.path.trim().toLowerCase();
