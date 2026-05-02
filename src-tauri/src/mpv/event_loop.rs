@@ -617,12 +617,23 @@ pub(super) fn mpv_event_loop(
                     #[cfg(debug_assertions)]
                     debug!("MPV Event Loop: MPV_EVENT_PLAYBACK_RESTART received.");
 
+                    is_playing.store(!last_is_paused, Ordering::Relaxed);
                     if notify_start {
                         notify_start = false;
                         emit_event(&app_handle, "file_loaded", ());
                     }
                     emit_event(&app_handle, "mpv-playback-restart", ());
-                    wake_lock_manager.update(true);
+                    emit_progress(
+                        &app_handle,
+                        last_time_pos,
+                        last_duration,
+                        last_buffered_pos,
+                        !last_is_paused,
+                        last_video_bitrate,
+                        last_is_buffering,
+                        last_download_speed_bps,
+                    );
+                    wake_lock_manager.update(!last_is_paused);
                 }
                 mpv_event_id::MPV_EVENT_SEEK => {
                     #[cfg(debug_assertions)]
