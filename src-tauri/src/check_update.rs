@@ -168,7 +168,8 @@ fn persist_host_auth(app_handle: &tauri::AppHandle, token: &SoiaAuthToken) {
 }
 
 fn request_soia_auth_from_server(app_handle: &tauri::AppHandle) -> Option<SoiaAuthToken> {
-    let state: crate::store::installation_store::InstallationState = crate::store::installation_store::get_installation_state(app_handle).ok()?;
+    let state: crate::store::installation_store::InstallationState =
+        crate::store::installation_store::get_installation_state(app_handle).ok()?;
     let base_url = option_env!("SOIA_API").unwrap_or("").trim();
     if base_url.is_empty() {
         return None;

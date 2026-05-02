@@ -4,6 +4,7 @@ use crate::store::ui_state_store::UiState;
 use crate::{mpv_command_checked, mpv_set_option_string_checked, with_mpv, AppState};
 #[cfg(debug_assertions)]
 use log::info;
+use log::warn;
 use std::path::{Path, PathBuf};
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 use std::process::Command;
@@ -83,6 +84,7 @@ fn configured_ytdl_path(configured_path: Option<String>) -> Option<String> {
     configured_path
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+        .filter(|value| is_existing_ytdl_path(value))
 }
 
 fn normalize_log_level(level: &str) -> Option<String> {
@@ -139,9 +141,7 @@ fn default_log_path(app: &tauri::AppHandle) -> Option<PathBuf> {
 
 fn default_ytdl_path() -> Option<String> {
     let candidate = PathBuf::from("/opt/homebrew/bin/yt-dlp");
-    candidate
-        .exists()
-        .then(|| candidate.to_string_lossy().to_string())
+    is_usable_ytdl_file(&candidate).then(|| candidate.to_string_lossy().to_string())
 }
 
 fn resolve_current_log_path(app: &tauri::AppHandle) -> Option<PathBuf> {
@@ -162,9 +162,38 @@ fn resolve_current_ytdl_path(
 ) -> Option<String> {
     match configured_path {
         Some(value) => configured_ytdl_path(Some(value)),
-        None => persisted_ytdl_path(app)
-            .or_else(|| configured_ytdl_path(std::env::var("SOIA_YTDL_PATH").ok()))
-            .or_else(default_ytdl_path),
+        None => {
+            if let Some(value) = persisted_ytdl_path(app) {
+                return configured_ytdl_path(Some(value));
+            }
+            configured_ytdl_path(std::env::var("SOIA_YTDL_PATH").ok()).or_else(default_ytdl_path)
+        }
+    }
+}
+
+fn is_existing_ytdl_path(path: &str) -> bool {
+    let path = PathBuf::from(path);
+    is_usable_ytdl_file(&path)
+}
+
+fn is_usable_ytdl_file(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let Ok(metadata) = std::fs::metadata(path) else {
+            return false;
+        };
+        return metadata.permissions().mode() & 0o111 != 0;
+    }
+
+    #[cfg(not(unix))]
+    {
+        true
     }
 }
 
@@ -398,21 +427,15 @@ fn apply_ytdl_path(mpv_guard: &crate::mpv::MpvHandle, ytdl_path: &str) -> Result
 }
 
 fn clear_ytdl_path(mpv_guard: &crate::mpv::MpvHandle) -> Result<(), String> {
-    mpv_set_option_string_checked(mpv_guard, "ytdl", "yes")?;
+    mpv_set_option_string_checked(mpv_guard, "ytdl", "no")?;
     let script_opts = mpv_guard.set_option_string("script-opts", "ytdl_hook-ytdl_path=");
     let clear_result = mpv_guard.set_option_string("ytdl-path", "");
-    if clear_result >= 0 {
-        return Ok(());
+    if script_opts < 0 || clear_result < 0 {
+        warn!(
+            "Disabled ytdl, but failed to clear ytdl path completely; script-opts result ({script_opts}), ytdl-path empty ({clear_result})"
+        );
     }
-
-    let fallback_result = mpv_guard.set_option_string("ytdl-path", "yt-dlp");
-    if fallback_result >= 0 {
-        return Ok(());
-    }
-
-    Err(format!(
-        "Failed to clear ytdl path; script-opts result ({script_opts}), ytdl-path empty ({clear_result}), ytdl-path fallback ({fallback_result})"
-    ))
+    Ok(())
 }
 
 fn normalized_shader_file_list(input: Vec<String>) -> Vec<String> {

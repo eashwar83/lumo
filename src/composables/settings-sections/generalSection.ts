@@ -134,6 +134,17 @@ const findYtdlPathItem = (groups: SettingGroup[]) => {
     return item?.type === "path" ? item : undefined;
 };
 
+const markYtdlPathUnavailable = (item: ReturnType<typeof findYtdlPathItem>) => {
+    if (!item) return;
+    item.validationMessage =
+        "The selected yt-dlp file does not exist or is unavailable.";
+};
+
+const clearYtdlPathValidation = (item: ReturnType<typeof findYtdlPathItem>) => {
+    if (!item) return;
+    item.validationMessage = undefined;
+};
+
 const findImageDisplayDurationItem = (groups: SettingGroup[]) => {
     const item = groups
         .flatMap((group) => group.items)
@@ -231,9 +242,22 @@ export const useGeneralSettingsSection = (isWindowsPlatform: boolean) => {
         const inputYtdlPath = ytdlPathItem?.value.trim();
         const requestedYtdlPath = inputYtdlPath ? inputYtdlPath : undefined;
         const applied = await applyYtdlSettings(requestedYtdlPath);
-        if (!applied) return;
+        if (!applied) {
+            if (requestedYtdlPath) {
+                markYtdlPathUnavailable(ytdlPathItem);
+                lastAppliedYtdlRequestKey = buildYtdlRequestKey(ytdlPathItem);
+            }
+            return;
+        }
 
         if (ytdlPathItem) {
+            if (requestedYtdlPath && !applied.ytdlPath) {
+                markYtdlPathUnavailable(ytdlPathItem);
+                lastAppliedYtdlRequestKey = buildYtdlRequestKey(ytdlPathItem);
+                return;
+            }
+
+            clearYtdlPathValidation(ytdlPathItem);
             const appliedYtdlPath = applied.ytdlPath ?? "";
             if (ytdlPathItem.value !== appliedYtdlPath) {
                 ytdlPathItem.value = appliedYtdlPath;
@@ -367,6 +391,9 @@ export const useGeneralSettingsSection = (isWindowsPlatform: boolean) => {
         });
         if (selected) {
             item.value = selected as string;
+            if (item.label === YTDL_PATH_SETTING_LABEL) {
+                item.validationMessage = undefined;
+            }
         }
     };
 

@@ -9,7 +9,7 @@ use std::error::Error;
 use std::ffi::c_void;
 use std::fs;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
@@ -236,9 +236,10 @@ fn configure_mpv_startup(app: &tauri::App) -> Result<(), Box<dyn Error>> {
     let log_level = resolve_log_level(app);
     mpv_guard.set_option_string("msg-level", to_mpv_msg_level(&log_level));
 
-    mpv_guard.set_option_string("ytdl", "yes");
     let ytdl_path = resolve_ytdl_path(app);
     if let Some(ytdl_path) = ytdl_path {
+        mpv_guard.set_option_string("ytdl", "yes");
+
         #[cfg(debug_assertions)]
         info!("Using yt-dlp search path(s): {}", ytdl_path);
 
@@ -256,23 +257,23 @@ fn configure_mpv_startup(app: &tauri::App) -> Result<(), Box<dyn Error>> {
                 }
             }
         }
-    }
-    mpv_guard.set_option_string(
-        "ytdl-format",
-        // "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
-        // "bv+ba/b",
-        "bv[height<=1080]+ba/b",
-    );
-    // mpv_guard.set_option_string(
-    //     "ytdl-raw-options",
-    //     // "format-sort=+codec:avc:m4a"
-    //     "format-sort=vcodec:h265+acodec:opus/best",
-    // );
+        mpv_guard.set_option_string(
+            "ytdl-format",
+            // "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
+            // "bv+ba/b",
+            "bv[height<=1080]+ba/b",
+        );
+        // mpv_guard.set_option_string(
+        //     "ytdl-raw-options",
+        //     // "format-sort=+codec:avc:m4a"
+        //     "format-sort=vcodec:h265+acodec:opus/best",
+        // );
 
-    // mpv_guard.set_option_string(
-    //     "ytdl-raw-options",
-    //     "write-auto-subs",
-    // );
+        // mpv_guard.set_option_string(
+        //     "ytdl-raw-options",
+        //     "write-auto-subs",
+        // );
+    }
 
     mpv_guard.set_option_string("cache", "auto");
     mpv_guard.set_option_string("cache-pause", "yes");
@@ -378,19 +379,54 @@ fn to_mpv_msg_level(level: &str) -> &'static str {
 }
 
 fn resolve_ytdl_path(app: &tauri::App) -> Option<String> {
-    load_setting_value(&app.handle(), YTDL_PATH_SETTING_LABEL)
-        .or_else(|| std::env::var("SOIA_YTDL_PATH").ok())
+    if let Some(configured_path) = load_setting_value(&app.handle(), YTDL_PATH_SETTING_LABEL) {
+        let resolved = normalize_existing_ytdl_path(configured_path);
+        if resolved.is_none() {
+            warn!("Configured yt-dlp path is unavailable; skipping ytdl startup options");
+        }
+        return resolved;
+    }
+
+    std::env::var("SOIA_YTDL_PATH")
+        .ok()
+        .and_then(normalize_existing_ytdl_path)
         .or_else(platform_default_ytdl_path)
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+}
+
+fn normalize_existing_ytdl_path(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(trimmed);
+    is_usable_ytdl_file(&path).then(|| trimmed.to_string())
+}
+
+fn is_usable_ytdl_file(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let Ok(metadata) = fs::metadata(path) else {
+            return false;
+        };
+        return metadata.permissions().mode() & 0o111 != 0;
+    }
+
+    #[cfg(not(unix))]
+    {
+        true
+    }
 }
 
 #[cfg(target_os = "macos")]
 fn platform_default_ytdl_path() -> Option<String> {
     let candidate = PathBuf::from("/opt/homebrew/bin/yt-dlp");
-    candidate
-        .exists()
-        .then(|| candidate.to_string_lossy().to_string())
+    is_usable_ytdl_file(&candidate).then(|| candidate.to_string_lossy().to_string())
 }
 
 #[cfg(not(target_os = "macos"))]

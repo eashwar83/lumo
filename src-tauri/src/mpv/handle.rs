@@ -348,7 +348,13 @@ impl MpvHandle {
         let is_rendering = self.is_rendering.clone();
         let eof_reached = self.eof_reached.clone();
         let handle = std::thread::spawn(move || {
-            mpv_event_loop(app_handle_clone, stop_flag, is_playing, is_rendering, eof_reached)
+            mpv_event_loop(
+                app_handle_clone,
+                stop_flag,
+                is_playing,
+                is_rendering,
+                eof_reached,
+            )
         });
         if let Ok(mut guard) = self.event_loop_handle.lock() {
             *guard = Some(handle);

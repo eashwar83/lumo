@@ -277,8 +277,12 @@ fn resolve_playlist_entry_path(base: &PlaylistBase<'_>, raw: &str) -> Option<Str
         return Some(candidate.to_string());
     }
     match base {
-        PlaylistBase::Local(base_dir) => Some(base_dir.join(candidate).to_string_lossy().into_owned()),
-        PlaylistBase::Remote(base_url) => base_url.join(candidate).ok().map(|item| item.to_string()),
+        PlaylistBase::Local(base_dir) => {
+            Some(base_dir.join(candidate).to_string_lossy().into_owned())
+        }
+        PlaylistBase::Remote(base_url) => {
+            base_url.join(candidate).ok().map(|item| item.to_string())
+        }
     }
 }
 
@@ -327,10 +331,7 @@ fn parse_m3u_playlist(content: &str, base: &PlaylistBase<'_>) -> Vec<ParsedPlayl
             path,
             title
         );
-        entries.push(ParsedPlaylistEntry {
-            path,
-            title,
-        });
+        entries.push(ParsedPlaylistEntry { path, title });
     }
 
     entries
@@ -356,7 +357,11 @@ fn parse_playlist_source_inner(source: &str) -> Result<ParsedPlaylistFile, Strin
                 return Err(format!("Playlist request failed: {}", status));
             }
             let content = response.text().map_err(|e| e.to_string())?;
-            log::debug!("playlist parse: loaded {} bytes from {}", content.len(), url);
+            log::debug!(
+                "playlist parse: loaded {} bytes from {}",
+                content.len(),
+                url
+            );
             let entries = parse_m3u_playlist(&content, &PlaylistBase::Remote(url.clone()));
             log::info!("playlist parse: done url={} entries={}", url, entries.len());
             return Ok(ParsedPlaylistFile { entries });
@@ -364,7 +369,10 @@ fn parse_playlist_source_inner(source: &str) -> Result<ParsedPlaylistFile, Strin
     }
 
     let input_path = PathBuf::from(trimmed);
-    log::info!("playlist parse: start path={}", input_path.to_string_lossy());
+    log::info!(
+        "playlist parse: start path={}",
+        input_path.to_string_lossy()
+    );
     if !input_path.is_file() {
         log::warn!(
             "playlist parse: file not found path={}",

@@ -40,6 +40,7 @@ export type PathSettingItem = {
     type: "path";
     placeholder?: string;
     browseTitle?: string;
+    validationMessage?: string;
 };
 
 export type SettingItem =

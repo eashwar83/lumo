@@ -451,29 +451,53 @@ onBeforeUnmount(() => {
                         </div>
                         <div class="panel__control panel__control--card">
                             <template v-if="item.type === 'path'">
-                                <div class="panel__path-control">
-                                    <template v-if="isFixedLogPathItem(item)">
-                                        <span class="panel__value-text panel__path-text panel__path-text--log">
-                                            {{ item.value || item.placeholder || "Unavailable" }}
-                                        </span>
-                                    </template>
-                                    <template v-else>
-                                        <input
-                                            v-model="item.value"
-                                            class="panel__input panel__input--path"
-                                            type="text"
-                                            :placeholder="item.placeholder"
-                                        />
-                                    </template>
-                                    <button
-                                        class="panel__action panel__action--ghost panel__action--icon panel__path-action"
-                                        type="button"
-                                        :title="isFixedLogPathItem(item) ? 'Open Folder' : item.browseTitle ?? 'Browse'"
-                                        :aria-label="isFixedLogPathItem(item) ? 'Open Folder' : item.browseTitle ?? 'Browse'"
-                                        @click="browseForPath(item)"
+                                <div class="panel__path-field">
+                                    <div class="panel__path-control">
+                                        <template v-if="isFixedLogPathItem(item)">
+                                            <span class="panel__value-text panel__path-text panel__path-text--log">
+                                                {{ item.value || item.placeholder || "Unavailable" }}
+                                            </span>
+                                        </template>
+                                        <template v-else>
+                                            <input
+                                                v-model="item.value"
+                                                class="panel__input panel__input--path"
+                                                :class="{ 'panel__input--invalid': item.validationMessage }"
+                                                type="text"
+                                                :placeholder="item.placeholder"
+                                                :aria-invalid="Boolean(item.validationMessage)"
+                                            />
+                                        </template>
+                                        <button
+                                            class="panel__action panel__action--ghost panel__action--icon panel__path-action"
+                                            type="button"
+                                            :title="isFixedLogPathItem(item) ? 'Open Folder' : item.browseTitle ?? 'Browse'"
+                                            :aria-label="isFixedLogPathItem(item) ? 'Open Folder' : item.browseTitle ?? 'Browse'"
+                                            @click="browseForPath(item)"
+                                        >
+                                            <svg
+                                                class="panel__action-icon panel__path-action-icon"
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                            >
+                                                <path
+                                                    d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
+                                                ></path>
+                                            </svg>
+                                        </button>
+                                    </div>
+                                    <p
+                                        v-if="item.validationMessage"
+                                        class="panel__validation"
+                                        role="status"
                                     >
                                         <svg
-                                            class="panel__action-icon panel__path-action-icon"
+                                            class="panel__validation-icon"
                                             xmlns="http://www.w3.org/2000/svg"
                                             viewBox="0 0 24 24"
                                             fill="none"
@@ -481,12 +505,14 @@ onBeforeUnmount(() => {
                                             stroke-width="2"
                                             stroke-linecap="round"
                                             stroke-linejoin="round"
+                                            aria-hidden="true"
                                         >
-                                            <path
-                                                d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
-                                            ></path>
+                                            <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />
+                                            <path d="M12 9v4" />
+                                            <path d="M12 17h.01" />
                                         </svg>
-                                    </button>
+                                        <span>{{ item.validationMessage }}</span>
+                                    </p>
                                 </div>
                             </template>
                             <template v-else-if="item.type === 'slider'">
