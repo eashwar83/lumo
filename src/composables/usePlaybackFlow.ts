@@ -69,6 +69,10 @@ type UsePlaybackFlowOptions = {
     nowPlaying: NowPlayingApi;
     hideAllMenus: () => void;
     isInfoOpen: Ref<boolean>;
+    loadingState?: {
+        isLoading: Ref<boolean>;
+        loadingUrl: Ref<string>;
+    };
     onPlaybackIntent?: () => void | Promise<void>;
 };
 
@@ -170,10 +174,11 @@ export const usePlaybackFlow = ({
     nowPlaying,
     hideAllMenus,
     isInfoOpen,
+    loadingState,
     onPlaybackIntent,
 }: UsePlaybackFlowOptions) => {
-    const isLoading = ref(false);
-    const loadingUrl = ref("");
+    const isLoading = loadingState?.isLoading ?? ref(false);
+    const loadingUrl = loadingState?.loadingUrl ?? ref("");
     const pendingResume = ref<{ url: string; position: number } | null>(null);
     const hideHistory = ref(false);
     const playbackPreferences = ref<PlaybackPreferences>({

@@ -1,12 +1,5 @@
 <script setup lang="ts">
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import {
-    getCurrentWindow,
-    LogicalSize,
-    PhysicalPosition,
-} from "@tauri-apps/api/window";
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import PlayerControls from "./components/PlayerControls.vue";
 import PlayerHeader from "./components/PlayerHeader.vue";
 import MainPanels from "./components/MainPanels.vue";
@@ -22,13 +15,16 @@ import { useAppRuntimeBindings } from "./composables/useAppRuntimeBindings";
 import { useAppPlaybackEvents } from "./composables/useAppPlaybackEvents";
 import { useAppUiActions } from "./composables/useAppUiActions";
 import { useAppBootstrap } from "./composables/useAppBootstrap";
-import { getMockMediaInfo } from "./mock/mediaInfo";
-import { applyThemeFromSettingGroups } from "./constants/theme";
-import { MEDIA_FILE_EXTENSIONS } from "./constants/media";
-import { normalizePlaybackKey } from "./utils/playbackSource";
-import type { PlaylistScrollState } from "./types/playlist";
-import { loadUiState, saveUiState } from "./composables/useUiStateStore";
-import { useUpdateSection } from "./composables/settings-sections";
+import { useManualWindowStatePersistence } from "./composables/useManualWindowStatePersistence";
+import { usePlaybackOverlays } from "./composables/usePlaybackOverlays";
+import { usePlaylistDrawerUi } from "./composables/usePlaylistDrawerUi";
+import { useUpdateNotePrompt } from "./composables/useUpdateNotePrompt";
+import { useWindowDragRegion } from "./composables/useWindowDragRegion";
+import { useMediaInfo } from "./composables/useMediaInfo";
+import { usePlaylistEntriesWithProgress } from "./composables/usePlaylistEntriesWithProgress";
+import { useAppStartupBindings } from "./composables/useAppStartupBindings";
+import { usePlaybackSeekActions } from "./composables/usePlaybackSeekActions";
+import { usePlaybackLoadingState } from "./composables/usePlaybackLoadingState";
 
 const {
     isMacOS,
@@ -74,156 +70,18 @@ const {
 } = useAppBootstrap();
 
 const clearNavSelectionDuringLoad = ref(false);
-const updateSection = useUpdateSection();
-
-type UpdateNotePrompt = {
-    version: string;
-    note: string;
-};
-
-type UpdateNoteBlock =
-    | {
-          type: "heading";
-          text: string;
-          level: number;
-      }
-    | {
-          type: "paragraph";
-          text: string;
-      }
-    | {
-          type: "list";
-          ordered: boolean;
-          items: string[];
-      };
-
-type ManualWindowState = {
-    width?: number;
-    height?: number;
-    x?: number;
-    y?: number;
-    isMaximized?: boolean;
-};
-
-type StoredWindowUiState = {
-    windowState?: ManualWindowState;
-};
-
-const normalizeDimension = (value: unknown): number | undefined => {
-    if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
-    const rounded = Math.floor(value);
-    return rounded > 0 ? rounded : undefined;
-};
-
-const normalizePersistedWindowState = (
-    value: unknown,
-): ManualWindowState | null => {
-    if (!value || typeof value !== "object") return null;
-    const candidate = value as ManualWindowState;
-    const width = normalizeDimension(candidate.width);
-    const height = normalizeDimension(candidate.height);
-    const x =
-        typeof candidate.x === "number" && Number.isFinite(candidate.x)
-            ? Math.round(candidate.x)
-            : undefined;
-    const y =
-        typeof candidate.y === "number" && Number.isFinite(candidate.y)
-            ? Math.round(candidate.y)
-            : undefined;
-    const isMaximized =
-        typeof candidate.isMaximized === "boolean"
-            ? candidate.isMaximized
-            : undefined;
-    if (
-        width === undefined &&
-        height === undefined &&
-        x === undefined &&
-        y === undefined &&
-        isMaximized === undefined
-    ) {
-        return null;
-    }
-    return {
-        width,
-        height,
-        x,
-        y,
-        isMaximized,
-    };
-};
-
-const shouldPersistManualWindow = async () => {
-    if (isLoading.value) return false;
-    if (isPlaybackActive.value) return false;
-    if (player.state.media.isFileLoaded) return false;
-    return !(await getCurrentWindow().isFullscreen().catch(() => false));
-};
-
-const persistCurrentManualWindow = async () => {
-    const currentWindow = getCurrentWindow();
-    if (!(await shouldPersistManualWindow())) return;
-
-    const isFullscreen = await currentWindow.isFullscreen().catch(() => false);
-    if (isFullscreen) return;
-
-    const scale = await currentWindow.scaleFactor().catch(() => 1);
-    const isMaximized = await currentWindow.isMaximized().catch(() => false);
-    const nextState: ManualWindowState = {
-        isMaximized,
-    };
-
-    if (!isMaximized) {
-        const [innerSize, outerPosition] = await Promise.all([
-            currentWindow.innerSize().catch(() => null),
-            currentWindow.outerPosition().catch(() => null),
-        ]);
-        nextState.width = normalizeDimension(
-            innerSize ? innerSize.width / scale : undefined,
-        );
-        nextState.height = normalizeDimension(
-            innerSize ? innerSize.height / scale : undefined,
-        );
-        nextState.x =
-            typeof outerPosition?.x === "number" ? Math.round(outerPosition.x) : undefined;
-        nextState.y =
-            typeof outerPosition?.y === "number" ? Math.round(outerPosition.y) : undefined;
-    }
-
-    await saveUiState({
-        windowState: nextState,
-    });
-};
-
-const restorePersistedManualWindow = async () => {
-    const currentWindow = getCurrentWindow();
-    const stored = await loadUiState<StoredWindowUiState>();
-    const persisted = normalizePersistedWindowState(stored?.windowState);
-    if (!persisted) return;
-
-    const isFullscreen = await currentWindow.isFullscreen().catch(() => false);
-    if (isFullscreen) return;
-
-    const isMaximized = await currentWindow.isMaximized().catch(() => false);
-    if (isMaximized && !persisted.isMaximized) {
-        await currentWindow.unmaximize().catch(() => {});
-    }
-
-    if (persisted.width !== undefined && persisted.height !== undefined) {
-        await currentWindow.setSize(
-            new LogicalSize(persisted.width, persisted.height),
-        );
-    }
-
-    if (persisted.x !== undefined && persisted.y !== undefined) {
-        await currentWindow.setPosition(
-            new PhysicalPosition(persisted.x, persisted.y),
-        );
-    }
-
-    if (persisted.isMaximized) {
-        await currentWindow.maximize().catch(() => {});
-    }
-};
+const playbackLoadingState = usePlaybackLoadingState();
+const { isLoading, loadingUrl } = playbackLoadingState;
+const {
+    persistCurrentManualWindow,
+    restorePersistedManualWindow,
+    schedulePersistManualWindow,
+    persistBeforeUnload,
+} = useManualWindowStatePersistence({
+    isLoading,
+    isPlaybackActive,
+    isFileLoaded: () => player.state.media.isFileLoaded,
+});
 
 const playbackFlow = usePlaybackFlow({
     isMacOS,
@@ -234,6 +92,7 @@ const playbackFlow = usePlaybackFlow({
     nowPlaying,
     hideAllMenus,
     isInfoOpen,
+    loadingState: playbackLoadingState,
     onPlaybackIntent: async () => {
         await persistCurrentManualWindow();
         clearNavSelectionDuringLoad.value = true;
@@ -241,8 +100,6 @@ const playbackFlow = usePlaybackFlow({
 });
 
 const {
-    isLoading,
-    loadingUrl,
     pendingResume,
     hideHistory,
     isLoadingForCurrentUrl,
@@ -286,101 +143,19 @@ const sideNavActivePanel = computed(() =>
         ? null
         : navActivePanel.value,
 );
-const shouldShowPlaybackLoadingOverlay = computed(
-    () =>
-        isLoading.value ||
-        (player.state.media.isFileLoaded && player.state.playback.isBuffering),
-);
-const loadingDownloadSpeedBps = computed(() => {
-    const speed = player.state.playback.downloadSpeedBps;
-    if (!Number.isFinite(speed) || speed <= 0) return null;
-    return speed;
+const {
+    isLoadingOverlayVisible,
+    loadingDownloadSpeedBps,
+    seekOverlayLeftText,
+    seekOverlayRightText,
+    seekOverlayLeftTimelineText,
+    seekOverlayLeftPulseToken,
+    seekOverlayRightPulseToken,
+    showSeekOverlay,
+} = usePlaybackOverlays({
+    player,
+    isLoading,
 });
-const isLoadingOverlayVisible = ref(false);
-let loadingOverlayDelayTimer: ReturnType<typeof setTimeout> | null = null;
-const seekOverlayLeftText = ref("");
-const seekOverlayRightText = ref("");
-const seekOverlayLeftTimelineText = ref("");
-const seekOverlayLeftPulseToken = ref(0);
-const seekOverlayRightPulseToken = ref(0);
-let seekOverlayTimer: ReturnType<typeof setTimeout> | null = null;
-let seekOverlayAccumulatedDelta = 0;
-let seekOverlayBaseTime = 0;
-
-const clearLoadingOverlayDelayTimer = () => {
-    if (loadingOverlayDelayTimer !== null) {
-        window.clearTimeout(loadingOverlayDelayTimer);
-        loadingOverlayDelayTimer = null;
-    }
-};
-
-const clearSeekOverlayTimer = () => {
-    if (seekOverlayTimer !== null) {
-        window.clearTimeout(seekOverlayTimer);
-        seekOverlayTimer = null;
-    }
-};
-
-const formatSeekDeltaSeconds = (delta: number) => {
-    const seconds = Math.abs(delta);
-    const rounded = Math.round(seconds * 10) / 10;
-    return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
-};
-
-const clampNumber = (value: number, min: number, max: number) =>
-    Math.min(Math.max(value, min), max);
-
-const buildSeekTimelineText = (targetTime: number, duration: number) => {
-    const safeDuration =
-        Number.isFinite(duration) && duration > 0 ? duration : 0;
-    const safeTarget = clampNumber(targetTime, 0, safeDuration);
-    return `${player.formatTime(safeTarget)} / ${player.formatTime(safeDuration)}`;
-};
-
-const showSeekOverlay = (delta: number) => {
-    const hasActiveOverlay = seekOverlayTimer !== null;
-    const hasSameDirection =
-        seekOverlayAccumulatedDelta === 0 ||
-        Math.sign(seekOverlayAccumulatedDelta) === Math.sign(delta);
-    if (!(hasActiveOverlay && hasSameDirection)) {
-        seekOverlayBaseTime = player.state.playback.currentTime;
-    }
-    seekOverlayAccumulatedDelta =
-        hasActiveOverlay && hasSameDirection
-            ? seekOverlayAccumulatedDelta + delta
-            : delta;
-    clearSeekOverlayTimer();
-    seekOverlayLeftText.value = "";
-    seekOverlayRightText.value = "";
-    seekOverlayLeftTimelineText.value = "";
-
-    const seekTargetTime = seekOverlayBaseTime + seekOverlayAccumulatedDelta;
-    const timelineText = buildSeekTimelineText(
-        seekTargetTime,
-        player.state.playback.duration,
-    );
-    if (seekOverlayAccumulatedDelta < 0) {
-        seekOverlayLeftText.value = `- ${formatSeekDeltaSeconds(
-            seekOverlayAccumulatedDelta,
-        )}`;
-        seekOverlayLeftTimelineText.value = timelineText;
-        seekOverlayLeftPulseToken.value += 1;
-    } else if (seekOverlayAccumulatedDelta > 0) {
-        seekOverlayRightText.value = `+ ${formatSeekDeltaSeconds(
-            seekOverlayAccumulatedDelta,
-        )}`;
-        seekOverlayLeftTimelineText.value = timelineText;
-        seekOverlayRightPulseToken.value += 1;
-    }
-    seekOverlayTimer = window.setTimeout(() => {
-        seekOverlayLeftText.value = "";
-        seekOverlayRightText.value = "";
-        seekOverlayLeftTimelineText.value = "";
-        seekOverlayTimer = null;
-        seekOverlayAccumulatedDelta = 0;
-        seekOverlayBaseTime = 0;
-    }, 700);
-};
 
 const {
     isClearConfirmOpen,
@@ -433,31 +208,11 @@ const onSideNavNavigate = async (
     await onNavAction(panel);
 };
 
-const beginSeekLoading = () => {
-    isLoading.value = true;
-    loadingUrl.value = player.state.media.url;
-    player.state.playback.downloadSpeedBps = 0;
-};
-
-const onSeek = async (position: number) => {
-    beginSeekLoading();
-    try {
-        await player.seek(position);
-    } catch {
-        isLoading.value = false;
-        loadingUrl.value = "";
-    }
-};
-
-const onSeekRelative = async (position: number) => {
-    beginSeekLoading();
-    try {
-        await player.seekRelative(position);
-    } catch {
-        isLoading.value = false;
-        loadingUrl.value = "";
-    }
-};
+const { onSeek, onSeekRelative } = usePlaybackSeekActions({
+    player,
+    isLoading,
+    loadingUrl,
+});
 
 const { onKeydown, onDoubleClick } = usePlaybackShortcuts(
     {
@@ -470,369 +225,6 @@ const { onKeydown, onDoubleClick } = usePlaybackShortcuts(
     showSeekOverlay,
 );
 
-const DRAG_THRESHOLD_PX = 4;
-const INTERACTIVE_TARGET_SELECTOR = [
-    "button",
-    "input",
-    "textarea",
-    "select",
-    "option",
-    "a[href]",
-    "summary",
-    "[role='button']",
-    "[role='link']",
-    "[role='checkbox']",
-    "[role='radio']",
-    "[role='switch']",
-    "[role='menuitem']",
-    "[contenteditable='true']",
-    "[tabindex]:not([tabindex='-1'])",
-    "[data-window-no-drag]",
-].join(", ");
-
-let dragStartX = 0;
-let dragStartY = 0;
-let isDragPending = false;
-let unlistenAppOpenFiles: UnlistenFn | null = null;
-let unlistenWindowDragDrop: UnlistenFn | null = null;
-let unlistenOpenSettingsPanel: UnlistenFn | null = null;
-let unlistenUpdateNotePrompt: UnlistenFn | null = null;
-let unlistenWindowMoved: UnlistenFn | null = null;
-let unlistenWindowResizedForPersistence: UnlistenFn | null = null;
-let drainPendingOpenFilesRef: (() => Promise<void>) | null = null;
-let mediaSizeQueryId = 0;
-const mediaFileSizeBytes = ref<number | null>(null);
-const MEDIA_EXTENSION_SET = new Set(
-    MEDIA_FILE_EXTENSIONS.map((extension) => extension.toLowerCase()),
-);
-const playlistScrollState = ref<PlaylistScrollState>({
-    list: 0,
-    playlists: {},
-});
-const playlistDrawerWidthRatio = ref<number | null>(null);
-const updateNotePrompt = ref<UpdateNotePrompt | null>(null);
-const isUpdateNotePromptOpen = computed(() => updateNotePrompt.value !== null);
-const escapeRegExp = (value: string) =>
-    value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-const stripInlineMarkdown = (value: string) =>
-    value
-        .replace(/\*\*([^*]+)\*\*/g, "$1")
-        .replace(/\*([^*]+)\*/g, "$1")
-        .replace(/`([^`]+)`/g, "$1")
-        .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-        .trim();
-
-const parseUpdateNoteContent = (version: string, note: string) => {
-    const trimmedNote = note.trim();
-    const fallbackTitle = `Version ${version} is available`;
-    if (!trimmedNote) {
-        return {
-            title: fallbackTitle,
-            blocks: [] as UpdateNoteBlock[],
-        };
-    }
-
-    const lines = trimmedNote.split(/\r?\n/);
-    const firstContentIndex = lines.findIndex((line) => line.trim().length > 0);
-    if (firstContentIndex < 0) {
-        return {
-            title: fallbackTitle,
-            blocks: [] as UpdateNoteBlock[],
-        };
-    }
-
-    const normalizedVersion = version.trim().replace(/^v/i, "");
-    const markdownReleaseHeadingPattern = new RegExp(
-        `^#{1,6}\\s+\\[?v?${escapeRegExp(normalizedVersion)}\\]?\\s*-\\s*(.+)$`,
-        "i",
-    );
-    const plainReleaseHeadingPattern = new RegExp(
-        `^(?:release|version)\\s+v?${escapeRegExp(normalizedVersion)}\\s*$`,
-        "i",
-    );
-    const firstLine = lines[firstContentIndex].trim();
-    const markdownHeadingMatch = firstLine.match(markdownReleaseHeadingPattern);
-    const title = markdownHeadingMatch
-        ? `Version ${version} Released - ${markdownHeadingMatch[1].trim()}`
-        : fallbackTitle;
-
-    if (markdownHeadingMatch || plainReleaseHeadingPattern.test(firstLine)) {
-        lines.splice(firstContentIndex, 1);
-    }
-
-    const blocks: UpdateNoteBlock[] = [];
-    let paragraphLines: string[] = [];
-    let listBlock: Extract<UpdateNoteBlock, { type: "list" }> | null = null;
-
-    const flushParagraph = () => {
-        const text = stripInlineMarkdown(paragraphLines.join(" "));
-        paragraphLines = [];
-        if (text) {
-            blocks.push({
-                type: "paragraph",
-                text,
-            });
-        }
-    };
-
-    const flushList = () => {
-        if (listBlock?.items.length) {
-            blocks.push(listBlock);
-        }
-        listBlock = null;
-    };
-
-    for (const rawLine of lines) {
-        const line = rawLine.trim();
-        if (!line) {
-            flushParagraph();
-            flushList();
-            continue;
-        }
-
-        const headingMatch = line.match(/^(#{2,6})\s+(.+)$/);
-        if (headingMatch) {
-            flushParagraph();
-            flushList();
-            blocks.push({
-                type: "heading",
-                level: headingMatch[1].length,
-                text: stripInlineMarkdown(headingMatch[2]),
-            });
-            continue;
-        }
-
-        const unorderedItemMatch = line.match(/^[-*]\s+(.+)$/);
-        const orderedItemMatch = line.match(/^\d+[.)]\s+(.+)$/);
-        if (unorderedItemMatch || orderedItemMatch) {
-            flushParagraph();
-            const ordered = Boolean(orderedItemMatch);
-            if (!listBlock || listBlock.ordered !== ordered) {
-                flushList();
-                listBlock = {
-                    type: "list",
-                    ordered,
-                    items: [],
-                };
-            }
-            listBlock.items.push(
-                stripInlineMarkdown((orderedItemMatch || unorderedItemMatch)?.[1] ?? ""),
-            );
-            continue;
-        }
-
-        flushList();
-        paragraphLines.push(line);
-    }
-
-    flushParagraph();
-    flushList();
-
-    return {
-        title,
-        blocks,
-    };
-};
-
-const updateNotePromptTitle = computed(() => {
-    const prompt = updateNotePrompt.value;
-    return prompt
-        ? parseUpdateNoteContent(prompt.version, prompt.note).title
-        : "Update Available";
-});
-const updateNotePromptBlocks = computed(() => {
-    const prompt = updateNotePrompt.value;
-    if (!prompt) return [] as UpdateNoteBlock[];
-    return parseUpdateNoteContent(prompt.version, prompt.note).blocks;
-});
-
-const showUpdateNotePrompt = (prompt: UpdateNotePrompt | null) => {
-    const version = prompt?.version?.trim();
-    const note = prompt?.note?.trim();
-    if (!version || !note) return;
-    updateNotePrompt.value = {
-        version,
-        note,
-    };
-};
-
-const openSettingsAndInstallUpdate = () => {
-    clearNavSelectionDuringLoad.value = false;
-    activePanel.value = "settings";
-    hideHistory.value = false;
-    void nextTick(() => {
-        void updateSection.installUpdate();
-    });
-};
-
-const closeUpdateNotePrompt = () => {
-    updateNotePrompt.value = null;
-};
-
-const onConfirmUpdateNotePrompt = () => {
-    closeUpdateNotePrompt();
-    openSettingsAndInstallUpdate();
-};
-
-const normalizePlaylistDrawerWidthRatio = (value: unknown): number | null => {
-    if (typeof value !== "number" || !Number.isFinite(value)) return null;
-    if (value <= 0) return null;
-    const normalized = Math.min(value, 0.86);
-    return Math.round(normalized * 10000) / 10000;
-};
-
-const onPlaylistScrollPositionChange = (
-    playlistId: string | null,
-    scrollTop: number,
-) => {
-    const nextScrollTop =
-        Number.isFinite(scrollTop) && scrollTop > 0 ? Math.round(scrollTop) : 0;
-    if (!playlistId) {
-        if (playlistScrollState.value.list === nextScrollTop) return;
-        playlistScrollState.value = {
-            ...playlistScrollState.value,
-            list: nextScrollTop,
-        };
-        return;
-    }
-    const current = playlistScrollState.value.playlists[playlistId] ?? 0;
-    if (current === nextScrollTop) return;
-    playlistScrollState.value = {
-        ...playlistScrollState.value,
-        playlists: {
-            ...playlistScrollState.value.playlists,
-            [playlistId]: nextScrollTop,
-        },
-    };
-};
-
-const onPlaylistDrawerWidthRatioChange = (ratio: number) => {
-    const normalized = normalizePlaylistDrawerWidthRatio(ratio);
-    if (playlistDrawerWidthRatio.value === normalized) return;
-    playlistDrawerWidthRatio.value = normalized;
-};
-
-let persistManualWindowTimer: number | null = null;
-const clearPersistManualWindowTimer = () => {
-    if (persistManualWindowTimer === null) return;
-    window.clearTimeout(persistManualWindowTimer);
-    persistManualWindowTimer = null;
-};
-
-const schedulePersistManualWindow = () => {
-    clearPersistManualWindowTimer();
-    persistManualWindowTimer = window.setTimeout(() => {
-        persistManualWindowTimer = null;
-        void persistCurrentManualWindow();
-    }, 220);
-};
-
-function extractPathExtension(path: string): string | null {
-    const cleanPath = path.trim().split(/[?#]/, 1)[0];
-    if (!cleanPath) return null;
-    const lastDotIndex = cleanPath.lastIndexOf(".");
-    const lastSeparatorIndex = Math.max(
-        cleanPath.lastIndexOf("/"),
-        cleanPath.lastIndexOf("\\"),
-    );
-    if (lastDotIndex <= lastSeparatorIndex) return null;
-    return cleanPath.slice(lastDotIndex + 1).toLowerCase();
-}
-
-function filterDroppedMediaPaths(paths: string[]): string[] {
-    const deduped = new Set<string>();
-    paths.forEach((path) => {
-        const trimmedPath = path.trim();
-        if (!trimmedPath) return;
-        const extension = extractPathExtension(trimmedPath);
-        if (!extension || !MEDIA_EXTENSION_SET.has(extension)) return;
-        deduped.add(trimmedPath);
-    });
-    return [...deduped];
-}
-
-function clearWindowDragCandidate() {
-    isDragPending = false;
-    window.removeEventListener("mousemove", onWindowDragMove);
-    window.removeEventListener("mouseup", clearWindowDragCandidate);
-}
-
-function onWindowDragMove(event: MouseEvent) {
-    if (!isDragPending) return;
-    const movedX = Math.abs(event.clientX - dragStartX);
-    const movedY = Math.abs(event.clientY - dragStartY);
-    if (movedX < DRAG_THRESHOLD_PX && movedY < DRAG_THRESHOLD_PX) return;
-
-    clearWindowDragCandidate();
-    void getCurrentWindow().startDragging();
-}
-
-function onDragRegionMouseDown(event: MouseEvent) {
-    if (event.button !== 0) return;
-    if (event.detail > 1) return;
-
-    dragStartX = event.clientX;
-    dragStartY = event.clientY;
-    isDragPending = true;
-    window.addEventListener("mousemove", onWindowDragMove);
-    window.addEventListener("mouseup", clearWindowDragCandidate, { once: true });
-}
-
-function isInteractiveTarget(target: EventTarget | null): boolean {
-    if (!(target instanceof Element)) return false;
-    return target.closest(INTERACTIVE_TARGET_SELECTOR) !== null;
-}
-
-function onAppMouseDownCapture(event: MouseEvent) {
-    if (isInteractiveTarget(event.target)) return;
-    onDragRegionMouseDown(event);
-}
-
-async function refreshMediaFileSize() {
-    const queryId = ++mediaSizeQueryId;
-    if (!player.state.media.isFileLoaded || !player.state.media.url.trim()) {
-        mediaFileSizeBytes.value = null;
-        return;
-    }
-
-    try {
-        const fileSize = await invoke<number | null>("get_media_file_size", {
-            path: player.state.media.url,
-        });
-        if (queryId !== mediaSizeQueryId) return;
-        mediaFileSizeBytes.value =
-            typeof fileSize === "number" && Number.isFinite(fileSize) && fileSize > 0
-                ? fileSize
-                : null;
-    } catch {
-        if (queryId !== mediaSizeQueryId) return;
-        mediaFileSizeBytes.value = null;
-    }
-}
-
-watch(
-    () => [player.state.media.isFileLoaded, player.state.media.url] as const,
-    () => {
-        void refreshMediaFileSize();
-    },
-    { immediate: true },
-);
-
-watch(shouldShowPlaybackLoadingOverlay, (shouldShow) => {
-    if (!shouldShow) {
-        clearLoadingOverlayDelayTimer();
-        isLoadingOverlayVisible.value = false;
-        return;
-    }
-    if (isLoadingOverlayVisible.value) return;
-    clearLoadingOverlayDelayTimer();
-    loadingOverlayDelayTimer = window.setTimeout(() => {
-        loadingOverlayDelayTimer = null;
-        isLoadingOverlayVisible.value = true;
-    }, 500);
-});
-
 watch(
     subtitlesDisabled,
     (disabled) => {
@@ -841,36 +233,34 @@ watch(
     { immediate: true },
 );
 
-const mediaInfo = computed(() => {
-    if (!player.state.media.isFileLoaded) return null;
-    return getMockMediaInfo(player.state.media.url, {
-        durationSeconds: player.state.playback.duration,
-        fileSizeBytes: mediaFileSizeBytes.value,
-    });
+const {
+    playlistScrollState,
+    playlistDrawerWidthRatio,
+    onPlaylistScrollPositionChange,
+    onPlaylistDrawerWidthRatioChange,
+} = usePlaylistDrawerUi();
+const {
+    isUpdateNotePromptOpen,
+    updateNotePromptTitle,
+    updateNotePromptBlocks,
+    showUpdateNotePrompt,
+    closeUpdateNotePrompt,
+    onConfirmUpdateNotePrompt,
+} = useUpdateNotePrompt({
+    activePanel,
+    hideHistory,
+    clearNavSelectionDuringLoad,
+    settingsPanelId: "settings",
 });
-
-const statusBadges = computed(() => mediaInfo.value?.badges ?? []);
+const { onAppMouseDownCapture, onDragRegionMouseDown } = useWindowDragRegion();
+const { mediaInfo, statusBadges } = useMediaInfo(player);
 const currentOrLastPlaybackUrl = computed(
     () => player.state.media.url || player.state.media.lastLoadedUrl,
 );
-const playlistEntriesWithProgress = computed(() => {
-    const ratioByPath = new Map<string, number>();
-    history.history.value.forEach((entry) => {
-        const duration = entry.duration;
-        const position = entry.lastPosition;
-        if (!Number.isFinite(duration) || duration <= 0) {
-            ratioByPath.set(normalizePlaybackKey(entry.path), 0);
-            return;
-        }
-        const ratio = Math.max(0, Math.min(1, position / duration));
-        ratioByPath.set(normalizePlaybackKey(entry.path), ratio);
-    });
-
-    return orderedPlaylist.value.map((entry) => ({
-        ...entry,
-        playedRatio: ratioByPath.get(normalizePlaybackKey(entry.path)) ?? 0,
-    }));
-});
+const playlistEntriesWithProgress = usePlaylistEntriesWithProgress(
+    orderedPlaylist,
+    history.history,
+);
 
 const { hasLoadedPanel, loadActivePanel } = useAppUiPersistence({
     activePanel,
@@ -937,143 +327,19 @@ useAppRuntimeBindings({
     schedulePointerRefresh,
 });
 
-onMounted(() => {
-    applyThemeFromSettingGroups();
-    void loadActivePanel();
-    void (async () => {
-        const currentWindow = getCurrentWindow();
-        await restorePersistedManualWindow().catch(() => {});
-
-        try {
-            unlistenWindowMoved = await currentWindow.onMoved(() => {
-                schedulePersistManualWindow();
-            });
-        } catch {
-            // Ignore window move binding failures in unsupported environments.
-        }
-
-        try {
-            unlistenWindowResizedForPersistence = await currentWindow.onResized(() => {
-                schedulePersistManualWindow();
-            });
-        } catch {
-            // Ignore window resize binding failures in unsupported environments.
-        }
-
-        const drainPendingOpenFiles = async () => {
-            const pending = await invoke<string[]>("consume_pending_open_files");
-            if (Array.isArray(pending) && pending.length) {
-                await openSelectedPaths(pending);
-            }
-        };
-        drainPendingOpenFilesRef = drainPendingOpenFiles;
-
-        try {
-            await drainPendingOpenFiles();
-        } catch {
-            // Ignore if there are no startup-open files.
-        }
-
-        try {
-            unlistenAppOpenFiles = await listen("app-open-files", () => {
-                void (async () => {
-                    try {
-                        await drainPendingOpenFiles();
-                    } catch {
-                        // Ignore transient queue-drain errors.
-                    }
-                })();
-                },
-            );
-        } catch {
-            // Ignore event-listener failures in unsupported environments.
-        }
-
-        try {
-            unlistenOpenSettingsPanel = await listen(
-                "soia-open-settings-panel",
-                () => {
-                    if (player.state.media.isFileLoaded) return;
-                    clearNavSelectionDuringLoad.value = false;
-                    activePanel.value = "settings";
-                    hideHistory.value = false;
-                },
-            );
-        } catch {
-            // Ignore event-listener failures in unsupported environments.
-        }
-
-        try {
-            unlistenUpdateNotePrompt = await listen<UpdateNotePrompt>(
-                "soia-update-note-prompt",
-                (event) => {
-                    void invoke("consume_pending_update_note_prompt").catch(() => {});
-                    showUpdateNotePrompt(event.payload);
-                },
-            );
-            const pendingPrompt = await invoke<UpdateNotePrompt | null>(
-                "consume_pending_update_note_prompt",
-            );
-            showUpdateNotePrompt(pendingPrompt);
-        } catch {
-            // Ignore event-listener failures in unsupported environments.
-        }
-
-        try {
-            unlistenWindowDragDrop = await getCurrentWindow().onDragDropEvent(
-                ({ payload }) => {
-                    if (payload.type !== "drop") return;
-                    const droppedPaths = filterDroppedMediaPaths(payload.paths);
-                    if (!droppedPaths.length) return;
-                    void openSelectedPaths(droppedPaths);
-                },
-            );
-        } catch {
-            // Ignore drag-drop binding failures in unsupported environments.
-        }
-    })();
-
-    window.addEventListener("focus", onWindowFocusDrainPendingFiles);
-    window.addEventListener("beforeunload", onBeforeUnloadPersistWindow);
+useAppStartupBindings({
+    activePanel,
+    hideHistory,
+    clearNavSelectionDuringLoad,
+    settingsPanelId: "settings",
+    isFileLoaded: () => player.state.media.isFileLoaded,
+    openSelectedPaths,
+    loadActivePanel,
+    restorePersistedManualWindow,
+    schedulePersistManualWindow,
+    persistBeforeUnload,
+    showUpdateNotePrompt,
 });
-
-onBeforeUnmount(() => {
-    clearLoadingOverlayDelayTimer();
-    clearSeekOverlayTimer();
-    clearPersistManualWindowTimer();
-    clearWindowDragCandidate();
-    unlistenAppOpenFiles?.();
-    unlistenAppOpenFiles = null;
-    unlistenWindowDragDrop?.();
-    unlistenWindowDragDrop = null;
-    unlistenOpenSettingsPanel?.();
-    unlistenOpenSettingsPanel = null;
-    unlistenUpdateNotePrompt?.();
-    unlistenUpdateNotePrompt = null;
-    unlistenWindowMoved?.();
-    unlistenWindowMoved = null;
-    unlistenWindowResizedForPersistence?.();
-    unlistenWindowResizedForPersistence = null;
-    drainPendingOpenFilesRef = null;
-    window.removeEventListener("focus", onWindowFocusDrainPendingFiles);
-    window.removeEventListener("beforeunload", onBeforeUnloadPersistWindow);
-});
-
-function onWindowFocusDrainPendingFiles() {
-    if (!drainPendingOpenFilesRef) return;
-    void (async () => {
-        try {
-            await drainPendingOpenFilesRef?.();
-        } catch {
-            // Ignore focus-triggered drain failures.
-        }
-    })();
-}
-
-function onBeforeUnloadPersistWindow() {
-    clearPersistManualWindowTimer();
-    void persistCurrentManualWindow();
-}
 </script>
 
 <template>
