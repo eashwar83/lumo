@@ -1,12 +1,18 @@
 use chrono::Utc;
 use log::{info, warn};
+use serde::Serialize;
 use serde_json::json;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::time::Duration;
 
 const UPDATE_AVAILABLE_EVENT: &str = "soia-update-available";
+const UPDATE_NOTE_PROMPT_EVENT: &str = "soia-update-note-prompt";
 static HAS_AVAILABLE_UPDATE: AtomicBool = AtomicBool::new(false);
+static UPDATE_NOTE_PROMPT_LOCK: Mutex<()> = Mutex::new(());
+static PENDING_UPDATE_NOTE_PROMPT: Mutex<Option<UpdateNotePrompt>> = Mutex::new(None);
 const HOST_AUTH_CACHE_KEY: &str = "host_auth_v1";
+const UPDATE_NOTE_PROMPTED_VERSION_KEY: &str = "update_note_prompted_version_v1";
 const HOST_AUTH_EXPIRY_SKEW_SECS: i64 = 30;
 const HOST_AUTH_CONNECT_TIMEOUT_SECS: u64 = 3;
 const HOST_AUTH_TIMEOUT_SECS: u64 = 7;
@@ -20,6 +26,13 @@ pub(crate) struct SoiaAuthToken {
     pub payload: String,
     pub signature_hex: String,
     pub expire_at: i64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct UpdateNotePrompt {
+    pub version: String,
+    pub note: String,
 }
 
 #[tauri::command]
@@ -37,6 +50,17 @@ pub(crate) fn should_use_embedded_update_install() -> bool {
     #[cfg(target_os = "windows")]
     {
         is_windows_setup_install()
+    }
+}
+
+#[tauri::command]
+pub(crate) fn consume_pending_update_note_prompt() -> Option<UpdateNotePrompt> {
+    match PENDING_UPDATE_NOTE_PROMPT.lock() {
+        Ok(mut prompt) => prompt.take(),
+        Err(err) => {
+            warn!("pending update note prompt lock is poisoned: {err}");
+            None
+        }
     }
 }
 
@@ -139,19 +163,11 @@ fn read_cached_soia_auth(app_handle: &tauri::AppHandle) -> Option<SoiaAuthToken>
 }
 
 fn persist_host_auth(app_handle: &tauri::AppHandle, token: &SoiaAuthToken) {
-    let state = match crate::store::installation_store::get_installation_state(app_handle) {
-        Ok(state) => state,
-        Err(err) => {
-            warn!("failed to read installation state for host auth cache: {err}");
-            return;
-        }
+    let mut data = match read_uuid_update_data_object(app_handle, "host auth cache") {
+        Some(data) => data,
+        None => return,
     };
-    let mut obj = state
-        .uuid_update_data
-        .as_object()
-        .cloned()
-        .unwrap_or_default();
-    obj.insert(
+    data.insert(
         HOST_AUTH_CACHE_KEY.to_string(),
         json!({
             "auth_payload": token.payload,
@@ -159,12 +175,62 @@ fn persist_host_auth(app_handle: &tauri::AppHandle, token: &SoiaAuthToken) {
             "expire_at": token.expire_at
         }),
     );
+    persist_uuid_update_data_object(app_handle, data, "host auth cache");
+}
+
+fn read_uuid_update_data_object(
+    app_handle: &tauri::AppHandle,
+    context: &str,
+) -> Option<serde_json::Map<String, serde_json::Value>> {
+    let state = match crate::store::installation_store::get_installation_state(app_handle) {
+        Ok(state) => state,
+        Err(err) => {
+            warn!("failed to read installation state for {context}: {err}");
+            return None;
+        }
+    };
+    Some(
+        state
+            .uuid_update_data
+            .as_object()
+            .cloned()
+            .unwrap_or_default(),
+    )
+}
+
+fn persist_uuid_update_data_object(
+    app_handle: &tauri::AppHandle,
+    data: serde_json::Map<String, serde_json::Value>,
+    context: &str,
+) {
     if let Err(err) = crate::store::installation_store::update_uuid_update_data(
         app_handle,
-        serde_json::Value::Object(obj),
+        serde_json::Value::Object(data),
     ) {
-        warn!("failed to persist host auth cache: {err}");
+        warn!("failed to persist {context}: {err}");
     }
+}
+
+fn update_note_prompted_version(app_handle: &tauri::AppHandle) -> Option<String> {
+    let state = crate::store::installation_store::get_installation_state(app_handle).ok()?;
+    state
+        .uuid_update_data
+        .get(UPDATE_NOTE_PROMPTED_VERSION_KEY)
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn mark_update_note_prompted(app_handle: &tauri::AppHandle, version: &str) {
+    let mut data = match read_uuid_update_data_object(app_handle, "update note prompt state") {
+        Some(data) => data,
+        None => return,
+    };
+    data.insert(
+        UPDATE_NOTE_PROMPTED_VERSION_KEY.to_string(),
+        serde_json::Value::String(version.to_string()),
+    );
+    persist_uuid_update_data_object(app_handle, data, "update note prompt state");
 }
 
 fn request_soia_auth_from_server(app_handle: &tauri::AppHandle) -> Option<SoiaAuthToken> {
@@ -245,6 +311,78 @@ fn run_daily_update_check(app_handle: &tauri::AppHandle) {
     }
 }
 
+#[cfg(desktop)]
+fn update_note_from_raw_json(update: &tauri_plugin_updater::Update) -> Option<String> {
+    update
+        .raw_json
+        .get("notes")
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+#[cfg(desktop)]
+fn available_update_note(update: &tauri_plugin_updater::Update) -> Option<String> {
+    let note = update
+        .body
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(|| update_note_from_raw_json(update))?;
+
+    has_detailed_update_note(&note).then_some(note)
+}
+
+#[cfg(desktop)]
+fn has_detailed_update_note(note: &str) -> bool {
+    note.lines().filter(|line| !line.trim().is_empty()).count() > 1
+}
+
+#[cfg(desktop)]
+fn maybe_show_update_note_prompt(
+    app_handle: &tauri::AppHandle,
+    update: &tauri_plugin_updater::Update,
+) {
+    let version = update.version.trim();
+    if version.is_empty() {
+        return;
+    }
+
+    let Some(note) = available_update_note(update) else {
+        return;
+    };
+
+    let _prompt_lock = match UPDATE_NOTE_PROMPT_LOCK.lock() {
+        Ok(lock) => lock,
+        Err(err) => {
+            warn!("update note prompt lock is poisoned: {err}");
+            return;
+        }
+    };
+    if update_note_prompted_version(app_handle).as_deref() == Some(version) {
+        return;
+    }
+
+    mark_update_note_prompted(app_handle, version);
+
+    use tauri::Emitter;
+
+    let prompt = UpdateNotePrompt {
+        version: version.to_string(),
+        note,
+    };
+    match PENDING_UPDATE_NOTE_PROMPT.lock() {
+        Ok(mut pending_prompt) => {
+            *pending_prompt = Some(prompt.clone());
+        }
+        Err(err) => {
+            warn!("pending update note prompt lock is poisoned: {err}");
+        }
+    }
+    let _ = app_handle.emit(UPDATE_NOTE_PROMPT_EVENT, prompt);
+}
+
 pub(crate) fn check_update(app_handle: tauri::AppHandle) -> Option<SoiaAuthToken> {
     set_update_available_state(false);
     let result = run_daily_signal_ping(&app_handle);
@@ -278,10 +416,14 @@ async fn run_tauri_updater_check(app_handle: tauri::AppHandle) {
     };
 
     match updater.check().await {
-        Ok(Some(_update)) => {
+        Ok(Some(update)) => {
             set_update_available_state(true);
             let _ = app_handle.emit(UPDATE_AVAILABLE_EVENT, true);
-            info!("tauri updater found an available update");
+            maybe_show_update_note_prompt(&app_handle, &update);
+            info!(
+                "tauri updater found an available update: {}",
+                update.version
+            );
         }
         Ok(None) => {
             set_update_available_state(false);

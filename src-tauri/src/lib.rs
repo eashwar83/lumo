@@ -322,7 +322,8 @@ pub fn run() {
             commands::persistence::get_media_association_status,
             commands::persistence::set_media_association_to_soia,
             check_update::has_available_update,
-            check_update::should_use_embedded_update_install
+            check_update::should_use_embedded_update_install,
+            check_update::consume_pending_update_note_prompt
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

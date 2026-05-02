@@ -8,12 +8,18 @@ const props = withDefaults(
         message: string;
         confirmText?: string;
         cancelText?: string;
+        confirmVariant?: "danger" | "primary";
+        size?: "normal" | "wide";
+        preserveMessageWhitespace?: boolean;
         confirmLoading?: boolean;
         errorMessage?: string;
     }>(),
     {
         confirmText: "Confirm",
         cancelText: "Cancel",
+        confirmVariant: "danger",
+        size: "normal",
+        preserveMessageWhitespace: false,
         confirmLoading: false,
         errorMessage: "",
     },
@@ -30,6 +36,10 @@ const confirmBtnRef = ref<HTMLButtonElement | null>(null);
 const previousFocusedElement = ref<HTMLElement | null>(null);
 const titleId = `confirm-dialog-title-${Math.random().toString(36).slice(2, 10)}`;
 const hasError = computed(() => Boolean(props.errorMessage));
+const confirmButtonClass = computed(() => ({
+    "confirm-dialog__btn--danger": props.confirmVariant === "danger",
+    "confirm-dialog__btn--primary": props.confirmVariant === "primary",
+}));
 
 const getFocusableElements = () => {
     const modal = modalRef.value;
@@ -132,6 +142,9 @@ onBeforeUnmount(() => {
             <div
                 ref="modalRef"
                 class="confirm-dialog__panel"
+                :class="{
+                    'confirm-dialog__panel--wide': props.size === 'wide',
+                }"
                 role="dialog"
                 aria-modal="true"
                 :aria-labelledby="titleId"
@@ -140,8 +153,16 @@ onBeforeUnmount(() => {
                 <div :id="titleId" class="confirm-dialog__title">
                     {{ props.title }}
                 </div>
-                <div class="confirm-dialog__body">
-                    {{ props.message }}
+                <div
+                    class="confirm-dialog__body"
+                    :class="{
+                        'confirm-dialog__body--preserve-whitespace':
+                            props.preserveMessageWhitespace,
+                    }"
+                >
+                    <slot>
+                        {{ props.message }}
+                    </slot>
                 </div>
                 <div v-if="hasError" class="confirm-dialog__error">
                     {{ props.errorMessage }}
@@ -158,7 +179,8 @@ onBeforeUnmount(() => {
                     </button>
                     <button
                         ref="confirmBtnRef"
-                        class="confirm-dialog__btn confirm-dialog__btn--danger"
+                        class="confirm-dialog__btn"
+                        :class="confirmButtonClass"
                         type="button"
                         :disabled="props.confirmLoading"
                         @click="emit('confirm')"
@@ -203,6 +225,10 @@ onBeforeUnmount(() => {
         inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
+.confirm-dialog__panel--wide {
+    width: min(560px, calc(100% - 40px));
+}
+
 .confirm-dialog__title {
     font-size: 16px;
     font-weight: 600;
@@ -213,6 +239,11 @@ onBeforeUnmount(() => {
     font-size: 13px;
     line-height: 1.5;
     color: rgba(255, 255, 255, 0.82);
+    text-align: left;
+}
+
+.confirm-dialog__body--preserve-whitespace {
+    white-space: pre-wrap;
 }
 
 .confirm-dialog__error {
@@ -263,6 +294,17 @@ onBeforeUnmount(() => {
     background: rgba(205, 72, 72, 0.34);
 }
 
+.confirm-dialog__btn--primary {
+    border-color: rgba(94, 148, 255, 0.62);
+    background: rgba(78, 132, 236, 0.22);
+    color: #dce8ff;
+}
+
+.confirm-dialog__btn--primary:hover {
+    border-color: rgba(124, 170, 255, 0.78);
+    background: rgba(78, 132, 236, 0.34);
+}
+
 :global(:root[data-theme="graphite"] .confirm-dialog__backdrop) {
     background: rgba(10, 15, 20, 0.74);
 }
@@ -309,6 +351,17 @@ onBeforeUnmount(() => {
     background: rgba(198, 92, 92, 0.44);
 }
 
+:global(:root[data-theme="graphite"] .confirm-dialog__btn--primary) {
+    border-color: rgba(118, 160, 232, 0.76);
+    background: rgba(82, 126, 202, 0.34);
+    color: #e4edff;
+}
+
+:global(:root[data-theme="graphite"] .confirm-dialog__btn--primary:hover) {
+    border-color: rgba(144, 183, 245, 0.9);
+    background: rgba(82, 126, 202, 0.46);
+}
+
 :global(:root[data-theme="light"] .confirm-dialog__backdrop) {
     background: rgba(245, 248, 252, 0.5);
 }
@@ -349,5 +402,16 @@ onBeforeUnmount(() => {
 :global(:root[data-theme="light"] .confirm-dialog__btn--danger:hover) {
     border-color: rgba(205, 84, 84, 0.62);
     background: rgba(205, 84, 84, 0.18);
+}
+
+:global(:root[data-theme="light"] .confirm-dialog__btn--primary) {
+    border-color: rgba(47, 105, 210, 0.45);
+    background: rgba(47, 105, 210, 0.1);
+    color: rgba(30, 78, 164, 0.96);
+}
+
+:global(:root[data-theme="light"] .confirm-dialog__btn--primary:hover) {
+    border-color: rgba(47, 105, 210, 0.58);
+    background: rgba(47, 105, 210, 0.16);
 }
 </style>

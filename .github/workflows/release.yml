@@ -291,6 +291,19 @@ jobs:
           WIN_X64_FILE="Soia-${TAG}-Windows-x64-setup.exe"
           LINUX_X64_FILE="Soia-${TAG}-Linux-x64-wayland.deb"
           LINUX_ARM_FILE="Soia-${TAG}-Linux-arm64-wayland.deb"
+          NOTES="$(awk -v version="$VERSION" '
+            $0 ~ "^## \\[" version "\\] - " {
+              capture = 1
+            }
+            capture {
+              print
+            }
+          ' RELEASE_NOTES.md)"
+
+          if [ -z "$(printf '%s' "$NOTES" | tr -d '[:space:]')" ]; then
+            echo "Missing release notes for version ${VERSION} in RELEASE_NOTES.md" >&2
+            exit 1
+          fi
 
           for sig in \
             "release/${MAC_ARM_FILE}.sig" \
@@ -306,7 +319,7 @@ jobs:
 
           jq -n \
             --arg version "$VERSION" \
-            --arg notes "Release ${TAG}" \
+            --arg notes "$NOTES" \
             --arg pub_date "$PUB_DATE" \
             --arg mac_arm_url "${BASE_URL}/${MAC_ARM_FILE}" \
             --arg mac_x64_url "${BASE_URL}/${MAC_X64_FILE}" \

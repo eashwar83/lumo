@@ -6,7 +6,7 @@ import {
     LogicalSize,
     PhysicalPosition,
 } from "@tauri-apps/api/window";
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import PlayerControls from "./components/PlayerControls.vue";
 import PlayerHeader from "./components/PlayerHeader.vue";
 import MainPanels from "./components/MainPanels.vue";
@@ -28,6 +28,7 @@ import { MEDIA_FILE_EXTENSIONS } from "./constants/media";
 import { normalizePlaybackKey } from "./utils/playbackSource";
 import type { PlaylistScrollState } from "./types/playlist";
 import { loadUiState, saveUiState } from "./composables/useUiStateStore";
+import { useUpdateSection } from "./composables/settings-sections";
 
 const {
     isMacOS,
@@ -73,6 +74,28 @@ const {
 } = useAppBootstrap();
 
 const clearNavSelectionDuringLoad = ref(false);
+const updateSection = useUpdateSection();
+
+type UpdateNotePrompt = {
+    version: string;
+    note: string;
+};
+
+type UpdateNoteBlock =
+    | {
+          type: "heading";
+          text: string;
+          level: number;
+      }
+    | {
+          type: "paragraph";
+          text: string;
+      }
+    | {
+          type: "list";
+          ordered: boolean;
+          items: string[];
+      };
 
 type ManualWindowState = {
     width?: number;
@@ -473,6 +496,7 @@ let isDragPending = false;
 let unlistenAppOpenFiles: UnlistenFn | null = null;
 let unlistenWindowDragDrop: UnlistenFn | null = null;
 let unlistenOpenSettingsPanel: UnlistenFn | null = null;
+let unlistenUpdateNotePrompt: UnlistenFn | null = null;
 let unlistenWindowMoved: UnlistenFn | null = null;
 let unlistenWindowResizedForPersistence: UnlistenFn | null = null;
 let drainPendingOpenFilesRef: (() => Promise<void>) | null = null;
@@ -486,6 +510,170 @@ const playlistScrollState = ref<PlaylistScrollState>({
     playlists: {},
 });
 const playlistDrawerWidthRatio = ref<number | null>(null);
+const updateNotePrompt = ref<UpdateNotePrompt | null>(null);
+const isUpdateNotePromptOpen = computed(() => updateNotePrompt.value !== null);
+const escapeRegExp = (value: string) =>
+    value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const stripInlineMarkdown = (value: string) =>
+    value
+        .replace(/\*\*([^*]+)\*\*/g, "$1")
+        .replace(/\*([^*]+)\*/g, "$1")
+        .replace(/`([^`]+)`/g, "$1")
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+        .trim();
+
+const parseUpdateNoteContent = (version: string, note: string) => {
+    const trimmedNote = note.trim();
+    const fallbackTitle = `Version ${version} is available`;
+    if (!trimmedNote) {
+        return {
+            title: fallbackTitle,
+            blocks: [] as UpdateNoteBlock[],
+        };
+    }
+
+    const lines = trimmedNote.split(/\r?\n/);
+    const firstContentIndex = lines.findIndex((line) => line.trim().length > 0);
+    if (firstContentIndex < 0) {
+        return {
+            title: fallbackTitle,
+            blocks: [] as UpdateNoteBlock[],
+        };
+    }
+
+    const normalizedVersion = version.trim().replace(/^v/i, "");
+    const markdownReleaseHeadingPattern = new RegExp(
+        `^#{1,6}\\s+\\[?v?${escapeRegExp(normalizedVersion)}\\]?\\s*-\\s*(.+)$`,
+        "i",
+    );
+    const plainReleaseHeadingPattern = new RegExp(
+        `^(?:release|version)\\s+v?${escapeRegExp(normalizedVersion)}\\s*$`,
+        "i",
+    );
+    const firstLine = lines[firstContentIndex].trim();
+    const markdownHeadingMatch = firstLine.match(markdownReleaseHeadingPattern);
+    const title = markdownHeadingMatch
+        ? `Version ${version} Released - ${markdownHeadingMatch[1].trim()}`
+        : fallbackTitle;
+
+    if (markdownHeadingMatch || plainReleaseHeadingPattern.test(firstLine)) {
+        lines.splice(firstContentIndex, 1);
+    }
+
+    const blocks: UpdateNoteBlock[] = [];
+    let paragraphLines: string[] = [];
+    let listBlock: Extract<UpdateNoteBlock, { type: "list" }> | null = null;
+
+    const flushParagraph = () => {
+        const text = stripInlineMarkdown(paragraphLines.join(" "));
+        paragraphLines = [];
+        if (text) {
+            blocks.push({
+                type: "paragraph",
+                text,
+            });
+        }
+    };
+
+    const flushList = () => {
+        if (listBlock?.items.length) {
+            blocks.push(listBlock);
+        }
+        listBlock = null;
+    };
+
+    for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line) {
+            flushParagraph();
+            flushList();
+            continue;
+        }
+
+        const headingMatch = line.match(/^(#{2,6})\s+(.+)$/);
+        if (headingMatch) {
+            flushParagraph();
+            flushList();
+            blocks.push({
+                type: "heading",
+                level: headingMatch[1].length,
+                text: stripInlineMarkdown(headingMatch[2]),
+            });
+            continue;
+        }
+
+        const unorderedItemMatch = line.match(/^[-*]\s+(.+)$/);
+        const orderedItemMatch = line.match(/^\d+[.)]\s+(.+)$/);
+        if (unorderedItemMatch || orderedItemMatch) {
+            flushParagraph();
+            const ordered = Boolean(orderedItemMatch);
+            if (!listBlock || listBlock.ordered !== ordered) {
+                flushList();
+                listBlock = {
+                    type: "list",
+                    ordered,
+                    items: [],
+                };
+            }
+            listBlock.items.push(
+                stripInlineMarkdown((orderedItemMatch || unorderedItemMatch)?.[1] ?? ""),
+            );
+            continue;
+        }
+
+        flushList();
+        paragraphLines.push(line);
+    }
+
+    flushParagraph();
+    flushList();
+
+    return {
+        title,
+        blocks,
+    };
+};
+
+const updateNotePromptTitle = computed(() => {
+    const prompt = updateNotePrompt.value;
+    return prompt
+        ? parseUpdateNoteContent(prompt.version, prompt.note).title
+        : "Update Available";
+});
+const updateNotePromptBlocks = computed(() => {
+    const prompt = updateNotePrompt.value;
+    if (!prompt) return [] as UpdateNoteBlock[];
+    return parseUpdateNoteContent(prompt.version, prompt.note).blocks;
+});
+
+const showUpdateNotePrompt = (prompt: UpdateNotePrompt | null) => {
+    const version = prompt?.version?.trim();
+    const note = prompt?.note?.trim();
+    if (!version || !note) return;
+    updateNotePrompt.value = {
+        version,
+        note,
+    };
+};
+
+const openSettingsAndInstallUpdate = () => {
+    clearNavSelectionDuringLoad.value = false;
+    activePanel.value = "settings";
+    hideHistory.value = false;
+    void nextTick(() => {
+        void updateSection.installUpdate();
+    });
+};
+
+const closeUpdateNotePrompt = () => {
+    updateNotePrompt.value = null;
+};
+
+const onConfirmUpdateNotePrompt = () => {
+    closeUpdateNotePrompt();
+    openSettingsAndInstallUpdate();
+};
 
 const normalizePlaylistDrawerWidthRatio = (value: unknown): number | null => {
     if (typeof value !== "number" || !Number.isFinite(value)) return null;
@@ -816,6 +1004,22 @@ onMounted(() => {
         }
 
         try {
+            unlistenUpdateNotePrompt = await listen<UpdateNotePrompt>(
+                "soia-update-note-prompt",
+                (event) => {
+                    void invoke("consume_pending_update_note_prompt").catch(() => {});
+                    showUpdateNotePrompt(event.payload);
+                },
+            );
+            const pendingPrompt = await invoke<UpdateNotePrompt | null>(
+                "consume_pending_update_note_prompt",
+            );
+            showUpdateNotePrompt(pendingPrompt);
+        } catch {
+            // Ignore event-listener failures in unsupported environments.
+        }
+
+        try {
             unlistenWindowDragDrop = await getCurrentWindow().onDragDropEvent(
                 ({ payload }) => {
                     if (payload.type !== "drop") return;
@@ -844,6 +1048,8 @@ onBeforeUnmount(() => {
     unlistenWindowDragDrop = null;
     unlistenOpenSettingsPanel?.();
     unlistenOpenSettingsPanel = null;
+    unlistenUpdateNotePrompt?.();
+    unlistenUpdateNotePrompt = null;
     unlistenWindowMoved?.();
     unlistenWindowMoved = null;
     unlistenWindowResizedForPersistence?.();
@@ -1069,9 +1275,118 @@ function onBeforeUnloadPersistWindow() {
             @cancel="closeClearConfirm"
             @confirm="onConfirmClear"
         />
+
+        <ConfirmDialog
+            :open="isUpdateNotePromptOpen"
+            :title="updateNotePromptTitle"
+            message=""
+            confirm-text="Update"
+            cancel-text="Cancel"
+            confirm-variant="primary"
+            size="wide"
+            @cancel="closeUpdateNotePrompt"
+            @confirm="onConfirmUpdateNotePrompt"
+        >
+            <div class="update-note">
+                <template v-if="updateNotePromptBlocks.length">
+                    <template
+                        v-for="(block, blockIndex) in updateNotePromptBlocks"
+                        :key="blockIndex"
+                    >
+                        <div
+                            v-if="block.type === 'heading'"
+                            class="update-note__heading"
+                            :class="{
+                                'update-note__heading--section': block.level <= 3,
+                            }"
+                        >
+                            {{ block.text }}
+                        </div>
+                        <p
+                            v-else-if="block.type === 'paragraph'"
+                            class="update-note__paragraph"
+                        >
+                            {{ block.text }}
+                        </p>
+                        <ol
+                            v-else-if="block.ordered"
+                            class="update-note__list update-note__list--ordered"
+                        >
+                            <li
+                                v-for="(item, itemIndex) in block.items"
+                                :key="itemIndex"
+                            >
+                                {{ item }}
+                            </li>
+                        </ol>
+                        <ul v-else class="update-note__list">
+                            <li
+                                v-for="(item, itemIndex) in block.items"
+                                :key="itemIndex"
+                            >
+                                {{ item }}
+                            </li>
+                        </ul>
+                    </template>
+                </template>
+                <p v-else class="update-note__paragraph">
+                    A new version is ready to install.
+                </p>
+            </div>
+        </ConfirmDialog>
     </main>
 </template>
 
 <style src="./styles/app-theme.css"></style>
 <style scoped src="./styles/app-shell.css"></style>
 <style src="./styles/player.css"></style>
+<style scoped>
+.update-note {
+    display: grid;
+    gap: 10px;
+    max-height: min(46vh, 360px);
+    overflow: auto;
+    padding-right: 2px;
+}
+
+.update-note__heading {
+    margin-top: 2px;
+    color: rgba(255, 255, 255, 0.74);
+    font-size: 12px;
+    font-weight: 650;
+}
+
+.update-note__heading--section {
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 13px;
+}
+
+.update-note__paragraph {
+    margin: 0;
+}
+
+.update-note__list {
+    margin: 0;
+    padding-left: 18px;
+}
+
+.update-note__list li + li {
+    margin-top: 6px;
+}
+
+:global(:root[data-theme="light"]) .update-note__heading {
+    color: rgba(33, 45, 60, 0.72);
+}
+
+:global(:root[data-theme="light"]) .update-note__heading--section {
+    color: rgba(33, 45, 60, 0.92);
+}
+
+:global(:root[data-theme="graphite"]) .update-note__heading {
+    color: rgba(220, 226, 234, 0.78);
+}
+
+:global(:root[data-theme="graphite"]) .update-note__heading--section {
+    color: rgba(237, 241, 246, 0.95);
+}
+</style>
