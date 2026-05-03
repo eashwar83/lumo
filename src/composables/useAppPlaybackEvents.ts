@@ -1,10 +1,6 @@
-import { invoke } from "@tauri-apps/api/core";
 import type { Ref } from "vue";
 import type { ProgressPayload } from "../types/media";
-import { MEDIA_FILE_EXTENSIONS } from "../constants/media";
 import { AUTO_PLAY_NEXT_IN_PLAYLIST_SETTING_LABEL } from "../mock/settings";
-import type { NetworkBrowseEntry, NetworkBrowseResult } from "../types/network";
-import { createWebdavPlaybackKey, parsePlaybackSource } from "../utils/playbackSource";
 import { loadUiState } from "./useUiStateStore";
 
 type EndFilePayload = {
@@ -31,10 +27,6 @@ type PlayerApi = {
     };
     setLoopFile: (enabled: boolean) => Promise<void>;
     syncMpvRenderTarget: () => Promise<void>;
-};
-
-type PlaylistApi = {
-    getPathForEnd: (currentPath: string) => string | null;
 };
 
 type HistoryApi = {
@@ -67,111 +59,26 @@ type TracksApi = {
 type UseAppPlaybackEventsOptions = {
     player: PlayerApi;
     tracks: TracksApi;
-    playlistState: PlaylistApi;
     history: HistoryApi;
     nowPlaying: NowPlayingApi;
     pendingResume: Ref<PendingResume | null>;
     isLoopOne: Ref<boolean>;
     isLoading: Ref<boolean>;
     loadingUrl: Ref<string>;
-    playPath: (path: string) => Promise<void>;
+    playNextAfterEnd: () => Promise<void>;
 };
 
 export const useAppPlaybackEvents = ({
     player,
     tracks,
-    playlistState,
     history,
     nowPlaying,
     pendingResume,
     isLoopOne,
     isLoading,
     loadingUrl,
-    playPath,
+    playNextAfterEnd,
 }: UseAppPlaybackEventsOptions) => {
-    const mediaExtensionSet = new Set(
-        MEDIA_FILE_EXTENSIONS.map((item) => item.toLowerCase()),
-    );
-
-    const getLowerExt = (path: string): string => {
-        const index = path.lastIndexOf(".");
-        if (index < 0) return "";
-        return path.slice(index + 1).toLowerCase();
-    };
-
-    const isMediaFilePath = (path: string): boolean =>
-        mediaExtensionSet.has(getLowerExt(path));
-
-    const normalizeWebdavPath = (path: string): string => {
-        const trimmed = path.trim();
-        if (!trimmed || trimmed === "/") return "/";
-        const withLeading = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
-        return withLeading.replace(/\/+$/, "");
-    };
-
-    const getWebdavParentPath = (path: string): string | null => {
-        const normalized = normalizeWebdavPath(path);
-        if (normalized === "/") return null;
-        const index = normalized.lastIndexOf("/");
-        if (index <= 0) return "/";
-        return normalized.slice(0, index);
-    };
-
-    const resolveNextPathInLocalDirectory = async (
-        currentPath: string,
-    ): Promise<string | null> => {
-        if (!isMediaFilePath(currentPath)) return null;
-        const siblings = await invoke<string[]>("list_local_media_siblings", {
-            path: currentPath,
-        }).catch(() => []);
-        if (!siblings.length) return null;
-        const mediaSiblings = siblings.filter((item) => isMediaFilePath(item));
-        const currentIndex = mediaSiblings.findIndex((item) => item === currentPath);
-        if (currentIndex < 0 || currentIndex + 1 >= mediaSiblings.length) return null;
-        return mediaSiblings[currentIndex + 1] ?? null;
-    };
-
-    const resolveNextPathInWebdavDirectory = async (
-        connectionId: string,
-        filePath: string,
-    ): Promise<string | null> => {
-        const parentPath = getWebdavParentPath(filePath);
-        if (!parentPath) return null;
-        const result = await invoke<NetworkBrowseResult>("browse_network_connection", {
-            payload: {
-                connectionId,
-                mode: "browse",
-                protocol: "webdav",
-                path: parentPath,
-            },
-        }).catch(() => null);
-        if (!result) return null;
-        const mediaFiles = result.entries.filter(
-            (entry: NetworkBrowseEntry) =>
-                entry.entryType === "file" && isMediaFilePath(entry.path),
-        );
-        const normalizedCurrentPath = normalizeWebdavPath(filePath);
-        const currentIndex = mediaFiles.findIndex(
-            (entry) => normalizeWebdavPath(entry.path) === normalizedCurrentPath,
-        );
-        if (currentIndex < 0 || currentIndex + 1 >= mediaFiles.length) return null;
-        const nextEntry = mediaFiles[currentIndex + 1];
-        return createWebdavPlaybackKey(connectionId, nextEntry.path);
-    };
-
-    const resolveNextPathInSameDirectory = async (
-        currentPath: string,
-    ): Promise<string | null> => {
-        const source = parsePlaybackSource(currentPath);
-        if (source.type === "local") {
-            return resolveNextPathInLocalDirectory(source.path);
-        }
-        if (source.type === "dlna") {
-            return null;
-        }
-        return resolveNextPathInWebdavDirectory(source.connectionId, source.filePath);
-    };
-
     const shouldAutoPlayNextInPlaylist = async () => {
         const stored = await loadUiState<{
             settings?: {
@@ -193,11 +100,7 @@ export const useAppPlaybackEvents = ({
 
     const handleEndFile = async () => {
         if (!(await shouldAutoPlayNextInPlaylist())) return;
-        const nextPath =
-            playlistState.getPathForEnd(player.state.media.url) ??
-            (await resolveNextPathInSameDirectory(player.state.media.url));
-        if (!nextPath) return;
-        await playPath(nextPath);
+        await playNextAfterEnd();
     };
 
     const onFileLoaded = () => {

@@ -16,7 +16,6 @@ type PlaylistApi = {
     deletePlaylist: (playlistId: string) => void;
     movePlaylist: (fromPlaylistId: string, toPlaylistId: string) => void;
     markActivePlaylistAsPlayback: () => void;
-    getAdjacentPath: (currentPath: string, direction: 1 | -1) => string | null;
     toggleLoopOne: (setLoopFile: (enabled: boolean) => Promise<void>) => Promise<void>;
     togglePlaylistLoop: (setLoopFile: (enabled: boolean) => Promise<void>) => Promise<void>;
 };
@@ -43,6 +42,8 @@ type UseAppUiActionsOptions = {
     schedulePointerRefresh: () => void;
     onStopPlayback: () => Promise<void>;
     playPath: (path: string) => Promise<void>;
+    playPreviousTrack: () => Promise<void>;
+    playNextTrack: () => Promise<void>;
 };
 
 export const useAppUiActions = ({
@@ -61,6 +62,8 @@ export const useAppUiActions = ({
     schedulePointerRefresh,
     onStopPlayback,
     playPath,
+    playPreviousTrack,
+    playNextTrack,
 }: UseAppUiActionsOptions) => {
     const isClearConfirmOpen = computed(() => clearConfirmTarget.value !== null);
     const clearConfirmTitle = computed(() => {
@@ -194,17 +197,9 @@ export const useAppUiActions = ({
         playlistState.movePlaylist(fromPlaylistId, toPlaylistId);
     };
 
-    const onPrevTrack = async () => {
-        const nextPath = playlistState.getAdjacentPath(player.state.media.url, -1);
-        if (!nextPath) return;
-        await playPath(nextPath);
-    };
+    const onPrevTrack = () => playPreviousTrack();
 
-    const onNextTrack = async () => {
-        const nextPath = playlistState.getAdjacentPath(player.state.media.url, 1);
-        if (!nextPath) return;
-        await playPath(nextPath);
-    };
+    const onNextTrack = () => playNextTrack();
 
     const toggleLoopOne = async () => {
         await playlistState.toggleLoopOne(player.setLoopFile);

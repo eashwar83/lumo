@@ -25,6 +25,7 @@ import { usePlaylistEntriesWithProgress } from "./composables/usePlaylistEntries
 import { useAppStartupBindings } from "./composables/useAppStartupBindings";
 import { usePlaybackSeekActions } from "./composables/usePlaybackSeekActions";
 import { usePlaybackLoadingState } from "./composables/usePlaybackLoadingState";
+import { usePlaybackNavigation } from "./composables/usePlaybackNavigation";
 
 const {
     isMacOS,
@@ -123,6 +124,12 @@ const onStopPlaybackWithWindowRestore = async () => {
     await restorePersistedManualWindow();
 };
 
+const playbackNavigation = usePlaybackNavigation({
+    player,
+    playlistState,
+    playPath,
+});
+
 const isWindowsPlatform =
     typeof navigator !== "undefined" && /\bwindows\b/i.test(navigator.userAgent);
 const playerHeaderCompactModeEnabled = computed(
@@ -199,6 +206,8 @@ const {
     schedulePointerRefresh,
     onStopPlayback: onStopPlaybackWithWindowRestore,
     playPath,
+    playPreviousTrack: playbackNavigation.playPreviousTrack,
+    playNextTrack: playbackNavigation.playNextTrack,
 });
 
 const onSideNavNavigate = async (
@@ -291,7 +300,7 @@ const {
         isLoopOne,
         isLoading,
         loadingUrl,
-        playPath,
+        playNextAfterEnd: playbackNavigation.playNextAfterEnd,
     });
 
 const onFileLoaded = async () => {
