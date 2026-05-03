@@ -1,6 +1,5 @@
 use crate::store::media_db;
 use crate::store::play_history::PlayHistoryEntry;
-use crate::store::ui_state_store::PlaylistEntry;
 use rusqlite::{params, params_from_iter, Transaction};
 use std::collections::HashMap;
 
@@ -78,6 +77,12 @@ struct DeleteCandidate {
     id: String,
     payload: String,
     record_version: i64,
+}
+
+#[derive(Clone)]
+pub struct DefaultPlaylistEntry {
+    pub path: String,
+    pub added_at: i64,
 }
 
 fn serialize_external_tracks(tracks: &[String]) -> String {
@@ -200,7 +205,7 @@ fn select_play_history_delete_candidates(
 
 fn select_playlist_delete_candidates(
     tx: &Transaction<'_>,
-    entries: &[PlaylistEntry],
+    entries: &[DefaultPlaylistEntry],
 ) -> Result<Vec<DeleteCandidate>, String> {
     if entries.is_empty() {
         let mut stmt = tx
@@ -264,7 +269,7 @@ fn select_playlist_delete_candidates(
 
 fn should_stage_playlist_reorder(
     tx: &Transaction<'_>,
-    entries: &[PlaylistEntry],
+    entries: &[DefaultPlaylistEntry],
 ) -> Result<bool, String> {
     let mut stmt = tx
         .prepare(
@@ -392,7 +397,7 @@ fn delete_play_history_except(
 
 fn delete_playlist_except(
     tx: &Transaction<'_>,
-    entries: &[PlaylistEntry],
+    entries: &[DefaultPlaylistEntry],
     device_id: &str,
     now: i64,
 ) -> Result<(), String> {
@@ -410,7 +415,7 @@ fn delete_playlist_except(
     Ok(())
 }
 
-pub fn load_playlist(app: &tauri::AppHandle) -> Result<Vec<PlaylistEntry>, String> {
+pub fn load_playlist(app: &tauri::AppHandle) -> Result<Vec<DefaultPlaylistEntry>, String> {
     let conn = media_db::open_db(app)?;
     let mut stmt = conn
         .prepare(
@@ -422,7 +427,7 @@ pub fn load_playlist(app: &tauri::AppHandle) -> Result<Vec<PlaylistEntry>, Strin
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |row| {
-            Ok(PlaylistEntry {
+            Ok(DefaultPlaylistEntry {
                 path: row.get(0)?,
                 added_at: row.get(1)?,
             })
@@ -431,7 +436,10 @@ pub fn load_playlist(app: &tauri::AppHandle) -> Result<Vec<PlaylistEntry>, Strin
     collect_rows(rows)
 }
 
-pub fn save_playlist(app: &tauri::AppHandle, entries: Vec<PlaylistEntry>) -> Result<(), String> {
+pub fn save_playlist(
+    app: &tauri::AppHandle,
+    entries: Vec<DefaultPlaylistEntry>,
+) -> Result<(), String> {
     let mut conn = media_db::open_db(app)?;
     let device_id = media_db::local_device_id(&conn)?;
     let now = media_db::now_millis();

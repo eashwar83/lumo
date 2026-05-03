@@ -140,6 +140,8 @@ pub struct Playlist {
 #[serde(rename_all = "camelCase")]
 pub struct PlaylistEntry {
     pub path: String,
+    #[serde(default)]
+    pub title: Option<String>,
     pub added_at: i64,
 }
 
@@ -206,6 +208,31 @@ fn strip_playlist(state: &UiState) -> UiState {
     stripped
 }
 
+fn from_default_playlist_entries(
+    entries: Vec<playback_store::DefaultPlaylistEntry>,
+) -> Vec<PlaylistEntry> {
+    entries
+        .into_iter()
+        .map(|entry| PlaylistEntry {
+            path: entry.path,
+            title: None,
+            added_at: entry.added_at,
+        })
+        .collect()
+}
+
+fn into_default_playlist_entries(
+    entries: Vec<PlaylistEntry>,
+) -> Vec<playback_store::DefaultPlaylistEntry> {
+    entries
+        .into_iter()
+        .map(|entry| playback_store::DefaultPlaylistEntry {
+            path: entry.path,
+            added_at: entry.added_at,
+        })
+        .collect()
+}
+
 fn load_state_from_disk(path: &Path, legacy_path: &Path) -> Result<UiState, String> {
     if let Some(state) = cached_ui_state() {
         return Ok(state);
@@ -242,7 +269,7 @@ pub fn load_ui_state(app: &tauri::AppHandle) -> Result<UiState, String> {
         json_io::write_json(&path, &state)?;
     }
     store_ui_state_cache(&state);
-    state.playlist = Some(playlist);
+    state.playlist = Some(from_default_playlist_entries(playlist));
     Ok(state)
 }
 
@@ -272,7 +299,7 @@ pub fn save_ui_state(app: &tauri::AppHandle, state: UiState) -> Result<(), Strin
     let legacy_path = legacy_ui_state_file_path(app)?;
     let mut state = state;
     if let Some(playlist) = state.playlist.take() {
-        playback_store::save_playlist(app, playlist)?;
+        playback_store::save_playlist(app, into_default_playlist_entries(playlist))?;
     }
     let existing = load_state_from_disk(&path, &legacy_path)?;
     let merged = existing.merge(state);
@@ -296,4 +323,63 @@ pub fn reset_ui_state(app: &tauri::AppHandle) -> Result<(), String> {
         *cache = Some(UiState::default());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn playlist_entry_title_survives_ui_state_json_round_trip() {
+        let state = UiState {
+            playlists: Some(vec![Playlist {
+                id: "pl_1".to_string(),
+                name: "IPTV".to_string(),
+                entries: vec![PlaylistEntry {
+                    path: "https://example.test/live.m3u8".to_string(),
+                    title: Some("News Channel".to_string()),
+                    added_at: 123,
+                }],
+                created_at: 100,
+            }]),
+            ..UiState::default()
+        };
+
+        let json = serde_json::to_string(&state).expect("serialize ui state");
+        let restored: UiState = serde_json::from_str(&json).expect("deserialize ui state");
+
+        let title = restored
+            .playlists
+            .expect("playlists")
+            .remove(0)
+            .entries
+            .remove(0)
+            .title;
+        assert_eq!(title.as_deref(), Some("News Channel"));
+    }
+
+    #[test]
+    fn playlist_entry_title_defaults_for_legacy_ui_state_json() {
+        let json = r#"{
+            "playlists": [{
+                "id": "pl_1",
+                "name": "Legacy",
+                "entries": [{
+                    "path": "/media/legacy.mp4",
+                    "addedAt": 123
+                }],
+                "createdAt": 100
+            }]
+        }"#;
+
+        let restored: UiState = serde_json::from_str(json).expect("deserialize ui state");
+        let title = restored
+            .playlists
+            .expect("playlists")
+            .remove(0)
+            .entries
+            .remove(0)
+            .title;
+        assert_eq!(title, None);
+    }
 }
