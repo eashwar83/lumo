@@ -380,6 +380,9 @@ export const usePlaybackFlow = ({
             await playDlna(source.resourceUrl, source.key, preferredTitle);
             return;
         }
+        if (source.type === "smb") {
+            throw new Error("SMB playback is not implemented yet");
+        }
         await playLocalPath(source.path, preferredTitle);
     };
 
@@ -561,6 +564,9 @@ export const usePlaybackFlow = ({
                 preferredTitle,
             );
             return;
+        }
+        if (source.type === "smb") {
+            throw new Error("SMB playback is not implemented yet");
         }
         hideHistory.value = true;
         await playPath(source.path, preferredTitle);

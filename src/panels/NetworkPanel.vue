@@ -254,9 +254,13 @@ const visibleNetworkEntries = computed(() =>
                 (selectedProtocol === "http-dlna" || selectedProtocol === "dlna") &&
                 currentSource.connectionId === selectedConnectionId
             ) {
-                getAncestorPaths(currentSource.resourceUrl).forEach((path) =>
-                    activeFolderPaths.add(path),
-                );
+                const activeParentPath = currentSource.parentPath;
+                if (activeParentPath) {
+                    activeFolderPaths.add(activeParentPath);
+                    getAncestorPaths(activeParentPath).forEach((path) =>
+                        activeFolderPaths.add(path),
+                    );
+                }
             }
         }
 

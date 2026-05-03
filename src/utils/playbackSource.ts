@@ -18,6 +18,12 @@ export type PlaybackSource =
           key: string;
           connectionId: string;
           resourceUrl: string;
+          parentPath?: string;
+      }
+    | {
+          type: "smb";
+          key: string;
+          url: string;
       };
 
 const normalizeFilePath = (path: string) => {
@@ -49,18 +55,26 @@ const parseDlnaKey = (
 ): {
     connectionId: string;
     resourceUrl: string;
+    parentPath?: string;
 } | null => {
     if (!key.startsWith(SOIA_DLNA_KEY_PREFIX)) return null;
     const value = key.slice(SOIA_DLNA_KEY_PREFIX.length);
     const slashIndex = value.indexOf("/");
     if (slashIndex <= 0) return null;
     const encodedConnectionId = value.slice(0, slashIndex);
-    const encodedResourceUrl = value.slice(slashIndex + 1);
+    const encodedParts = value.slice(slashIndex + 1).split("/");
+    const encodedResourceUrl = encodedParts[0] ?? "";
+    const encodedParentPath = encodedParts[1] ?? "";
     if (!encodedConnectionId || !encodedResourceUrl) return null;
     try {
-        return {
+        const parsed = {
             connectionId: decodeURIComponent(encodedConnectionId),
             resourceUrl: decodeURIComponent(encodedResourceUrl),
+        };
+        if (!encodedParentPath) return parsed;
+        return {
+            ...parsed,
+            parentPath: decodeURIComponent(encodedParentPath).trim() || "0",
         };
     } catch {
         return null;
@@ -84,8 +98,15 @@ export const createWebdavPlaybackKey = (
 export const createDlnaPlaybackKey = (
     connectionId: string,
     resourceUrl: string,
-): string =>
-    `${SOIA_DLNA_KEY_PREFIX}${encodeURIComponent(connectionId.trim())}/${encodeURIComponent(resourceUrl.trim())}`;
+    parentPath?: string,
+): string => {
+    const base =
+        `${SOIA_DLNA_KEY_PREFIX}${encodeURIComponent(connectionId.trim())}/${encodeURIComponent(resourceUrl.trim())}`;
+    const normalizedParent = parentPath?.trim();
+    return normalizedParent
+        ? `${base}/${encodeURIComponent(normalizedParent)}`
+        : base;
+};
 
 export const parsePlaybackSource = (key: string): PlaybackSource => {
     const soiaWebdav = parseWebdavKey(key, SOIA_WEBDAV_KEY_PREFIX);
@@ -105,6 +126,15 @@ export const parsePlaybackSource = (key: string): PlaybackSource => {
             key,
             connectionId: soiaDlna.connectionId,
             resourceUrl: soiaDlna.resourceUrl,
+            parentPath: soiaDlna.parentPath,
+        };
+    }
+
+    if (/^smb:\/\//i.test(key)) {
+        return {
+            type: "smb",
+            key,
+            url: key,
         };
     }
 
@@ -144,6 +174,9 @@ export const getPlaybackDisplayPath = (key: string): string => {
     }
     if (source.type === "dlna") {
         return source.resourceUrl;
+    }
+    if (source.type === "smb") {
+        return source.url;
     }
     return source.path;
 };

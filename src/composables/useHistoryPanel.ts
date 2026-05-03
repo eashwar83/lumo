@@ -40,6 +40,9 @@ export const useHistoryPanel = () => {
         if (source.type === "dlna") {
             return getPathDisplayName(source.resourceUrl, source.resourceUrl);
         }
+        if (source.type === "smb") {
+            return getPathDisplayName(source.url, source.url);
+        }
         return getPathDisplayName(source.path, source.path);
     };
 
@@ -54,6 +57,9 @@ export const useHistoryPanel = () => {
         }
         if (source.type === "dlna") {
             return [getProtocolBadge("dlna")];
+        }
+        if (source.type === "smb") {
+            return [getProtocolBadge("smb")];
         }
 
         const normalized = source.path.trim().toLowerCase();

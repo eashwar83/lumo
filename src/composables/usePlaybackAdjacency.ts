@@ -1,7 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { MEDIA_FILE_EXTENSIONS } from "../constants/media";
 import type { NetworkBrowseEntry, NetworkBrowseResult } from "../types/network";
-import { createWebdavPlaybackKey, parsePlaybackSource } from "../utils/playbackSource";
+import {
+    createDlnaPlaybackKey,
+    createWebdavPlaybackKey,
+    parsePlaybackSource,
+} from "../utils/playbackSource";
 
 const mediaExtensionSet = new Set(
     MEDIA_FILE_EXTENSIONS.map((item) => item.toLowerCase()),
@@ -30,6 +34,8 @@ const getWebdavParentPath = (path: string): string | null => {
     if (index <= 0) return "/";
     return normalized.slice(0, index);
 };
+
+const normalizeDlnaObjectId = (path: string): string => path.trim() || "0";
 
 const resolveAdjacentPathInLocalDirectory = async (
     currentPath: string,
@@ -89,6 +95,52 @@ const resolveAdjacentPathInWebdavDirectory = async (
     return createWebdavPlaybackKey(connectionId, nextEntry.path);
 };
 
+const resolveAdjacentPathInDlnaDirectory = async (
+    connectionId: string,
+    resourceUrl: string,
+    parentPath: string | undefined,
+    direction: 1 | -1,
+): Promise<string | null> => {
+    if (!parentPath) return null;
+    const normalizedParentPath = normalizeDlnaObjectId(parentPath);
+    const result = await invoke<NetworkBrowseResult>("browse_network_connection", {
+        payload: {
+            connectionId,
+            mode: "browse",
+            protocol: "http-dlna",
+            path: normalizedParentPath,
+        },
+    }).catch(() => null);
+    if (!result) return null;
+    const mediaFiles = result.entries.filter(
+        (entry: NetworkBrowseEntry) => entry.entryType === "file",
+    );
+    const currentIndex = mediaFiles.findIndex(
+        (entry) => entry.path === resourceUrl,
+    );
+    const nextIndex = currentIndex + direction;
+    if (
+        currentIndex < 0 ||
+        nextIndex < 0 ||
+        nextIndex >= mediaFiles.length
+    ) {
+        return null;
+    }
+    const nextEntry = mediaFiles[nextIndex];
+    return createDlnaPlaybackKey(
+        connectionId,
+        nextEntry.path,
+        normalizedParentPath,
+    );
+};
+
+const resolveAdjacentPathInSmbDirectory = async (
+    _currentUrl: string,
+    _direction: 1 | -1,
+): Promise<string | null> => {
+    return null;
+};
+
 export const resolveAdjacentPathInSameDirectory = async (
     currentPath: string,
     direction: 1 | -1,
@@ -98,7 +150,15 @@ export const resolveAdjacentPathInSameDirectory = async (
         return resolveAdjacentPathInLocalDirectory(source.path, direction);
     }
     if (source.type === "dlna") {
-        return null;
+        return resolveAdjacentPathInDlnaDirectory(
+            source.connectionId,
+            source.resourceUrl,
+            source.parentPath,
+            direction,
+        );
+    }
+    if (source.type === "smb") {
+        return resolveAdjacentPathInSmbDirectory(source.url, direction);
     }
     return resolveAdjacentPathInWebdavDirectory(
         source.connectionId,

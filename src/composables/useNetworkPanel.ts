@@ -170,8 +170,13 @@ export const useNetworkPanel = () => {
         connectionId: selectedConnectionId.value,
         filePath: entry.path,
         playbackKey:
-            selectedConnection.value?.protocol === "http-dlna"
-                ? createDlnaPlaybackKey(selectedConnectionId.value, entry.path)
+            selectedConnection.value?.protocol === "http-dlna" ||
+            selectedConnection.value?.protocol === "dlna"
+                ? createDlnaPlaybackKey(
+                    selectedConnectionId.value,
+                    entry.path,
+                    browser.networkPath.value,
+                )
                 : createWebdavPlaybackKey(selectedConnectionId.value, entry.path),
         displayName: entry.name,
     });
