@@ -190,6 +190,7 @@ fn to_connection_path(root_segments: &[String], url: &Url) -> Option<String> {
 }
 
 pub async fn list_directory(
+    app: &tauri::AppHandle,
     connection: &NetworkConnectionRecord,
     path: &str,
 ) -> Result<WebdavBrowseResult, String> {
@@ -198,9 +199,11 @@ pub async fn list_directory(
     let normalized_path = normalize_path(path);
     let target_url = build_target_url(&base_url, &root_segments, &normalized_path)?;
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .build()
+    let client = crate::network::proxy::configure_client_builder(
+        app,
+        reqwest::Client::builder().timeout(Duration::from_secs(15)),
+    )?
+    .build()
         .map_err(|e| e.to_string())?;
     let propfind = Method::from_bytes(b"PROPFIND").map_err(|e| e.to_string())?;
     let request = client

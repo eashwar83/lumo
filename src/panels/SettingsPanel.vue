@@ -515,6 +515,40 @@ onBeforeUnmount(() => {
                                     </p>
                                 </div>
                             </template>
+                            <template v-else-if="item.type === 'text'">
+                                <div class="panel__path-field">
+                                    <input
+                                        v-model="item.value"
+                                        class="panel__input panel__input--path"
+                                        :class="{ 'panel__input--invalid': item.validationMessage }"
+                                        type="text"
+                                        :placeholder="item.placeholder"
+                                        :aria-invalid="Boolean(item.validationMessage)"
+                                    />
+                                    <p
+                                        v-if="item.validationMessage"
+                                        class="panel__validation"
+                                        role="status"
+                                    >
+                                        <svg
+                                            class="panel__validation-icon"
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            stroke-width="2"
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            aria-hidden="true"
+                                        >
+                                            <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />
+                                            <path d="M12 9v4" />
+                                            <path d="M12 17h.01" />
+                                        </svg>
+                                        <span>{{ item.validationMessage }}</span>
+                                    </p>
+                                </div>
+                            </template>
                             <template v-else-if="item.type === 'slider'">
                                 <div class="panel__slider">
                                     <input

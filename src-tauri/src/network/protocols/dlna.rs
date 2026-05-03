@@ -40,7 +40,10 @@ struct ContentDirectoryService {
     control_url: Url,
 }
 
-pub async fn discover_devices(timeout_secs: u64) -> Result<Vec<DlnaDevice>, String> {
+pub async fn discover_devices(
+    app: &tauri::AppHandle,
+    timeout_secs: u64,
+) -> Result<Vec<DlnaDevice>, String> {
     log::info!(
         "SSDP scan started: st={}, timeout={}s",
         SSDP_ST_MEDIA_SERVER,
@@ -140,9 +143,11 @@ pub async fn discover_devices(timeout_secs: u64) -> Result<Vec<DlnaDevice>, Stri
         });
     }
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(2))
-        .build()
+    let client = crate::network::proxy::configure_client_builder(
+        app,
+        reqwest::Client::builder().timeout(Duration::from_secs(2)),
+    )?
+    .build()
         .map_err(|e| format!("Failed to create DLNA discovery HTTP client: {}", e))?;
 
     log::info!(
@@ -169,14 +174,15 @@ pub async fn discover_devices(timeout_secs: u64) -> Result<Vec<DlnaDevice>, Stri
 }
 
 pub async fn browse_directory(
+    app: &tauri::AppHandle,
     connection: &NetworkConnectionRecord,
     object_id: &str,
 ) -> Result<DlnaBrowseResult, String> {
     let base_url = Url::parse(connection.base_url.trim())
         .map_err(|e| format!("Invalid DLNA device URL: {}", e))?;
 
-    let service = fetch_content_directory_service(&base_url).await?;
-    let result_xml = soap_browse(&service, object_id).await?;
+    let service = fetch_content_directory_service(app, &base_url).await?;
+    let result_xml = soap_browse(app, &service, object_id).await?;
 
     parse_browse_result(object_id, &result_xml)
 }
@@ -197,11 +203,14 @@ fn parse_ssdp_headers(response: &str) -> HashMap<String, String> {
 }
 
 async fn fetch_content_directory_service(
+    app: &tauri::AppHandle,
     base_url: &Url,
 ) -> Result<ContentDirectoryService, String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
+    let client = crate::network::proxy::configure_client_builder(
+        app,
+        reqwest::Client::builder().timeout(Duration::from_secs(10)),
+    )?
+    .build()
         .map_err(|e| e.to_string())?;
 
     let body = client
@@ -273,7 +282,11 @@ fn child_text(node: roxmltree::Node<'_, '_>, child_name: &str) -> Option<String>
         .filter(|txt| !txt.is_empty())
 }
 
-async fn soap_browse(service: &ContentDirectoryService, object_id: &str) -> Result<String, String> {
+async fn soap_browse(
+    app: &tauri::AppHandle,
+    service: &ContentDirectoryService,
+    object_id: &str,
+) -> Result<String, String> {
     let object_id = if object_id.trim().is_empty() {
         "0"
     } else {
@@ -298,9 +311,11 @@ async fn soap_browse(service: &ContentDirectoryService, object_id: &str) -> Resu
         object_id = xml_escape(object_id),
     );
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .build()
+    let client = crate::network::proxy::configure_client_builder(
+        app,
+        reqwest::Client::builder().timeout(Duration::from_secs(15)),
+    )?
+    .build()
         .map_err(|e| e.to_string())?;
 
     let response_text = client

@@ -246,10 +246,14 @@ fn request_soia_auth_from_server(app_handle: &tauri::AppHandle) -> Option<SoiaAu
     let separator = if base_url.contains('?') { '&' } else { '?' };
     let url = format!("{base_url}{separator}{version_query}&os={os}");
 
-    let client = reqwest::blocking::Client::builder()
-        .connect_timeout(Duration::from_secs(HOST_AUTH_CONNECT_TIMEOUT_SECS))
-        .timeout(Duration::from_secs(HOST_AUTH_TIMEOUT_SECS))
-        .build()
+    let client = crate::network::proxy::configure_blocking_client_builder(
+        app_handle,
+        reqwest::blocking::Client::builder()
+            .connect_timeout(Duration::from_secs(HOST_AUTH_CONNECT_TIMEOUT_SECS))
+            .timeout(Duration::from_secs(HOST_AUTH_TIMEOUT_SECS)),
+    )
+    .ok()?
+    .build()
         .ok()?;
 
     let response = client.get(&url).send().ok()?;

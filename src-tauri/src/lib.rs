@@ -316,6 +316,7 @@ pub fn run() {
             commands::persistence::open_log_directory,
             commands::persistence::apply_logging_settings,
             commands::persistence::apply_ytdl_settings,
+            commands::persistence::apply_proxy_settings,
             commands::persistence::apply_rendering_settings,
             commands::persistence::resolve_shader_candidates,
             commands::persistence::resolve_existing_shader_files,

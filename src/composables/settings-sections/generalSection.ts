@@ -7,6 +7,8 @@ import {
     IMAGE_DISPLAY_DURATION_SETTING_LABEL,
     LOG_LEVEL_SETTING_LABEL,
     LOG_PATH_SETTING_LABEL,
+    PROXY_ADDRESS_SETTING_LABEL,
+    PROXY_MODE_SETTING_LABEL,
     WALLPAPER_MODE_SETTING_LABEL,
     YTDL_PATH_SETTING_LABEL,
     type SettingGroup,
@@ -17,12 +19,18 @@ import { applyWindowDecorationsFromSettingGroups } from "../../constants/windowD
 import {
     applyImageDisplayDuration,
     applyLoggingSettings,
+    applyProxySettings,
     applyYtdlSettings,
     openLogDirectory,
 } from "../useUiStateStore";
 
 export type StoredSettingItem = { label: string; value: string };
 export type StoredSettingGroup = { title: string; items: StoredSettingItem[] };
+
+const DEV_ONLY_SETTING_LABELS = new Set([
+    PROXY_MODE_SETTING_LABEL,
+    PROXY_ADDRESS_SETTING_LABEL,
+]);
 
 const normalizeLogLevel = (value: string): string | null => {
     const trimmed = value.trim();
@@ -44,15 +52,20 @@ const normalizeLogLevel = (value: string): string | null => {
 const cloneSettingGroups = () =>
     defaultSettingGroups.map((group) => ({
         title: group.title,
-        items: group.items.map((item) => {
-            if (item.type === "select") {
-                return {
-                    ...item,
-                    options: [...item.options],
-                };
-            }
-            return { ...item };
-        }),
+        items: group.items
+            .filter(
+                (item) =>
+                    import.meta.env.DEV || !DEV_ONLY_SETTING_LABELS.has(item.label),
+            )
+            .map((item) => {
+                if (item.type === "select") {
+                    return {
+                        ...item,
+                        options: [...item.options],
+                    };
+                }
+                return { ...item };
+            }),
     }));
 
 const mergeSettingGroups = (stored?: StoredSettingGroup[]): SettingGroup[] => {
@@ -134,6 +147,42 @@ const findYtdlPathItem = (groups: SettingGroup[]) => {
     return item?.type === "path" ? item : undefined;
 };
 
+const findProxyModeItem = (groups: SettingGroup[]) => {
+    const item = groups
+        .flatMap((group) => group.items)
+        .find(
+            (candidate) =>
+                candidate.type === "select" &&
+                candidate.label === PROXY_MODE_SETTING_LABEL,
+        );
+    return item?.type === "select" ? item : undefined;
+};
+
+const findProxyAddressItem = (groups: SettingGroup[]) => {
+    const item = groups
+        .flatMap((group) => group.items)
+        .find(
+            (candidate) =>
+                candidate.type === "text" &&
+                candidate.label === PROXY_ADDRESS_SETTING_LABEL,
+        );
+    return item?.type === "text" ? item : undefined;
+};
+
+const markProxyAddressInvalid = (
+    item: ReturnType<typeof findProxyAddressItem>,
+) => {
+    if (!item) return;
+    item.validationMessage = "Enter a valid proxy server, for example 127.0.0.1:7890.";
+};
+
+const clearProxyAddressValidation = (
+    item: ReturnType<typeof findProxyAddressItem>,
+) => {
+    if (!item) return;
+    item.validationMessage = undefined;
+};
+
 const markYtdlPathUnavailable = (item: ReturnType<typeof findYtdlPathItem>) => {
     if (!item) return;
     item.validationMessage =
@@ -175,12 +224,15 @@ export const useGeneralSettingsSection = (isWindowsPlatform: boolean) => {
     const settingGroups = ref<SettingGroup[]>(cloneSettingGroups());
     const LOGGING_APPLY_DELAY_MS = 250;
     const YTDL_APPLY_DELAY_MS = 250;
+    const PROXY_APPLY_DELAY_MS = 250;
     const IMAGE_DURATION_APPLY_DELAY_MS = 250;
     let loggingApplyTimer: number | null = null;
     let ytdlApplyTimer: number | null = null;
+    let proxyApplyTimer: number | null = null;
     let imageDurationApplyTimer: number | null = null;
     let lastAppliedLoggingRequestKey: string | null = null;
     let lastAppliedYtdlRequestKey: string | null = null;
+    let lastAppliedProxyRequestKey: string | null = null;
     let lastAppliedImageDurationRequestKey: string | null = null;
     let lastWallpaperModeValue: string | null = null;
     let isWallpaperRestartPromptOpen = false;
@@ -287,6 +339,64 @@ export const useGeneralSettingsSection = (isWindowsPlatform: boolean) => {
         }, YTDL_APPLY_DELAY_MS);
     };
 
+    const buildProxyRequestKey = (
+        proxyModeItem: ReturnType<typeof findProxyModeItem>,
+        proxyAddressItem: ReturnType<typeof findProxyAddressItem>,
+    ): string =>
+        JSON.stringify({
+            proxyMode: proxyModeItem?.value.trim() ?? "",
+            proxyAddress: proxyAddressItem?.value.trim() ?? "",
+        });
+
+    const applyProxyOptions = async (groups: SettingGroup[]) => {
+        const proxyModeItem = findProxyModeItem(groups);
+        const proxyAddressItem = findProxyAddressItem(groups);
+        const requestKey = buildProxyRequestKey(proxyModeItem, proxyAddressItem);
+        if (requestKey === lastAppliedProxyRequestKey) {
+            return;
+        }
+
+        const requestedMode = proxyModeItem?.value.trim() || undefined;
+        const requestedAddress = proxyAddressItem?.value.trim() || undefined;
+        const applied = await applyProxySettings(requestedMode, requestedAddress);
+        if (!applied) {
+            if ((requestedMode ?? "Off") !== "Off") {
+                markProxyAddressInvalid(proxyAddressItem);
+                lastAppliedProxyRequestKey = buildProxyRequestKey(
+                    proxyModeItem,
+                    proxyAddressItem,
+                );
+            }
+            return;
+        }
+
+        if (proxyModeItem && proxyModeItem.value !== applied.proxyMode) {
+            proxyModeItem.value = applied.proxyMode;
+        }
+        if (proxyAddressItem) {
+            const appliedAddress = applied.proxyAddress ?? "";
+            if (proxyAddressItem.value !== appliedAddress) {
+                proxyAddressItem.value = appliedAddress;
+            }
+            clearProxyAddressValidation(proxyAddressItem);
+        }
+
+        lastAppliedProxyRequestKey = buildProxyRequestKey(
+            findProxyModeItem(groups),
+            findProxyAddressItem(groups),
+        );
+    };
+
+    const scheduleApplyProxyOptions = () => {
+        if (proxyApplyTimer) {
+            window.clearTimeout(proxyApplyTimer);
+        }
+        proxyApplyTimer = window.setTimeout(() => {
+            void applyProxyOptions(settingGroups.value);
+            proxyApplyTimer = null;
+        }, PROXY_APPLY_DELAY_MS);
+    };
+
     const buildImageDurationRequestKey = (
         durationItem: ReturnType<typeof findImageDisplayDurationItem>,
     ): string =>
@@ -333,6 +443,7 @@ export const useGeneralSettingsSection = (isWindowsPlatform: boolean) => {
         await Promise.all([
             applyLoggingOptions(groups),
             applyYtdlOptions(groups),
+            applyProxyOptions(groups),
             applyImageDurationOptions(groups),
         ]);
     };
@@ -401,6 +512,7 @@ export const useGeneralSettingsSection = (isWindowsPlatform: boolean) => {
         applyVisualSettings(settingGroups.value);
         scheduleApplyLoggingOptions();
         scheduleApplyYtdlOptions();
+        scheduleApplyProxyOptions();
         scheduleApplyImageDurationOptions();
         void maybePromptWallpaperModeRestart();
     };
@@ -427,6 +539,10 @@ export const useGeneralSettingsSection = (isWindowsPlatform: boolean) => {
         if (ytdlApplyTimer) {
             window.clearTimeout(ytdlApplyTimer);
             ytdlApplyTimer = null;
+        }
+        if (proxyApplyTimer) {
+            window.clearTimeout(proxyApplyTimer);
+            proxyApplyTimer = null;
         }
         if (imageDurationApplyTimer) {
             window.clearTimeout(imageDurationApplyTimer);

@@ -21,6 +21,15 @@ use tauri::AppHandle;
 const WALLPAPER_MODE_SETTING_LABEL: &str = "WALLPAPER_MODE";
 #[cfg(target_os = "windows")]
 const WALLPAPER_MODE_ENABLED_VALUE: &str = "Enable";
+// const INITIAL_COLOR_OPTIONS: &[(&str, &str)] = &[
+//     ("target-prim", "bt.709"),
+//     ("target-trc", "srgb"),
+//     ("target-colorspace-hint", "yes"),
+//     ("target-colorspace-hint-mode", "target"),
+//     ("tone-mapping", "bt.2390"),
+//     ("gamut-mapping-mode", "perceptual"),
+//     ("hdr-compute-peak", "yes"),
+// ];
 
 pub struct MpvHandle {
     ctx: AtomicPtr<c_void>,
@@ -52,6 +61,21 @@ fn release_mpv_context(ctx: &AtomicPtr<c_void>, terminate: bool) {
         }
     }
 }
+
+// fn set_initial_color_options(ctx: *mut c_void) {
+//     for (name, value) in INITIAL_COLOR_OPTIONS {
+//         let Ok(c_name) = CString::new(*name) else {
+//             continue;
+//         };
+//         let Ok(c_value) = CString::new(*value) else {
+//             continue;
+//         };
+//         let result = unsafe { mpv_set_option_string(ctx, c_name.as_ptr(), c_value.as_ptr()) };
+//         if result < 0 {
+//             warn!("Failed to set initial mpv color option {name}={value}: {result}");
+//         }
+//     }
+// }
 
 fn release_soia_utils(utils_ptr: *mut SoiaUtils) {
     if utils_ptr.is_null() {
@@ -116,6 +140,8 @@ impl MpvHandle {
                     .to_string(),
             );
         }
+
+        // set_initial_color_options(ctx);
 
         let init_result = unsafe { mpv_initialize(ctx) };
         if init_result < 0 {

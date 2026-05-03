@@ -596,6 +596,23 @@ pub(crate) fn apply_ytdl_settings(
 }
 
 #[tauri::command]
+pub(crate) fn apply_proxy_settings(
+    state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
+    proxy_mode: Option<String>,
+    proxy_address: Option<String>,
+) -> Result<crate::network::proxy::ProxySettingsState, String> {
+    let resolved = crate::network::proxy::resolve_settings(&app, proxy_mode, proxy_address)?;
+    #[cfg(debug_assertions)]
+    crate::network::proxy::store_runtime_settings(resolved.clone());
+    with_mpv(&state, |mpv_guard| {
+        crate::network::proxy::apply_to_mpv(mpv_guard, &resolved)?;
+        Ok(())
+    })?;
+    Ok(resolved)
+}
+
+#[tauri::command]
 pub(crate) fn apply_rendering_settings(
     state: tauri::State<'_, AppState>,
     selected_shader_files: Vec<String>,

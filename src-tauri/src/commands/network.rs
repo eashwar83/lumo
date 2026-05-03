@@ -15,9 +15,11 @@ pub(crate) fn list_network_connections(
 
 #[tauri::command]
 pub(crate) async fn discover_network_connections(
+    app: tauri::AppHandle,
     payload: Option<DiscoverNetworkPayload>,
 ) -> Result<Vec<DiscoveredNetworkConnection>, String> {
     crate::network::service::discover_connections(
+        &app,
         payload.as_ref().and_then(|item| item.protocol.as_deref()),
         payload.as_ref().and_then(|item| item.timeout_secs),
     )
@@ -62,7 +64,7 @@ pub(crate) async fn browse_network_connection(
         payload.path,
         &payload.mode,
     );
-    crate::network::service::browse_connection(&connection, &path, protocol).await
+    crate::network::service::browse_connection(&app, &connection, &path, protocol).await
 }
 
 #[tauri::command]

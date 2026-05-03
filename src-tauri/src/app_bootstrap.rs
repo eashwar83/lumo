@@ -236,6 +236,19 @@ fn configure_mpv_startup(app: &tauri::App) -> Result<(), Box<dyn Error>> {
     let log_level = resolve_log_level(app);
     mpv_guard.set_option_string("msg-level", to_mpv_msg_level(&log_level));
 
+    #[cfg(debug_assertions)]
+    {
+        match crate::network::proxy::resolve_settings(&app.handle().clone(), None, None) {
+            Ok(proxy_settings) => {
+                crate::network::proxy::store_runtime_settings(proxy_settings.clone());
+                if let Err(error) = crate::network::proxy::apply_to_mpv(&mpv_guard, &proxy_settings) {
+                    warn!("Failed to apply startup proxy settings: {error}");
+                }
+            }
+            Err(error) => warn!("Ignoring invalid startup proxy settings: {error}"),
+        }
+    }
+
     let ytdl_path = resolve_ytdl_path(app);
     if let Some(ytdl_path) = ytdl_path {
         mpv_guard.set_option_string("ytdl", "yes");

@@ -8,6 +8,11 @@ type LoggingSettingsState = {
 type YtdlSettingsState = {
     ytdlPath: string | null;
 };
+type ProxySettingsState = {
+    proxyMode: string;
+    proxyAddress: string | null;
+    proxyUrl: string | null;
+};
 type RenderingSettingsState = {
     selectedShaderFiles: string[];
     activeShaderFiles: string[];
@@ -87,6 +92,20 @@ export const applyYtdlSettings = async (
     try {
         return await invoke<YtdlSettingsState>("apply_ytdl_settings", {
             ytdlPath,
+        });
+    } catch {
+        return null;
+    }
+};
+
+export const applyProxySettings = async (
+    proxyMode?: string,
+    proxyAddress?: string,
+): Promise<ProxySettingsState | null> => {
+    try {
+        return await invoke<ProxySettingsState>("apply_proxy_settings", {
+            proxyMode,
+            proxyAddress,
         });
     } catch {
         return null;

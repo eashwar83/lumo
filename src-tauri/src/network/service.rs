@@ -82,6 +82,7 @@ pub(crate) fn resolve_browse_path(
 }
 
 pub(crate) async fn browse_connection(
+    app: &tauri::AppHandle,
     connection: &NetworkConnectionRecord,
     path: &str,
     protocol: BrowseProtocol,
@@ -90,7 +91,7 @@ pub(crate) async fn browse_connection(
         BrowseProtocol::Webdav => {
             ensure_protocol(connection, &["webdav"])?;
             let result =
-                crate::network::protocols::webdav::list_directory(connection, path).await?;
+                crate::network::protocols::webdav::list_directory(app, connection, path).await?;
             Ok(NetworkBrowseResult {
                 path: result.path,
                 entries: result
@@ -113,7 +114,7 @@ pub(crate) async fn browse_connection(
         BrowseProtocol::Dlna => {
             ensure_protocol(connection, &["http-dlna", "dlna"])?;
             let result =
-                crate::network::protocols::dlna::browse_directory(connection, path).await?;
+                crate::network::protocols::dlna::browse_directory(app, connection, path).await?;
             Ok(NetworkBrowseResult {
                 path: result.path,
                 entries: result
@@ -137,6 +138,7 @@ pub(crate) async fn browse_connection(
 }
 
 pub(crate) async fn discover_connections(
+    app: &tauri::AppHandle,
     protocol: Option<&str>,
     timeout_secs: Option<u64>,
 ) -> Result<Vec<DiscoveredNetworkConnection>, String> {
@@ -148,7 +150,7 @@ pub(crate) async fn discover_connections(
 
     let mut result: Vec<DiscoveredNetworkConnection> = Vec::new();
     if protocol == "all" || protocol == "http-dlna" || protocol == "dlna" {
-        let devices = crate::network::protocols::dlna::discover_devices(timeout_secs).await?;
+        let devices = crate::network::protocols::dlna::discover_devices(app, timeout_secs).await?;
         result.extend(devices.into_iter().map(|item| DiscoveredNetworkConnection {
             protocol: "http-dlna".to_string(),
             usn: Some(item.usn),

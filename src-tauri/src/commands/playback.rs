@@ -337,7 +337,10 @@ fn parse_m3u_playlist(content: &str, base: &PlaylistBase<'_>) -> Vec<ParsedPlayl
     entries
 }
 
-fn parse_playlist_source_inner(source: &str) -> Result<ParsedPlaylistFile, String> {
+fn parse_playlist_source_inner(
+    app: &tauri::AppHandle,
+    source: &str,
+) -> Result<ParsedPlaylistFile, String> {
     let trimmed = source.trim();
     if trimmed.is_empty() {
         return Err("Playlist source is empty".to_string());
@@ -346,9 +349,11 @@ fn parse_playlist_source_inner(source: &str) -> Result<ParsedPlaylistFile, Strin
     if let Ok(url) = url::Url::parse(trimmed) {
         if matches!(url.scheme(), "http" | "https") {
             log::info!("playlist parse: start url={}", url);
-            let client = reqwest::blocking::Client::builder()
-                .timeout(Duration::from_secs(20))
-                .build()
+            let client = crate::network::proxy::configure_blocking_client_builder(
+                app,
+                reqwest::blocking::Client::builder().timeout(Duration::from_secs(20)),
+            )?
+            .build()
                 .map_err(|e| e.to_string())?;
             let response = client.get(url.clone()).send().map_err(|e| e.to_string())?;
             let status = response.status();
@@ -398,14 +403,16 @@ fn parse_playlist_source_inner(source: &str) -> Result<ParsedPlaylistFile, Strin
 
 #[tauri::command]
 pub(crate) fn parse_playlist_file(
+    app: tauri::AppHandle,
     payload: ParsePlaylistFilePayload,
 ) -> Result<ParsedPlaylistFile, String> {
-    parse_playlist_source_inner(&payload.path)
+    parse_playlist_source_inner(&app, &payload.path)
 }
 
 #[tauri::command]
 pub(crate) fn parse_playlist_source(
+    app: tauri::AppHandle,
     payload: ParsePlaylistSourcePayload,
 ) -> Result<ParsedPlaylistFile, String> {
-    parse_playlist_source_inner(&payload.source)
+    parse_playlist_source_inner(&app, &payload.source)
 }

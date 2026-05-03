@@ -43,16 +43,28 @@ export type PathSettingItem = {
     validationMessage?: string;
 };
 
+export type TextSettingItem = {
+    label: string;
+    displayLabel?: string;
+    value: string;
+    type: "text";
+    placeholder?: string;
+    validationMessage?: string;
+};
+
 export type SettingItem =
     | SelectSettingItem
     | ToggleSettingItem
     | SliderSettingItem
-    | PathSettingItem;
+    | PathSettingItem
+    | TextSettingItem;
 export type SettingGroup = { title: string; items: SettingItem[] };
 
 export const YTDL_PATH_SETTING_LABEL = "SOIA_YTDL_PATH";
 export const LOG_PATH_SETTING_LABEL = "SOIA_LOG_PATH";
 export const LOG_LEVEL_SETTING_LABEL = "SOIA_LOG_LEVEL";
+export const PROXY_MODE_SETTING_LABEL = "SOIA_PROXY_MODE";
+export const PROXY_ADDRESS_SETTING_LABEL = "SOIA_PROXY_ADDRESS";
 export const SKIP_INTRO_SECONDS_SETTING_LABEL = "SKIP_INTRO_SECONDS";
 export const SEEK_STEP_SETTING_LABEL = "Skip Step";
 export const ENABLE_COMPACT_MODE_SETTING_LABEL = "ENABLE_COMPACT_MODE";
@@ -266,6 +278,20 @@ export const defaultSettingGroups: SettingGroup[] = [
                 type: "path",
                 placeholder: "Select the yt-dlp executable...",
                 browseTitle: "Select yt-dlp executable",
+            },
+            {
+                label: PROXY_MODE_SETTING_LABEL,
+                displayLabel: "Proxy Type",
+                value: "Off",
+                type: "select",
+                options: ["Off", "HTTP"],
+            },
+            {
+                label: PROXY_ADDRESS_SETTING_LABEL,
+                displayLabel: "Proxy Server",
+                value: "",
+                type: "text",
+                placeholder: "127.0.0.1:7890",
             },
             {
                 label: LOG_LEVEL_SETTING_LABEL,
