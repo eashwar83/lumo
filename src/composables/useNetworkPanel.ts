@@ -1,5 +1,9 @@
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type { NetworkFileRow, NetworkPlayRequest } from "../types/network";
+import {
+    NETWORK_START_AT_ROOT_SETTING_LABEL,
+    SETTINGS_UPDATED_EVENT,
+} from "../mock/settings";
 import {
     createDlnaPlaybackKey,
     createWebdavPlaybackKey,
@@ -16,7 +20,31 @@ type StoredNetworkState = {
     path?: string;
 };
 
+type StoredSettingGroups = Array<{
+    title: string;
+    items: Array<{ label: string; value: string }>;
+}>;
+
+type StoredSettingsState = {
+    settings?: {
+        groups?: StoredSettingGroups;
+    };
+};
+
+type SettingsUpdatedDetail = {
+    groups?: StoredSettingGroups;
+};
+
 type NetworkPanelViewMode = "connections" | "browser";
+
+const isSettingEnabled = (
+    groups: StoredSettingGroups | undefined,
+    label: string,
+): boolean =>
+    groups
+        ?.flatMap((group) => group.items)
+        .find((item) => item.label === label)
+        ?.value === "On";
 
 export const useNetworkPanel = () => {
     const {
@@ -32,6 +60,7 @@ export const useNetworkPanel = () => {
     const browser = useNetworkBrowser(selectedConnectionId, selectedConnection);
     const viewMode = ref<NetworkPanelViewMode>("connections");
     const hasConnected = ref(false);
+    const shouldStartAtRoot = ref(false);
     const activeConnectionLabel = computed(
         () => selectedConnection.value?.label || "Network",
     );
@@ -62,18 +91,39 @@ export const useNetworkPanel = () => {
         });
     };
 
+    const getRootPathForSelectedConnection = () => {
+        const protocol = selectedConnection.value?.protocol?.toLowerCase() ?? "webdav";
+        return protocol === "http-dlna" || protocol === "dlna" ? "0" : "/";
+    };
+
+    const applySettingsGroups = (groups?: StoredSettingGroups) => {
+        shouldStartAtRoot.value = isSettingEnabled(
+            groups,
+            NETWORK_START_AT_ROOT_SETTING_LABEL,
+        );
+    };
+
     const loadStoredUiState = async () => {
-        const stored = await loadUiStateStore<{ network?: StoredNetworkState }>();
+        const stored = await loadUiStateStore<
+            { network?: StoredNetworkState } & StoredSettingsState
+        >();
+        applySettingsGroups(stored?.settings?.groups);
         const network = stored?.network;
         if (network?.selectedConnection) {
             selectedConnectionId.value = network.selectedConnection;
         }
         if (network?.path) {
-            browser.networkPath.value =
-                selectedConnection.value?.protocol === "http-dlna"
-                    ? "0"
-                    : browser.normalizePath(network.path);
+            browser.networkPath.value = shouldStartAtRoot.value
+                ? getRootPathForSelectedConnection()
+                : selectedConnection.value?.protocol === "http-dlna"
+                  ? "0"
+                  : browser.normalizePath(network.path);
         }
+    };
+
+    const onSettingsUpdated = (event: Event) => {
+        const customEvent = event as CustomEvent<SettingsUpdatedDetail>;
+        applySettingsGroups(customEvent.detail?.groups);
     };
 
     const onConnect = async () => {
@@ -96,12 +146,35 @@ export const useNetworkPanel = () => {
         }
         const connection = selectedConnection.value;
         if (!connection) return;
-        browser.networkPath.value =
-            connection.protocol === "http-dlna"
-                ? "0"
-                : browser.normalizePath(connection.defaultPath || "/");
+        browser.networkPath.value = shouldStartAtRoot.value
+            ? getRootPathForSelectedConnection()
+            : connection.protocol === "http-dlna"
+              ? "0"
+              : browser.normalizePath(connection.defaultPath || "/");
         viewMode.value = "browser";
         await onConnect();
+    };
+
+    const resetBrowserToRootWhenVisible = async () => {
+        if (!shouldStartAtRoot.value) return;
+        if (viewMode.value !== "browser") return;
+        const rootPath = getRootPathForSelectedConnection();
+        if (!hasConnected.value) {
+            browser.networkPath.value = rootPath;
+            return;
+        }
+        if (browser.networkPath.value === rootPath && browser.currentFiles.value.length) {
+            return;
+        }
+        try {
+            await browser.openDirectory(rootPath);
+            hasConnected.value = true;
+        } catch (error) {
+            browser.errorMessage.value = toErrorMessage(
+                error,
+                "Failed to open network root",
+            );
+        }
     };
 
     const onBackToConnections = () => {
@@ -212,6 +285,9 @@ export const useNetworkPanel = () => {
     );
 
     onMounted(async () => {
+        if (typeof window !== "undefined") {
+            window.addEventListener(SETTINGS_UPDATED_EVENT, onSettingsUpdated);
+        }
         await loadConnections();
         await loadStoredUiState();
         try {
@@ -222,6 +298,11 @@ export const useNetworkPanel = () => {
         if (!selectedConnection.value && connections.value.length > 0) {
             selectedConnectionId.value = connections.value[0].id;
         }
+    });
+
+    onUnmounted(() => {
+        if (typeof window === "undefined") return;
+        window.removeEventListener(SETTINGS_UPDATED_EVENT, onSettingsUpdated);
     });
 
     return {
@@ -247,6 +328,7 @@ export const useNetworkPanel = () => {
         onDeleteConnection,
         onDiscoverConnections,
         onOpenBrowser,
+        resetBrowserToRootWhenVisible,
         onBackToConnections,
         buildPlayRequest,
         getAncestorPaths: browser.getAncestorPaths,

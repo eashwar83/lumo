@@ -68,6 +68,7 @@ const showPanels = () => !props.isFileLoaded;
                 v-show="showPanels() && props.mode === 'network'"
                 :history="props.history"
                 :current-url="props.currentUrl"
+                :is-visible="showPanels() && props.mode === 'network'"
                 @play-network="emit('play-network', $event)"
             />
 

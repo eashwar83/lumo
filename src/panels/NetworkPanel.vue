@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref } from "vue";
+import { computed, nextTick, reactive, ref, watch } from "vue";
 import type { HistoryEntry } from "../types/history";
 import type {
     NetworkConnection,
@@ -19,6 +19,7 @@ import NetworkConnectionModal from "../components/network/NetworkConnectionModal
 const props = defineProps<{
     history: HistoryEntry[];
     currentUrl: string;
+    isVisible: boolean;
 }>();
 
 const {
@@ -41,6 +42,7 @@ const {
     onDeleteConnection,
     onDiscoverConnections,
     onOpenBrowser,
+    resetBrowserToRootWhenVisible,
     onBackToConnections,
     onBrowsePath,
     buildPlayRequest,
@@ -63,6 +65,14 @@ const isSwitchingView = ref(false);
 const isDiscovering = ref(false);
 const editingConnectionId = ref<string | null>(null);
 const canDiscoverConnections = true;
+
+watch(
+    () => props.isVisible,
+    (isVisible, wasVisible) => {
+        if (!isVisible || wasVisible) return;
+        void resetBrowserToRootWhenVisible();
+    },
+);
 
 type SupportedProtocol = "webdav" | "smb" | "ftp" | "http-dlna";
 
