@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.9] - 2026-05-04
+
+### Features
+
+- Improved macOS SDR Rendering: Optimized color accuracy for a more precise visual experience on macOS.
+- DLNA Auto-Play: Added support for automatically playing the next item in the queue when streaming via DLNA.
+- M3U (IPTV) Parsing: You can now import M3U files to automatically parse channels and generate organized playlists.
+
+### Fixes
+
+- Fixed incorrect play/pause button state.
+- Fixed inability to manually play the next item.
+
 ## [0.1.8] - 2026-04-30
 
 ### Features

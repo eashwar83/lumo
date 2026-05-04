@@ -19,14 +19,15 @@ You can also go to System Settings > Privacy & Security and click "Open Anyway" 
 
 The app is open-source and its code is publicly available for anyone to inspect.
 
-## [0.1.8] - 2026-04-30
-
-This release expands playback controls, improves autoplay behavior across local and WebDAV media, and makes window state restoration more consistent.
+## [0.1.9] - 2026-05-04
 
 ### Highlights
 
-- Added a **Disable Subtitles** option to force subtitles off when opening media.
-- Improved **Auto-Play Next** handling for both **local files** and **WebDAV playback**.
-- Added persistence for **manual window state**.
-- Improved the **Network** panel with current playback highlighting and visible folder path context.
-- Added a global toggle with a persistent profile, plus per-file video adjustments (contrast, brightness, gamma, hue)
+- Improved macOS SDR Rendering: Optimized color accuracy for a more precise visual experience on macOS.
+- DLNA Auto-Play: Added support for automatically playing the next item in the queue when streaming via DLNA.
+- M3U (IPTV) Parsing: You can now import M3U files to automatically parse channels and generate organized playlists.
+
+### Fixes
+
+- Fixed incorrect play/pause button state.
+- Fixed inability to manually play the next item.
