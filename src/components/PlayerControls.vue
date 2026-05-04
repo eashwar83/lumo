@@ -369,10 +369,40 @@ onUnmounted(() => {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
+.player-controls-content :deep(.controls-left > .icon-button--player),
+.player-controls-content :deep(.controls-right > .icon-button--player) {
+    position: relative;
+    border-radius: 8px;
+}
+
+.player-controls-content :deep(.controls-left > .icon-button--player::before),
+.player-controls-content :deep(.controls-right > .icon-button--player::before) {
+    content: "";
+    position: absolute;
+    inset: -2px;
+    border-radius: 8px;
+    opacity: 0;
+    background: rgba(255, 255, 255, 0.08);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    transition: opacity 0.2s ease;
+}
+
+.player-controls-content :deep(.controls-left > .icon-button--player:hover:not(:disabled):not(.icon-button--disabled)::before),
+.player-controls-content :deep(.controls-right > .icon-button--player:hover:not(:disabled):not(.icon-button--disabled)::before) {
+    opacity: 1;
+}
+
+.player-controls-content :deep(.controls-left > .icon-button--player > *),
+.player-controls-content :deep(.controls-right > .icon-button--player > *) {
+    position: relative;
+}
+
 .player-controls-content :deep(.track-menu-container .icon-button--player) {
     border-radius: 6px;
 }
 
+.player-controls-content :deep(.controls-left > .icon-button--player:focus-visible),
+.player-controls-content :deep(.controls-right > .icon-button--player:focus-visible),
 .player-controls-content :deep(.track-menu-container .icon-button--player:focus-visible) {
     outline: 2px solid rgba(255, 255, 255, 0.5);
     outline-offset: 2px;
