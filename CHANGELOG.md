@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.2.0] - 2026-05-10
+
+### Features
+
+- Added persistent advanced subtitle appearance controls for font, color, size, and position.
+- Added separate primary and secondary subtitle position controls for dual subtitles.
+- Added SMB/Samba network share discovery, browsing, and playback support.
+
+### Improvements
+
+- Network discovery now streams discovered connections into the Network panel during scans.
+
+### Fixes
+
+- Fixed the Network panel so the active playback item is revealed in the browser.
+- Polished connection modal interactions for more reliable editing.
+
 ## [0.1.9] - 2026-05-04
 
 ### Features
