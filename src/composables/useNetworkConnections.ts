@@ -7,6 +7,8 @@ const shouldUseMockConnections = import.meta.env.DEV;
 const createConnectionId = () => `webdav-${Date.now()}`;
 const createDlnaConnectionId = (usn: string, index: number) =>
     `dlna-${usn.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || index}`;
+const createSmbConnectionId = (usn: string, index: number) =>
+    `smb-${usn.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || index}`;
 
 type DiscoveredNetworkConnection = {
     protocol: string;
@@ -45,6 +47,22 @@ const toConnectionFromDiscovery = (
             username: "",
             password: "",
             defaultPath: "0",
+        };
+    }
+    if (protocol === "smb" || protocol === "samba") {
+        const host = hostFromLocation(connection.location);
+        return {
+            id: createSmbConnectionId(connection.usn || connection.location, index),
+            label:
+                connection.friendlyName?.trim() ||
+                host ||
+                connection.server?.split(".")[0]?.trim() ||
+                `SMB ${index + 1}`,
+            protocol: "smb",
+            baseUrl: connection.location,
+            username: "",
+            password: "",
+            defaultPath: "/",
         };
     }
     return null;

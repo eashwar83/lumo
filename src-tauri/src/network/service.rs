@@ -161,7 +161,15 @@ pub(crate) async fn discover_connections(
         }));
     }
     if protocol == "all" || protocol == "smb" || protocol == "samba" {
-        log::debug!("SMB discovery is not implemented yet");
+        let devices = crate::network::protocols::smb::discover_devices(timeout_secs).await?;
+        result.extend(devices.into_iter().map(|item| DiscoveredNetworkConnection {
+            protocol: "smb".to_string(),
+            usn: Some(item.instance_name),
+            location: item.location,
+            friendly_name: item.friendly_name,
+            server: item.server,
+            st: Some(item.service_type),
+        }));
     }
 
     Ok(result)

@@ -364,6 +364,32 @@ export const usePlaybackFlow = ({
         );
     };
 
+    const playSmb = async (url: string, preferredTitle?: string) => {
+        await triggerPlaybackIntent();
+        hideHistory.value = true;
+        nowPlaying.clearArtwork();
+        tracks.resetTracks();
+        player.state.media.url = url;
+        player.state.media.title = rememberPreferredTitle(url, preferredTitle);
+        player.state.playback.isBuffering = false;
+        player.state.playback.downloadSpeedBps = 0;
+        player.state.playback.hwdecCurrent = "";
+        loadingUrl.value = url;
+        isLoading.value = true;
+        await ensurePlaybackPreferencesLoaded();
+        const preferences = playbackPreferences.value;
+        await player.setPlaybackSpeed(preferences.defaultSpeed);
+        const resumePosition = getStartPosition(
+            url,
+            preferences.skipIntroSeconds,
+        );
+        pendingResume.value = {
+            url,
+            position: resumePosition,
+        };
+        await player.loadFileAtUrl(url, resumePosition, preferences.autoPlay);
+    };
+
     const playPath = async (path: string, preferredTitle?: string) => {
         if (!path) return;
         const source = parsePlaybackSource(path);
@@ -381,7 +407,8 @@ export const usePlaybackFlow = ({
             return;
         }
         if (source.type === "smb") {
-            throw new Error("SMB playback is not implemented yet");
+            await playSmb(source.url, preferredTitle);
+            return;
         }
         await playLocalPath(source.path, preferredTitle);
     };
@@ -566,7 +593,8 @@ export const usePlaybackFlow = ({
             return;
         }
         if (source.type === "smb") {
-            throw new Error("SMB playback is not implemented yet");
+            await playSmb(source.url, preferredTitle);
+            return;
         }
         hideHistory.value = true;
         await playPath(source.path, preferredTitle);
