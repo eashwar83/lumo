@@ -285,6 +285,17 @@ const visibleNetworkEntries = computed(() =>
                     );
                 }
             }
+        } else if (currentSource.type === "smb") {
+            const selectedConnectionId = selectedConnectionConfig.value?.id ?? "";
+            if (
+                (selectedProtocol === "smb" || selectedProtocol === "samba") &&
+                currentSource.connectionId === selectedConnectionId &&
+                currentSource.filePath
+            ) {
+                getAncestorPaths(currentSource.filePath).forEach((path) =>
+                    activeFolderPaths.add(path),
+                );
+            }
         }
 
         return networkEntries.value
