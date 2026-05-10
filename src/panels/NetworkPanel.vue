@@ -84,7 +84,6 @@ type ProtocolOption = {
 const protocolOptions: ProtocolOption[] = [
     { value: "webdav", label: "WebDAV" },
     { value: "smb", label: "SMB" },
-    { value: "ftp", label: "FTP" },
     { value: "http-dlna", label: "HTTP DLNA" },
 ];
 
@@ -219,8 +218,8 @@ const closeCreateModal = () => {
     createError.value = "";
 };
 
-const closeDeleteModal = () => {
-    if (isDeletingConnection.value) return;
+const closeDeleteModal = (force = false) => {
+    if (isDeletingConnection.value && !force) return;
     isDeleteModalOpen.value = false;
     pendingDeleteConnection.value = null;
     deleteError.value = "";
@@ -498,7 +497,7 @@ const onDeleteConnectionConfirm = async () => {
             deleteError.value = errorMessage.value || "Failed to delete connection";
             return;
         }
-        closeDeleteModal();
+        closeDeleteModal(true);
     } finally {
         isDeletingConnection.value = false;
     }
