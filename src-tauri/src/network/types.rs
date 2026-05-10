@@ -17,7 +17,7 @@ pub(crate) struct NetworkBrowseResult {
     pub entries: Vec<NetworkBrowseEntry>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DiscoveredNetworkConnection {
     pub protocol: String,
@@ -33,6 +33,7 @@ pub(crate) struct DiscoveredNetworkConnection {
 pub(crate) struct DiscoverNetworkPayload {
     pub protocol: Option<String>,
     pub timeout_secs: Option<u64>,
+    pub scan_id: Option<String>,
 }
 
 #[derive(Deserialize)]

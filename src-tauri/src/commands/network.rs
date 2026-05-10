@@ -22,6 +22,7 @@ pub(crate) async fn discover_network_connections(
         &app,
         payload.as_ref().and_then(|item| item.protocol.as_deref()),
         payload.as_ref().and_then(|item| item.timeout_secs),
+        payload.as_ref().and_then(|item| item.scan_id.as_deref()),
     )
     .await
 }

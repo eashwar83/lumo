@@ -114,7 +114,7 @@ struct ResolvedSmbTarget {
     display_path: String,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct SmbService {
     instance_name: String,
     target: Option<String>,
@@ -140,7 +140,13 @@ struct MdnsRecord {
     data: MdnsRecordData,
 }
 
-pub async fn discover_devices(timeout_secs: u64) -> Result<Vec<SmbDevice>, String> {
+pub async fn discover_devices_with_callback<F>(
+    timeout_secs: u64,
+    mut on_device: F,
+) -> Result<Vec<SmbDevice>, String>
+where
+    F: FnMut(SmbDevice),
+{
     let timeout_secs = timeout_secs.max(1);
     log::info!(
         "SMB mDNS scan started: service={}, timeout={}s",
@@ -171,6 +177,7 @@ pub async fn discover_devices(timeout_secs: u64) -> Result<Vec<SmbDevice>, Strin
     let mut services: HashMap<String, SmbService> = HashMap::new();
     let mut queried_services = HashSet::new();
     let mut queried_hosts = HashSet::new();
+    let mut emitted_locations = HashSet::new();
     let mut packets = 0usize;
 
     while Instant::now() < deadline {
@@ -267,6 +274,22 @@ pub async fn discover_devices(timeout_secs: u64) -> Result<Vec<SmbDevice>, Strin
                 .collect::<Vec<_>>();
             if !queries.is_empty() {
                 send_query(&socket, target, &queries, !receives_multicast).await?;
+            }
+        }
+
+        for service in services.values() {
+            let Some(device) = service_to_device(service.clone()) else {
+                continue;
+            };
+            if emitted_locations.insert(device.location.clone()) {
+                log::info!(
+                    "SMB mDNS device discovered: name={}, location={}, friendly_name={}, server={}",
+                    device.instance_name,
+                    device.location,
+                    device.friendly_name.as_deref().unwrap_or(""),
+                    device.server.as_deref().unwrap_or("")
+                );
+                on_device(device);
             }
         }
     }

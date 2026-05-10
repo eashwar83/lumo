@@ -1,6 +1,31 @@
 use crate::network::types::{DiscoveredNetworkConnection, NetworkBrowseEntry, NetworkBrowseResult};
 use crate::store::network_connection_store::NetworkConnectionRecord;
+use serde::Serialize;
 use std::borrow::Cow;
+use tauri::Emitter;
+
+const NETWORK_DISCOVERY_FOUND_EVENT: &str = "network-discovery-found";
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NetworkDiscoveryFoundPayload {
+    scan_id: Option<String>,
+    connection: DiscoveredNetworkConnection,
+}
+
+fn emit_discovered_connection(
+    app: &tauri::AppHandle,
+    scan_id: Option<&str>,
+    connection: DiscoveredNetworkConnection,
+) {
+    let payload = NetworkDiscoveryFoundPayload {
+        scan_id: scan_id.map(ToString::to_string),
+        connection,
+    };
+    if let Err(error) = app.emit(NETWORK_DISCOVERY_FOUND_EVENT, payload) {
+        log::debug!("Failed to emit network discovery item: {}", error);
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BrowseProtocol {
@@ -165,6 +190,7 @@ pub(crate) async fn discover_connections(
     app: &tauri::AppHandle,
     protocol: Option<&str>,
     timeout_secs: Option<u64>,
+    scan_id: Option<&str>,
 ) -> Result<Vec<DiscoveredNetworkConnection>, String> {
     let protocol = protocol
         .map(|value| value.trim().to_ascii_lowercase())
@@ -174,7 +200,25 @@ pub(crate) async fn discover_connections(
 
     let mut result: Vec<DiscoveredNetworkConnection> = Vec::new();
     if protocol == "all" || protocol == "http-dlna" || protocol == "dlna" {
-        let devices = crate::network::protocols::dlna::discover_devices(app, timeout_secs).await?;
+        let devices = crate::network::protocols::dlna::discover_devices_with_callback(
+            app,
+            timeout_secs,
+            |item| {
+                emit_discovered_connection(
+                    app,
+                    scan_id,
+                    DiscoveredNetworkConnection {
+                        protocol: "http-dlna".to_string(),
+                        usn: Some(item.usn),
+                        location: item.location,
+                        friendly_name: item.friendly_name,
+                        server: item.server,
+                        st: Some(item.st),
+                    },
+                );
+            },
+        )
+        .await?;
         result.extend(devices.into_iter().map(|item| DiscoveredNetworkConnection {
             protocol: "http-dlna".to_string(),
             usn: Some(item.usn),
@@ -185,7 +229,24 @@ pub(crate) async fn discover_connections(
         }));
     }
     if protocol == "all" || protocol == "smb" || protocol == "samba" {
-        let devices = crate::network::protocols::smb::discover_devices(timeout_secs).await?;
+        let devices = crate::network::protocols::smb::discover_devices_with_callback(
+            timeout_secs,
+            |item| {
+                emit_discovered_connection(
+                    app,
+                    scan_id,
+                    DiscoveredNetworkConnection {
+                        protocol: "smb".to_string(),
+                        usn: Some(item.instance_name),
+                        location: item.location,
+                        friendly_name: item.friendly_name,
+                        server: item.server,
+                        st: Some(item.service_type),
+                    },
+                );
+            },
+        )
+        .await?;
         result.extend(devices.into_iter().map(|item| DiscoveredNetworkConnection {
             protocol: "smb".to_string(),
             usn: Some(item.instance_name),
