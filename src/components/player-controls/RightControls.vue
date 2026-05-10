@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type { MediaTrack } from "../../types/media";
 import type { SubtitleTarget } from "../../composables/useSubtitleState";
 import ControlSlider from "./ControlSlider.vue";
@@ -27,6 +27,14 @@ const props = defineProps<{
     dualSubEnabled: boolean;
     secondarySubId: MediaTrack["id"];
     activeSubTarget: SubtitleTarget;
+    primarySubFontFamily: string;
+    secondarySubFontFamily: string;
+    primarySubFontSize: number;
+    secondarySubFontSize: number;
+    primarySubFontColor: string;
+    secondarySubFontColor: string;
+    primarySubPos: number;
+    secondarySubPos: number;
     showSubMenu: boolean;
     hasAudioTracks: boolean;
     hasSubTracks: boolean;
@@ -39,6 +47,11 @@ const emit = defineEmits<{
     (e: "set-speed", rate: number): void;
     (e: "set-audio-delay", value: number): void;
     (e: "set-sub-delay-for-target", payload: { target: SubtitleTarget; value: number }): void;
+    (e: "set-sub-font-family", payload: { target: SubtitleTarget; value: string }): void;
+    (e: "set-sub-font-size", payload: { target: SubtitleTarget; value: number }): void;
+    (e: "set-sub-font-color", payload: { target: SubtitleTarget; value: string }): void;
+    (e: "set-sub-position", payload: { target: SubtitleTarget; value: number }): void;
+    (e: "reset-sub-appearance", target?: SubtitleTarget): void;
     (e: "set-brightness", value: number): void;
     (e: "set-contrast", value: number): void;
     (e: "set-saturation", value: number): void;
@@ -64,11 +77,46 @@ const isWindowsPlatform =
 
 const isPipEnabled = ref(false);
 const isTogglingPip = ref(false);
+const showSubtitleAdvancedSettings = ref(false);
 let unlistenNativePipChanged: (() => void) | null = null;
+
+const subtitleFontOptions = [
+    "",
+    "Arial",
+    "Helvetica Neue",
+    "PingFang SC",
+    "Hiragino Sans GB",
+    "Microsoft YaHei",
+    "Noto Sans CJK SC",
+    "Source Han Sans SC",
+    "Verdana",
+    "Georgia",
+    "Times New Roman",
+    "Courier New",
+    "JetBrains Mono",
+];
 
 const isSameTrackId = (left: MediaTrack["id"], right: MediaTrack["id"]) =>
     String(left) === String(right);
 const activeSubTarget = computed(() => props.activeSubTarget);
+const activeSubFontFamily = computed(() =>
+    props.primarySubFontFamily,
+);
+const activeSubFontOptions = computed(() => {
+    if (
+        !activeSubFontFamily.value ||
+        subtitleFontOptions.includes(activeSubFontFamily.value)
+    ) {
+        return subtitleFontOptions;
+    }
+    return [subtitleFontOptions[0], activeSubFontFamily.value, ...subtitleFontOptions.slice(1)];
+});
+const activeSubFontSize = computed(() =>
+    props.primarySubFontSize,
+);
+const activeSubFontColor = computed(() =>
+    props.primarySubFontColor,
+);
 
 const activeTrackId = computed<MediaTrack["id"]>(() =>
     props.activeSubTarget === "primary"
@@ -113,6 +161,40 @@ const onResetActiveSubDelay = () => {
     onChangeActiveSubDelay(0);
 };
 
+const onChangeActiveSubFontFamily = (event: Event) => {
+    const input = event.target as HTMLInputElement | null;
+    emit("set-sub-font-family", {
+        target: props.activeSubTarget,
+        value: input?.value ?? "",
+    });
+};
+
+const onChangeActiveSubFontSize = (value: number) => {
+    emit("set-sub-font-size", {
+        target: props.activeSubTarget,
+        value,
+    });
+};
+
+const onChangeActiveSubFontColor = (event: Event) => {
+    const input = event.target as HTMLInputElement | null;
+    emit("set-sub-font-color", {
+        target: props.activeSubTarget,
+        value: input?.value ?? "#ffffff",
+    });
+};
+
+const onChangeSubPosition = (target: SubtitleTarget, value: number) => {
+    emit("set-sub-position", {
+        target,
+        value,
+    });
+};
+
+const onResetActiveSubAppearance = () => {
+    emit("reset-sub-appearance", undefined);
+};
+
 const refreshPipState = async () => {
     if (!isNativePipPlatform) return;
     try {
@@ -151,6 +233,15 @@ onUnmounted(() => {
     unlistenNativePipChanged?.();
     unlistenNativePipChanged = null;
 });
+
+watch(
+    () => props.showSubMenu,
+    (showSubMenu) => {
+        if (!showSubMenu) {
+            showSubtitleAdvancedSettings.value = false;
+        }
+    },
+);
 </script>
 
 <template>
@@ -319,25 +410,72 @@ onUnmounted(() => {
             <transition name="fade-up">
                 <div
                     v-if="showSubMenu"
-                    class="track-menu track-menu--wide"
+                    class="track-menu track-menu--wide track-menu--subtitle"
+                    :class="{
+                        'track-menu--subtitle-advanced':
+                            showSubtitleAdvancedSettings,
+                    }"
                 >
                     <div class="track-menu__header">
-                        <span>Subtitle</span>
-                        <div class="track-menu__header-actions">
+                        <div class="track-menu__title-group">
                             <button
-                                class="track-menu__mode-toggle"
+                                v-if="showSubtitleAdvancedSettings"
+                                class="track-menu__back-button"
+                                type="button"
+                                title="Back to subtitle tracks"
+                                aria-label="Back to subtitle tracks"
+                                @click.stop="
+                                    showSubtitleAdvancedSettings = false
+                                "
+                            >
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    height="24px"
+                                    viewBox="0 -960 960 960"
+                                    width="24px"
+                                    fill="currentColor"
+                                    aria-hidden="true"
+                                >
+                                    <path
+                                        d="M560-240 320-480l240-240 56 56-184 184 184 184-56 56Z"
+                                    />
+                                </svg>
+                            </button>
+                            <button
+                                v-else
+                                class="icon-button track-menu__header-action track-menu__header-action--compact"
+                                type="button"
+                                title="Advanced subtitle settings"
+                                aria-label="Advanced subtitle settings"
+                                @click.stop="showSubtitleAdvancedSettings = true"
+                            >
+                                <svg viewBox="0 0 24 24" fill="currentColor">
+                                    <path
+                                        d="M5 7q-.83 0-1.415-.585Q3 5.83 3 5q0-.83.585-1.415Q4.17 3 5 3q.83 0 1.415.585Q7 4.17 7 5q0 .83-.585 1.415Q5.83 7 5 7Zm0-2ZM2 6V4H1v2h1Zm21 0V4H8v2h15Zm-8 8q-.83 0-1.415-.585Q13 12.83 13 12q0-.83.585-1.415Q14.17 10 15 10q.83 0 1.415.585Q17 11.17 17 12q0 .83-.585 1.415Q15.83 14 15 14Zm0-2ZM12 13v-2H1v2h11Zm11 0v-2h-5v2h5ZM8 21q-.83 0-1.415-.585Q6 19.83 6 19q0-.83.585-1.415Q7.17 17 8 17q.83 0 1.415.585Q10 18.17 10 19q0 .83-.585 1.415Q8.83 21 8 21Zm0-2ZM5 20v-2H1v2h4Zm18 0v-2H11v2h12Z"
+                                    />
+                                </svg>
+                            </button>
+                            <span>
+                                {{
+                                    showSubtitleAdvancedSettings
+                                        ? "Advance Settings"
+                                        : "Subtitle"
+                                }}
+                            </span>
+                        </div>
+                        <div
+                            v-if="!showSubtitleAdvancedSettings"
+                            class="track-menu__header-actions"
+                        >
+                            <button
+                                class="track-menu__dual-button"
+                                :class="{ 'track-menu__dual-button--active': dualSubEnabled }"
                                 type="button"
                                 :aria-pressed="dualSubEnabled"
                                 :title="dualSubEnabled ? 'Dual subtitles' : 'Single subtitle'"
                                 @click.stop="emit('toggle-dual-sub', !dualSubEnabled)"
                             >
-                                <span class="track-menu__mode-label">Dual</span>
-                                <span
-                                    class="track-menu__mode-switch"
-                                    :class="{ 'track-menu__mode-switch--on': dualSubEnabled }"
-                                >
-                                    <span class="track-menu__mode-thumb"></span>
-                                </span>
+                                Dual
                             </button>
                             <button
                                 class="icon-button track-menu__header-action"
@@ -356,7 +494,98 @@ onUnmounted(() => {
                             </button>
                         </div>
                     </div>
-                    <div class="track-menu__list">
+                    <div
+                        v-if="showSubtitleAdvancedSettings"
+                        class="track-menu__list track-menu__list--subtitle-advanced"
+                    >
+                        <div class="subtitle-advanced">
+                            <label class="subtitle-advanced__field subtitle-advanced__field--inline">
+                                <span>Font</span>
+                                <select
+                                    class="subtitle-advanced__input subtitle-advanced__select"
+                                    :value="activeSubFontFamily"
+                                    @change="onChangeActiveSubFontFamily"
+                                >
+                                    <option
+                                        v-for="font in activeSubFontOptions"
+                                        :key="font || 'default'"
+                                        :value="font"
+                                    >
+                                        {{ font || "Default" }}
+                                    </option>
+                                </select>
+                            </label>
+                            <label class="subtitle-advanced__field subtitle-advanced__field--inline">
+                                <span>Color</span>
+                                <span class="subtitle-advanced__color-row">
+                                    <input
+                                        class="subtitle-advanced__color"
+                                        type="color"
+                                        :value="activeSubFontColor"
+                                        @input="onChangeActiveSubFontColor"
+                                    />
+                                    <span class="subtitle-advanced__color-value">
+                                        {{ activeSubFontColor }}
+                                    </span>
+                                </span>
+                            </label>
+                            <ControlSlider
+                                label="Scale"
+                                :value="activeSubFontSize"
+                                :min="8"
+                                :max="200"
+                                :step="1"
+                                unit=""
+                                :precision="0"
+                                @change="onChangeActiveSubFontSize"
+                                @reset="onChangeActiveSubFontSize(38)"
+                            />
+                            <ControlSlider
+                                v-if="!dualSubEnabled"
+                                label="Position"
+                                :value="primarySubPos"
+                                :min="0"
+                                :max="100"
+                                :step="1"
+                                unit=""
+                                :precision="0"
+                                @change="onChangeSubPosition('primary', $event)"
+                                @reset="onChangeSubPosition('primary', 100)"
+                            />
+                            <ControlSlider
+                                v-else
+                                label="Primary Position"
+                                :value="primarySubPos"
+                                :min="0"
+                                :max="100"
+                                :step="1"
+                                unit=""
+                                :precision="0"
+                                @change="onChangeSubPosition('primary', $event)"
+                                @reset="onChangeSubPosition('primary', 100)"
+                            />
+                            <ControlSlider
+                                v-if="dualSubEnabled"
+                                label="Secondary Position"
+                                :value="secondarySubPos"
+                                :min="0"
+                                :max="100"
+                                :step="1"
+                                unit=""
+                                :precision="0"
+                                @change="onChangeSubPosition('secondary', $event)"
+                                @reset="onChangeSubPosition('secondary', 0)"
+                            />
+                            <button
+                                class="subtitle-advanced__reset"
+                                type="button"
+                                @click="onResetActiveSubAppearance"
+                            >
+                                Reset appearance
+                            </button>
+                        </div>
+                    </div>
+                    <div v-else class="track-menu__list">
                         <div v-if="dualSubEnabled" class="track-menu__sub-targets">
                             <button
                                 class="track-menu__sub-target"
@@ -417,7 +646,10 @@ onUnmounted(() => {
                             </button>
                         </div>
                     </div>
-                    <div v-if="props.hasSubTracks" class="track-menu__footer">
+                    <div
+                        v-if="props.hasSubTracks && !showSubtitleAdvancedSettings"
+                        class="track-menu__footer"
+                    >
                         <ControlSlider
                             :label="dualSubEnabled ? 'Delay' : 'Delay'"
                             :value="
@@ -638,6 +870,91 @@ onUnmounted(() => {
     gap: 8px;
 }
 
+.track-menu__title-group {
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.track-menu__back-button {
+    width: 26px;
+    height: 26px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    cursor: pointer;
+    transition:
+        color 0.2s,
+        transform 0.1s;
+}
+
+.track-menu__back-button:hover {
+    background: transparent;
+    color: #ccc;
+}
+
+.track-menu__back-button:active {
+    transform: none;
+}
+
+.track-menu__back-button svg {
+    width: 22px;
+    height: 22px;
+    transition: transform 0.1s;
+}
+
+.track-menu__back-button:hover svg {
+    transform: scale(1.1);
+}
+
+.track-menu__back-button:active svg {
+    transform: scale(0.95);
+}
+
+.track-menu__header-action--compact svg {
+    width: 21px;
+    height: 21px;
+    transform: none;
+}
+
+.track-menu__header-action--compact {
+    width: 26px;
+    height: 26px;
+}
+
+.track-menu__dual-button {
+    height: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 7px;
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.78);
+    padding: 0 8px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    transition:
+        background-color 0.2s ease,
+        border-color 0.2s ease,
+        color 0.2s ease;
+}
+
+.track-menu__dual-button:hover {
+    background: rgba(255, 255, 255, 0.11);
+    color: rgba(255, 255, 255, 0.94);
+}
+
+.track-menu__dual-button--active {
+    background: rgba(143, 179, 255, 0.22);
+    border-color: rgba(143, 179, 255, 0.75);
+    color: #dfeaff;
+}
+
 .track-menu__mode-toggle {
     border: none;
     background: transparent;
@@ -751,5 +1068,111 @@ onUnmounted(() => {
     display: flex;
     flex-direction: column;
     gap: 12px;
+}
+
+.track-menu--subtitle {
+    min-width: 270px;
+}
+
+.track-menu--subtitle-advanced {
+    min-width: 300px;
+}
+
+.track-menu--subtitle .track-menu__header {
+    padding-left: 8px;
+    gap: 6px;
+}
+
+.track-menu__list--subtitle-advanced {
+    padding-bottom: 2px;
+}
+
+.subtitle-advanced {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 10px 14px 14px;
+}
+
+.subtitle-advanced__field {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    color: rgba(255, 255, 255, 0.82);
+    font-size: 12px;
+}
+
+.subtitle-advanced__field--inline {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.subtitle-advanced__field--inline .subtitle-advanced__input {
+    width: 170px;
+}
+
+.subtitle-advanced__input {
+    height: 30px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.94);
+    padding: 0 9px;
+    font-size: 12px;
+    outline: none;
+}
+
+.subtitle-advanced__input:focus {
+    border-color: rgba(143, 179, 255, 0.75);
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.subtitle-advanced__select {
+    cursor: pointer;
+}
+
+.subtitle-advanced__color-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.subtitle-advanced__color {
+    width: 34px;
+    height: 28px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 8px;
+    background: transparent;
+    padding: 2px;
+    cursor: pointer;
+}
+
+.subtitle-advanced__color-value {
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+
+.subtitle-advanced__reset {
+    height: 30px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.86);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition:
+        background-color 0.2s ease,
+        border-color 0.2s ease,
+        color 0.2s ease;
+}
+
+.subtitle-advanced__reset:hover {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.24);
+    color: #fff;
 }
 </style>

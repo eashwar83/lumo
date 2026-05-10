@@ -10,6 +10,53 @@ pub(super) fn ensure_numeric_locale_for_mpv() {
     }
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[repr(C)]
+struct DlInfo {
+    dli_fname: *const c_char,
+    dli_fbase: *mut c_void,
+    dli_sname: *const c_char,
+    dli_saddr: *mut c_void,
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+unsafe extern "C" {
+    fn dladdr(addr: *const c_void, info: *mut DlInfo) -> c_int;
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) fn resolve_linked_library_path(symbol: *const c_void) -> Option<String> {
+    if symbol.is_null() {
+        return None;
+    }
+
+    let mut info = DlInfo {
+        dli_fname: std::ptr::null(),
+        dli_fbase: std::ptr::null_mut(),
+        dli_sname: std::ptr::null(),
+        dli_saddr: std::ptr::null_mut(),
+    };
+
+    let result = unsafe { dladdr(symbol, &mut info) };
+    if result == 0 || info.dli_fname.is_null() {
+        return None;
+    }
+
+    let raw_path = unsafe { std::ffi::CStr::from_ptr(info.dli_fname) }
+        .to_string_lossy()
+        .into_owned();
+
+    std::fs::canonicalize(&raw_path)
+        .map(|path| path.to_string_lossy().into_owned())
+        .ok()
+        .or(Some(raw_path))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+pub(crate) fn resolve_linked_library_path(_symbol: *const c_void) -> Option<String> {
+    None
+}
+
 #[repr(C)]
 #[derive(Debug, PartialEq)]
 #[allow(non_camel_case_types)]

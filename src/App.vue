@@ -33,6 +33,7 @@ const {
     tracks,
     speed,
     adjustments,
+    subtitleAppearance,
     history,
     playlistState,
     playlists,
@@ -309,6 +310,7 @@ const onFileLoaded = async () => {
         await tracks.setSubtitlesDisabled(true);
     }
     await adjustments.applyColorAdjustmentsForMedia(player.state.media.url);
+    await subtitleAppearance.applySubtitleAppearanceOptions();
 };
 
 useAppRuntimeBindings({
@@ -500,6 +502,14 @@ useAppStartupBindings({
             :dual-sub-enabled="tracks.dualSubEnabled.value"
             :secondary-sub-id="tracks.secondarySubId.value"
             :active-sub-target="tracks.activeSubTarget.value"
+            :primary-sub-font-family="subtitleAppearance.primaryFontFamily.value"
+            :secondary-sub-font-family="subtitleAppearance.secondaryFontFamily.value"
+            :primary-sub-font-size="subtitleAppearance.primaryFontSize.value"
+            :secondary-sub-font-size="subtitleAppearance.secondaryFontSize.value"
+            :primary-sub-font-color="subtitleAppearance.primaryFontColor.value"
+            :secondary-sub-font-color="subtitleAppearance.secondaryFontColor.value"
+            :primary-sub-pos="subtitleAppearance.primarySubPos.value"
+            :secondary-sub-pos="subtitleAppearance.secondarySubPos.value"
             :show-sub-menu="tracks.showSubMenu.value"
             :has-audio-tracks="hasAudioTracks"
             :has-sub-tracks="hasSubTracks"
@@ -514,6 +524,11 @@ useAppStartupBindings({
             @set-speed="speed.setSpeed"
             @set-audio-delay="adjustments.setAudioDelay"
             @set-sub-delay-for-target="adjustments.setSubDelayForTarget"
+            @set-sub-font-family="subtitleAppearance.setSubtitleFontFamily"
+            @set-sub-font-size="subtitleAppearance.setSubtitleFontSize"
+            @set-sub-font-color="subtitleAppearance.setSubtitleFontColor"
+            @set-sub-position="subtitleAppearance.setSubtitlePosition"
+            @reset-sub-appearance="subtitleAppearance.resetSubtitleAppearance"
             @set-brightness="adjustments.setBrightness"
             @set-contrast="adjustments.setContrast"
             @set-saturation="adjustments.setSaturation"

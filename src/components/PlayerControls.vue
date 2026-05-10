@@ -36,6 +36,14 @@ const props = defineProps<{
     dualSubEnabled: boolean;
     secondarySubId: MediaTrack["id"];
     activeSubTarget: SubtitleTarget;
+    primarySubFontFamily: string;
+    secondarySubFontFamily: string;
+    primarySubFontSize: number;
+    secondarySubFontSize: number;
+    primarySubFontColor: string;
+    secondarySubFontColor: string;
+    primarySubPos: number;
+    secondarySubPos: number;
     showSubMenu: boolean;
     hasAudioTracks: boolean;
     hasSubTracks: boolean;
@@ -53,6 +61,11 @@ const emit = defineEmits<{
     (e: "set-speed", rate: number): void;
     (e: "set-audio-delay", value: number): void;
     (e: "set-sub-delay-for-target", payload: { target: SubtitleTarget; value: number }): void;
+    (e: "set-sub-font-family", payload: { target: SubtitleTarget; value: string }): void;
+    (e: "set-sub-font-size", payload: { target: SubtitleTarget; value: number }): void;
+    (e: "set-sub-font-color", payload: { target: SubtitleTarget; value: string }): void;
+    (e: "set-sub-position", payload: { target: SubtitleTarget; value: number }): void;
+    (e: "reset-sub-appearance", target?: SubtitleTarget): void;
     (e: "set-brightness", value: number): void;
     (e: "set-contrast", value: number): void;
     (e: "set-saturation", value: number): void;
@@ -243,6 +256,14 @@ onUnmounted(() => {
                         :dual-sub-enabled="dualSubEnabled"
                         :secondary-sub-id="secondarySubId"
                         :active-sub-target="activeSubTarget"
+                        :primary-sub-font-family="primarySubFontFamily"
+                        :secondary-sub-font-family="secondarySubFontFamily"
+                        :primary-sub-font-size="primarySubFontSize"
+                        :secondary-sub-font-size="secondarySubFontSize"
+                        :primary-sub-font-color="primarySubFontColor"
+                        :secondary-sub-font-color="secondarySubFontColor"
+                        :primary-sub-pos="primarySubPos"
+                        :secondary-sub-pos="secondarySubPos"
                         :show-sub-menu="showSubMenu"
                         :has-audio-tracks="hasAudioTracks"
                         :has-sub-tracks="hasSubTracks"
@@ -254,6 +275,11 @@ onUnmounted(() => {
                         @set-sub-delay-for-target="
                             emit('set-sub-delay-for-target', $event)
                         "
+                        @set-sub-font-family="emit('set-sub-font-family', $event)"
+                        @set-sub-font-size="emit('set-sub-font-size', $event)"
+                        @set-sub-font-color="emit('set-sub-font-color', $event)"
+                        @set-sub-position="emit('set-sub-position', $event)"
+                        @reset-sub-appearance="emit('reset-sub-appearance', $event)"
                         @set-brightness="emit('set-brightness', $event)"
                         @set-contrast="emit('set-contrast', $event)"
                         @set-saturation="emit('set-saturation', $event)"
