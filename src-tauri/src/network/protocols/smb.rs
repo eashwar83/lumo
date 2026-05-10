@@ -1,9 +1,16 @@
 use std::collections::{HashMap, HashSet};
+use std::ffi::{CStr, CString};
+use std::os::raw::{c_char, c_int};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::{Duration, Instant};
+use chrono::{DateTime, Utc};
+use percent_encoding::{percent_decode_str, utf8_percent_encode, AsciiSet, CONTROLS};
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::UdpSocket;
 use tokio::time;
+use url::Url;
+
+use crate::store::network_connection_store::NetworkConnectionRecord;
 
 const MDNS_MULTICAST_ADDR: &str = "224.0.0.251:5353";
 const MDNS_MULTICAST_IPV4: Ipv4Addr = Ipv4Addr::new(224, 0, 0, 251);
@@ -16,6 +23,28 @@ const DNS_TYPE_SRV: u16 = 33;
 const DNS_CLASS_IN: u16 = 0x0001;
 const DNS_CLASS_IN_QU: u16 = 0x8001;
 
+const SMB_PATH_ENCODE_SET: &AsciiSet = &CONTROLS
+    .add(b' ')
+    .add(b'"')
+    .add(b'#')
+    .add(b'%')
+    .add(b'<')
+    .add(b'>')
+    .add(b'?')
+    .add(b'`')
+    .add(b'{')
+    .add(b'}')
+    .add(b'[')
+    .add(b']')
+    .add(b'\\')
+    .add(b'^')
+    .add(b'|');
+const SMB_USERINFO_ENCODE_SET: &AsciiSet = &SMB_PATH_ENCODE_SET
+    .add(b'/')
+    .add(b':')
+    .add(b';')
+    .add(b'@');
+
 #[derive(Clone)]
 pub struct SmbDevice {
     pub instance_name: String,
@@ -23,6 +52,66 @@ pub struct SmbDevice {
     pub friendly_name: Option<String>,
     pub server: Option<String>,
     pub service_type: String,
+}
+
+#[derive(Clone)]
+pub struct SmbBrowseEntry {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+    pub size: Option<u64>,
+    pub modified_at: Option<String>,
+}
+
+pub struct SmbBrowseResult {
+    pub path: String,
+    pub entries: Vec<SmbBrowseEntry>,
+}
+
+#[repr(C)]
+struct SoiaSmbBrowseEntry {
+    name: *mut c_char,
+    is_dir: c_int,
+    size: u64,
+    has_size: c_int,
+    modified_at: i64,
+    has_modified_at: c_int,
+}
+
+#[repr(C)]
+struct SoiaSmbBrowseResult {
+    entries: *mut SoiaSmbBrowseEntry,
+    entry_count: usize,
+    error: *mut c_char,
+}
+
+#[link(name = "soia_utils")]
+unsafe extern "C" {
+    fn soia_smb_browse_directory(
+        server: *const c_char,
+        share: *const c_char,
+        path: *const c_char,
+        domain: *const c_char,
+        username: *const c_char,
+        password: *const c_char,
+        result: *mut SoiaSmbBrowseResult,
+    ) -> c_int;
+    fn soia_smb_browse_result_free(result: *mut SoiaSmbBrowseResult);
+}
+
+struct ParsedSmbConnection {
+    server: String,
+    share: Option<String>,
+    root_path: String,
+    domain: String,
+    username: String,
+    password: String,
+}
+
+struct ResolvedSmbTarget {
+    share: String,
+    target_path: String,
+    display_path: String,
 }
 
 #[derive(Default)]
@@ -192,12 +281,348 @@ pub async fn discover_devices(timeout_secs: u64) -> Result<Vec<SmbDevice>, Strin
             .unwrap_or(&a.instance_name)
             .cmp(b.friendly_name.as_deref().unwrap_or(&b.instance_name))
     });
+    for device in &devices {
+        log::info!(
+            "SMB mDNS device discovered: name={}, location={}, friendly_name={}, server={}",
+            device.instance_name,
+            device.location,
+            device.friendly_name.as_deref().unwrap_or(""),
+            device.server.as_deref().unwrap_or("")
+        );
+    }
     log::info!(
         "SMB mDNS scan finished: discovered={}, packets={}",
         devices.len(),
         packets
     );
     Ok(devices)
+}
+
+pub async fn list_directory(
+    connection: &NetworkConnectionRecord,
+    path: &str,
+) -> Result<SmbBrowseResult, String> {
+    let connection = parse_smb_connection(connection)?;
+    let normalized_path = normalize_path(path);
+    let target = resolve_smb_target(&connection, &normalized_path)?;
+
+    tauri::async_runtime::spawn_blocking(move || browse_directory_blocking(connection, target))
+        .await
+        .map_err(|e| format!("SMB browse task failed: {}", e))?
+}
+
+pub fn build_playback_url(
+    connection: &NetworkConnectionRecord,
+    file_path: &str,
+) -> Result<String, String> {
+    let connection = parse_smb_connection(connection)?;
+    let normalized_path = normalize_path(file_path);
+    let target = resolve_smb_target(&connection, &normalized_path)?;
+    if target.share.is_empty() {
+        return Err("SMB share is required for playback".into());
+    }
+    let path = encode_smb_path(&target.target_path);
+    let share = encode_smb_segment(&target.share);
+    let credentials = format_smb_credentials(&connection);
+    let suffix = if path.is_empty() {
+        "/".to_string()
+    } else {
+        format!("/{}", path)
+    };
+    Ok(format!(
+        "smb://{}{}/{}{}",
+        credentials, connection.server, share, suffix
+    ))
+}
+
+fn browse_directory_blocking(
+    connection: ParsedSmbConnection,
+    target: ResolvedSmbTarget,
+) -> Result<SmbBrowseResult, String> {
+    let server = cstring("SMB server", &connection.server)?;
+    let share = cstring("SMB share", &target.share)?;
+    let path = cstring("SMB path", &target.target_path)?;
+    let domain = cstring("SMB domain", &connection.domain)?;
+    let username = cstring("SMB username", &connection.username)?;
+    let password = cstring("SMB password", &connection.password)?;
+
+    let mut result = SoiaSmbBrowseResult {
+        entries: std::ptr::null_mut(),
+        entry_count: 0,
+        error: std::ptr::null_mut(),
+    };
+
+    let status = unsafe {
+        soia_smb_browse_directory(
+            server.as_ptr(),
+            share.as_ptr(),
+            path.as_ptr(),
+            domain.as_ptr(),
+            username.as_ptr(),
+            password.as_ptr(),
+            &mut result,
+        )
+    };
+
+    if status != 0 {
+        let error = c_string_lossy(result.error)
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "SMB browse failed".to_string());
+        unsafe {
+            soia_smb_browse_result_free(&mut result);
+        }
+        return Err(error);
+    }
+
+    let entries = if result.entry_count == 0 {
+        Vec::new()
+    } else {
+        unsafe {
+            std::slice::from_raw_parts(result.entries, result.entry_count)
+                .iter()
+                .filter_map(|entry| smb_entry_from_ffi(&target.display_path, entry))
+                .collect::<Vec<_>>()
+        }
+    };
+    unsafe {
+        soia_smb_browse_result_free(&mut result);
+    }
+
+    let mut entries = entries;
+    entries.sort_by(|left, right| match (left.is_dir, right.is_dir) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
+    });
+
+    Ok(SmbBrowseResult {
+        path: target.display_path,
+        entries,
+    })
+}
+
+fn parse_smb_connection(
+    connection: &NetworkConnectionRecord,
+) -> Result<ParsedSmbConnection, String> {
+    let url = Url::parse(connection.base_url.trim())
+        .map_err(|e| format!("Invalid SMB URL: {}", e))?;
+    if url.scheme() != "smb" {
+        return Err("SMB URL must start with smb://".into());
+    }
+
+    let mut server = url
+        .host_str()
+        .ok_or_else(|| "SMB URL host is required".to_string())?
+        .to_string();
+    if let Some(port) = url.port() {
+        server = format!("{}:{}", server, port);
+    }
+
+    let segments = url
+        .path_segments()
+        .map(|segments| {
+            segments
+                .filter(|segment| !segment.is_empty())
+                .map(|segment| percent_decode_str(segment).decode_utf8_lossy().to_string())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let share = segments
+        .first()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let root_path = if share.is_some() && segments.len() > 1 {
+        normalize_path(&format!("/{}", segments[1..].join("/")))
+    } else {
+        "/".to_string()
+    };
+
+    let mut username = connection.username.trim().to_string();
+    let mut password = connection.password.clone();
+    if username.is_empty() && !url.username().is_empty() {
+        username = percent_decode_str(url.username()).decode_utf8_lossy().to_string();
+    }
+    if password.is_empty() {
+        if let Some(url_password) = url.password() {
+            password = percent_decode_str(url_password).decode_utf8_lossy().to_string();
+        }
+    }
+    let mut domain = String::new();
+    if let Some((domain_part, user_part)) = username.split_once(';') {
+        domain = domain_part.trim().to_string();
+        username = user_part.trim().to_string();
+    }
+
+    Ok(ParsedSmbConnection {
+        server,
+        share,
+        root_path,
+        domain,
+        username,
+        password,
+    })
+}
+
+fn resolve_smb_target(
+    connection: &ParsedSmbConnection,
+    path: &str,
+) -> Result<ResolvedSmbTarget, String> {
+    let normalized_path = normalize_path(path);
+    if let Some(share) = &connection.share {
+        let target_path = join_paths(&connection.root_path, &normalized_path);
+        let display_path = normalize_path_without_root(&connection.root_path, &target_path);
+        return Ok(ResolvedSmbTarget {
+            share: share.clone(),
+            target_path,
+            display_path,
+        });
+    }
+
+    if normalized_path == "/" {
+        return Ok(ResolvedSmbTarget {
+            share: String::new(),
+            target_path: "/".to_string(),
+            display_path: "/".to_string(),
+        });
+    }
+
+    let mut segments = normalized_path
+        .trim_start_matches('/')
+        .split('/')
+        .filter(|segment| !segment.is_empty());
+    let share = segments
+        .next()
+        .map(|segment| segment.to_string())
+        .ok_or_else(|| "SMB share is required".to_string())?;
+    let remaining = segments.collect::<Vec<_>>();
+    let target_path = if remaining.is_empty() {
+        "/".to_string()
+    } else {
+        normalize_path(&format!("/{}", remaining.join("/")))
+    };
+
+    Ok(ResolvedSmbTarget {
+        share,
+        target_path,
+        display_path: normalized_path,
+    })
+}
+
+fn smb_entry_from_ffi(current_path: &str, entry: &SoiaSmbBrowseEntry) -> Option<SmbBrowseEntry> {
+    let name = c_string_lossy(entry.name)?.trim().to_string();
+    if name.is_empty() || name == "." || name == ".." {
+        return None;
+    }
+    let path = child_path(current_path, &name);
+    Some(SmbBrowseEntry {
+        name,
+        path,
+        is_dir: entry.is_dir != 0,
+        size: if entry.has_size != 0 {
+            Some(entry.size)
+        } else {
+            None
+        },
+        modified_at: if entry.has_modified_at != 0 {
+            DateTime::<Utc>::from_timestamp(entry.modified_at, 0).map(|time| time.to_rfc3339())
+        } else {
+            None
+        },
+    })
+}
+
+fn normalize_path(path: &str) -> String {
+    let trimmed = path.trim();
+    if trimmed.is_empty() || trimmed == "/" {
+        return "/".to_string();
+    }
+    let with_leading = if trimmed.starts_with('/') {
+        trimmed.to_string()
+    } else {
+        format!("/{}", trimmed)
+    };
+    with_leading.trim_end_matches('/').to_string()
+}
+
+fn join_paths(root: &str, path: &str) -> String {
+    let root = normalize_path(root);
+    let path = normalize_path(path);
+    if root == "/" {
+        return path;
+    }
+    if path == "/" {
+        return root;
+    }
+    format!("{}/{}", root.trim_end_matches('/'), path.trim_start_matches('/'))
+}
+
+fn child_path(parent: &str, name: &str) -> String {
+    let parent = normalize_path(parent);
+    if parent == "/" {
+        format!("/{}", name)
+    } else {
+        format!("{}/{}", parent, name)
+    }
+}
+
+fn normalize_path_without_root(root: &str, path: &str) -> String {
+    let root = normalize_path(root);
+    let path = normalize_path(path);
+    if root == "/" {
+        return path;
+    }
+    if path == root {
+        return "/".to_string();
+    }
+    path.strip_prefix(root.trim_end_matches('/'))
+        .map(normalize_path)
+        .unwrap_or(path)
+}
+
+fn format_smb_credentials(connection: &ParsedSmbConnection) -> String {
+    if connection.username.is_empty() {
+        return String::new();
+    }
+    let domain = if connection.domain.is_empty() {
+        String::new()
+    } else {
+        format!("{};", encode_smb_userinfo(&connection.domain))
+    };
+    format!(
+        "{}{}:{}@",
+        domain,
+        encode_smb_userinfo(&connection.username),
+        encode_smb_userinfo(&connection.password),
+    )
+}
+
+fn encode_smb_segment(value: &str) -> String {
+    utf8_percent_encode(value, SMB_PATH_ENCODE_SET).to_string()
+}
+
+fn encode_smb_path(path: &str) -> String {
+    normalize_path(path)
+        .trim_start_matches('/')
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .map(encode_smb_segment)
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn encode_smb_userinfo(value: &str) -> String {
+    utf8_percent_encode(value, SMB_USERINFO_ENCODE_SET).to_string()
+}
+
+fn cstring(label: &str, value: &str) -> Result<CString, String> {
+    CString::new(value).map_err(|_| format!("{} contains an embedded NUL byte", label))
+}
+
+fn c_string_lossy(ptr: *const c_char) -> Option<String> {
+    if ptr.is_null() {
+        return None;
+    }
+    Some(unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned())
 }
 
 async fn send_query(

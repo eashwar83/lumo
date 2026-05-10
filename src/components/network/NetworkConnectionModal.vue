@@ -10,6 +10,7 @@ type ConnectionForm = {
     baseUrl: string;
     host: string;
     share: string;
+    group: string;
     port: string;
     username: string;
     password: string;
@@ -91,12 +92,12 @@ const emit = defineEmits<{
                     />
                 </label>
                 <label class="network-modal__field">
-                    <span>Share</span>
+                    <span>Share (optional)</span>
                     <input
                         v-model="props.createForm.share"
                         class="panel__input panel__input--path network-modal__input"
                         type="text"
-                        placeholder="media"
+                        placeholder="Leave empty to browse shares"
                     />
                 </label>
             </template>
@@ -151,6 +152,18 @@ const emit = defineEmits<{
                         v-model="props.createForm.password"
                         class="panel__input panel__input--path network-modal__input"
                         type="password"
+                        placeholder="Optional"
+                    />
+                </label>
+                <label
+                    v-if="props.isSmbProtocol"
+                    class="network-modal__field"
+                >
+                    <span>Group</span>
+                    <input
+                        v-model="props.createForm.group"
+                        class="panel__input panel__input--path network-modal__input"
+                        type="text"
                         placeholder="Optional"
                     />
                 </label>

@@ -6,6 +6,7 @@ import {
 } from "../mock/settings";
 import {
     createDlnaPlaybackKey,
+    createSmbPlaybackKey,
     createWebdavPlaybackKey,
 } from "../utils/playbackSource";
 import { useNetworkConnections } from "./useNetworkConnections";
@@ -205,8 +206,8 @@ export const useNetworkPanel = () => {
         }
     };
 
-    const onCreateConnection = () => {
-        createConnection();
+    const onCreateConnection = (protocol = "webdav") => {
+        createConnection(protocol);
         viewMode.value = "connections";
     };
 
@@ -242,15 +243,20 @@ export const useNetworkPanel = () => {
         protocol: selectedConnection.value?.protocol || "webdav",
         connectionId: selectedConnectionId.value,
         filePath: entry.path,
-        playbackKey:
-            selectedConnection.value?.protocol === "http-dlna" ||
-            selectedConnection.value?.protocol === "dlna"
-                ? createDlnaPlaybackKey(
+        playbackKey: (() => {
+            const protocol = selectedConnection.value?.protocol?.toLowerCase() || "webdav";
+            if (protocol === "http-dlna" || protocol === "dlna") {
+                return createDlnaPlaybackKey(
                     selectedConnectionId.value,
                     entry.path,
                     browser.networkPath.value,
-                )
-                : createWebdavPlaybackKey(selectedConnectionId.value, entry.path),
+                );
+            }
+            if (protocol === "smb" || protocol === "samba") {
+                return createSmbPlaybackKey(selectedConnectionId.value, entry.path);
+            }
+            return createWebdavPlaybackKey(selectedConnectionId.value, entry.path);
+        })(),
         displayName: entry.name,
     });
 

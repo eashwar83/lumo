@@ -1,6 +1,7 @@
 import { computed, onMounted, onUnmounted, ref, type Ref } from "vue";
+import { invoke } from "@tauri-apps/api/core";
 import type { HistoryEntry } from "../types/history";
-import type { NetworkPlayRequest } from "../types/network";
+import type { NetworkConnection, NetworkPlayRequest } from "../types/network";
 import { parsePlaybackSource } from "../utils/playbackSource";
 import type { PlayerApi } from "./usePlaybackController";
 import { loadUiState } from "./useUiStateStore";
@@ -89,6 +90,75 @@ type PlaybackPreferences = {
     compactModeEnabled: boolean;
     wallpaperModeEnabled: boolean;
     subtitlesDisabled: boolean;
+};
+
+const isSmbProtocol = (protocol: string) => {
+    const normalized = protocol.trim().toLowerCase();
+    return normalized === "smb" || normalized === "samba";
+};
+
+const decodeUrlSegment = (segment: string) => {
+    try {
+        return decodeURIComponent(segment);
+    } catch {
+        return segment;
+    }
+};
+
+const splitDecodedPathSegments = (path: string) =>
+    path.split("/").filter(Boolean).map(decodeUrlSegment);
+
+const normalizePathFromSegments = (segments: string[]) =>
+    segments.length ? `/${segments.join("/")}` : "/";
+
+const resolveSmbUrlFromSavedConnection = async (
+    url: string,
+): Promise<{
+    connectionId: string;
+    filePath: string;
+} | null> => {
+    let parsed: URL;
+    try {
+        parsed = new URL(url);
+    } catch {
+        return null;
+    }
+    if (parsed.protocol.toLowerCase() !== "smb:") return null;
+
+    const connections = await invoke<NetworkConnection[]>("list_network_connections");
+    const urlHost = parsed.host.toLowerCase();
+    const urlSegments = splitDecodedPathSegments(parsed.pathname);
+
+    let bestMatch: { connectionId: string; filePath: string; score: number } | null = null;
+    for (const connection of connections) {
+        if (!isSmbProtocol(connection.protocol)) continue;
+        let base: URL;
+        try {
+            base = new URL(connection.baseUrl);
+        } catch {
+            continue;
+        }
+        if (base.protocol.toLowerCase() !== "smb:") continue;
+        if (base.host.toLowerCase() !== urlHost) continue;
+
+        const baseSegments = splitDecodedPathSegments(base.pathname);
+        const isPrefix = baseSegments.every(
+            (segment, index) => urlSegments[index] === segment,
+        );
+        if (!isPrefix) continue;
+
+        const filePath = normalizePathFromSegments(urlSegments.slice(baseSegments.length));
+        const score = baseSegments.length;
+        if (!bestMatch || score > bestMatch.score) {
+            bestMatch = {
+                connectionId: connection.id,
+                filePath,
+                score,
+            };
+        }
+    }
+
+    return bestMatch;
 };
 
 const DEFAULT_PLAYBACK_PREFERENCES: PlaybackPreferences = {
@@ -390,6 +460,46 @@ export const usePlaybackFlow = ({
         await player.loadFileAtUrl(url, resumePosition, preferences.autoPlay);
     };
 
+    const playSmbNetwork = async (
+        connectionId: string,
+        filePath: string,
+        playbackKey: string,
+        preferredTitle?: string,
+    ) => {
+        await triggerPlaybackIntent();
+        hideHistory.value = true;
+        nowPlaying.clearArtwork();
+        tracks.resetTracks();
+        player.state.media.url = playbackKey;
+        player.state.media.title = rememberPreferredTitle(
+            playbackKey,
+            preferredTitle,
+        );
+        player.state.playback.isBuffering = false;
+        player.state.playback.downloadSpeedBps = 0;
+        player.state.playback.hwdecCurrent = "";
+        loadingUrl.value = playbackKey;
+        isLoading.value = true;
+        await ensurePlaybackPreferencesLoaded();
+        const preferences = playbackPreferences.value;
+        await player.setPlaybackSpeed(preferences.defaultSpeed);
+        const resumePosition = getStartPosition(
+            playbackKey,
+            preferences.skipIntroSeconds,
+        );
+        pendingResume.value = {
+            url: playbackKey,
+            position: resumePosition,
+        };
+        await player.loadNetworkFile(
+            "smb",
+            connectionId,
+            filePath,
+            resumePosition,
+            preferences.autoPlay,
+        );
+    };
+
     const playPath = async (path: string, preferredTitle?: string) => {
         if (!path) return;
         const source = parsePlaybackSource(path);
@@ -407,8 +517,30 @@ export const usePlaybackFlow = ({
             return;
         }
         if (source.type === "smb") {
-            await playSmb(source.url, preferredTitle);
-            return;
+            if (source.connectionId && source.filePath) {
+                await playSmbNetwork(
+                    source.connectionId,
+                    source.filePath,
+                    source.key,
+                    preferredTitle,
+                );
+                return;
+            }
+            if (source.url) {
+                const networkSource = await resolveSmbUrlFromSavedConnection(source.url);
+                if (networkSource) {
+                    await playSmbNetwork(
+                        networkSource.connectionId,
+                        networkSource.filePath,
+                        source.url,
+                        preferredTitle,
+                    );
+                    return;
+                }
+                await playSmb(source.url, preferredTitle);
+                return;
+            }
+            throw new Error("Invalid SMB playback source");
         }
         await playLocalPath(source.path, preferredTitle);
     };
@@ -593,8 +725,30 @@ export const usePlaybackFlow = ({
             return;
         }
         if (source.type === "smb") {
-            await playSmb(source.url, preferredTitle);
-            return;
+            if (source.connectionId && source.filePath) {
+                await playSmbNetwork(
+                    source.connectionId,
+                    source.filePath,
+                    source.key,
+                    preferredTitle,
+                );
+                return;
+            }
+            if (source.url) {
+                const networkSource = await resolveSmbUrlFromSavedConnection(source.url);
+                if (networkSource) {
+                    await playSmbNetwork(
+                        networkSource.connectionId,
+                        networkSource.filePath,
+                        source.url,
+                        preferredTitle,
+                    );
+                    return;
+                }
+                await playSmb(source.url, preferredTitle);
+                return;
+            }
+            throw new Error("Invalid SMB playback source");
         }
         hideHistory.value = true;
         await playPath(source.path, preferredTitle);
@@ -613,6 +767,15 @@ export const usePlaybackFlow = ({
         }
         if (protocol === "webdav") {
             await playWebdav(
+                payload.connectionId,
+                payload.filePath,
+                payload.playbackKey,
+                displayName,
+            );
+            return;
+        }
+        if (protocol === "smb" || protocol === "samba") {
+            await playSmbNetwork(
                 payload.connectionId,
                 payload.filePath,
                 payload.playbackKey,

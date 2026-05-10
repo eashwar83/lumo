@@ -158,7 +158,7 @@ export const resolveAdjacentPathInSameDirectory = async (
         );
     }
     if (source.type === "smb") {
-        return resolveAdjacentPathInSmbDirectory(source.url, direction);
+        return resolveAdjacentPathInSmbDirectory(source.url ?? source.key, direction);
     }
     return resolveAdjacentPathInWebdavDirectory(
         source.connectionId,

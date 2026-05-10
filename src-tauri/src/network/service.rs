@@ -6,6 +6,7 @@ use std::borrow::Cow;
 pub(crate) enum BrowseProtocol {
     Webdav,
     Dlna,
+    Smb,
 }
 
 fn ensure_protocol(connection: &NetworkConnectionRecord, expected: &[&str]) -> Result<(), String> {
@@ -26,6 +27,7 @@ pub(crate) fn protocol_from_str(value: &str) -> Option<BrowseProtocol> {
     match value.trim().to_ascii_lowercase().as_str() {
         "webdav" => Some(BrowseProtocol::Webdav),
         "http-dlna" | "dlna" => Some(BrowseProtocol::Dlna),
+        "smb" | "samba" => Some(BrowseProtocol::Smb),
         _ => None,
     }
 }
@@ -134,6 +136,28 @@ pub(crate) async fn browse_connection(
                     .collect(),
             })
         }
+        BrowseProtocol::Smb => {
+            ensure_protocol(connection, &["smb", "samba"])?;
+            let result = crate::network::protocols::smb::list_directory(connection, path).await?;
+            Ok(NetworkBrowseResult {
+                path: result.path,
+                entries: result
+                    .entries
+                    .into_iter()
+                    .map(|entry| NetworkBrowseEntry {
+                        name: entry.name,
+                        path: entry.path,
+                        entry_type: if entry.is_dir {
+                            "dir".into()
+                        } else {
+                            "file".into()
+                        },
+                        size: entry.size,
+                        modified_at: entry.modified_at,
+                    })
+                    .collect(),
+            })
+        }
     }
 }
 
@@ -175,21 +199,27 @@ pub(crate) async fn discover_connections(
     Ok(result)
 }
 
-pub(crate) fn resolve_webdav_playback_url(
+pub(crate) fn resolve_network_playback_url(
     connection: &NetworkConnectionRecord,
     protocol_hint: Option<&str>,
     file_path: &str,
 ) -> Result<String, String> {
     let protocol = resolve_protocol_with_hint(connection, protocol_hint)?;
 
-    if protocol != BrowseProtocol::Webdav {
-        return Err(format!(
-            "load_network_file currently supports webdav only, got {}",
+    match protocol {
+        BrowseProtocol::Webdav => {
+            ensure_protocol(connection, &["webdav"])?;
+            crate::network::protocols::webdav::build_playback_url(connection, file_path)
+        }
+        BrowseProtocol::Smb => {
+            ensure_protocol(connection, &["smb", "samba"])?;
+            crate::network::protocols::smb::build_playback_url(connection, file_path)
+        }
+        BrowseProtocol::Dlna => Err(format!(
+            "load_network_file does not support DLNA playback URL resolution for {}",
             connection.protocol
-        ));
+        )),
     }
-    ensure_protocol(connection, &["webdav"])?;
-    crate::network::protocols::webdav::build_playback_url(connection, file_path)
 }
 
 fn default_browse_path(connection: &NetworkConnectionRecord, protocol: BrowseProtocol) -> String {
@@ -200,6 +230,7 @@ fn default_browse_path(connection: &NetworkConnectionRecord, protocol: BrowsePro
     match protocol {
         BrowseProtocol::Webdav => "/".to_string(),
         BrowseProtocol::Dlna => "0".to_string(),
+        BrowseProtocol::Smb => "/".to_string(),
     }
 }
 
@@ -207,6 +238,7 @@ fn normalize_input_path(path: Option<String>, protocol: BrowseProtocol) -> Strin
     let fallback: Cow<'static, str> = match protocol {
         BrowseProtocol::Webdav => Cow::Borrowed("/"),
         BrowseProtocol::Dlna => Cow::Borrowed("0"),
+        BrowseProtocol::Smb => Cow::Borrowed("/"),
     };
 
     let value = path.unwrap_or_else(|| fallback.to_string());

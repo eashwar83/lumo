@@ -41,7 +41,8 @@ export const useHistoryPanel = () => {
             return getPathDisplayName(source.resourceUrl, source.resourceUrl);
         }
         if (source.type === "smb") {
-            return getPathDisplayName(source.url, source.url);
+            const display = source.url ?? source.filePath ?? source.key;
+            return getPathDisplayName(display, display);
         }
         return getPathDisplayName(source.path, source.path);
     };

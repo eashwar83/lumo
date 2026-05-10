@@ -106,6 +106,7 @@ const createForm = reactive({
     baseUrl: "",
     host: "",
     share: "",
+    group: "",
     port: "21",
     username: "",
     password: "",
@@ -144,6 +145,7 @@ const resetCreateForm = () => {
     createForm.baseUrl = "";
     createForm.host = "";
     createForm.share = "";
+    createForm.group = "";
     createForm.port = "21";
     createForm.username = "";
     createForm.password = "";
@@ -172,12 +174,19 @@ const openEditModal = (connection: NetworkConnection) => {
     createForm.baseUrl = normalizedBaseUrl;
     createForm.host = "";
     createForm.share = "";
+    createForm.group = "";
     createForm.port = "21";
     createForm.username = connection.username || "";
     createForm.password = connection.password || "";
     createForm.defaultPath = normalizedDefaultPath;
 
     if (protocol === "smb") {
+        const username = connection.username || "";
+        const [group, user] = username.includes(";")
+            ? username.split(/;(.*)/s)
+            : ["", username];
+        createForm.group = group?.trim() ?? "";
+        createForm.username = user?.trim() ?? "";
         const smbMatch = normalizedBaseUrl.match(/^smb:\/\/([^/]+)\/?(.*)$/i);
         if (smbMatch) {
             createForm.host = smbMatch[1] ?? "";
@@ -223,7 +232,11 @@ const onEntryClick = async (entry: NetworkFileRow) => {
         return;
     }
     if (isLoading.value) return;
-    await openEntry(entry);
+    try {
+        await openEntry(entry);
+    } catch (error) {
+        maybeOpenSmbCredentialsEditor(error);
+    }
 };
 
 const onOpenConnectionBrowser = async (connectionId: string) => {
@@ -232,6 +245,7 @@ const onOpenConnectionBrowser = async (connectionId: string) => {
     await nextTick();
     try {
         await onOpenBrowser(connectionId);
+        maybeOpenSmbCredentialsEditor(errorMessage.value);
     } finally {
         isSwitchingView.value = false;
     }
@@ -342,6 +356,26 @@ const toErrorMessage = (error: unknown, fallback: string) => {
     return fallback;
 };
 
+const isSmbLogonFailure = (error: unknown) => {
+    const message = toErrorMessage(error, "").toLowerCase();
+    return (
+        message.includes("status_logon_failure") ||
+        message.includes("0xc000006d") ||
+        message.includes("logon_failure")
+    );
+};
+
+const maybeOpenSmbCredentialsEditor = (error: unknown) => {
+    if (!isSmbLogonFailure(error)) return false;
+    const connection = selectedConnectionConfig.value;
+    if (!connection) return false;
+    const protocol = connection.protocol.trim().toLowerCase();
+    if (protocol !== "smb" && protocol !== "samba") return false;
+    if (connection.username.trim() || connection.password) return false;
+    openEditModal(connection);
+    return true;
+};
+
 const buildConnectionBaseUrl = () => {
     if (isSmbProtocol.value) {
         const host = createForm.host.trim();
@@ -349,10 +383,7 @@ const buildConnectionBaseUrl = () => {
         if (!host) {
             throw new Error("SMB host is required");
         }
-        if (!share) {
-            throw new Error("SMB share is required");
-        }
-        return `smb://${host}/${share}`;
+        return share ? `smb://${host}/${share}` : `smb://${host}/`;
     }
     if (isFtpProtocol.value) {
         const host = createForm.host.trim();
@@ -395,7 +426,12 @@ const buildAutoConnectionLabel = (baseUrl: string) => {
 
 const onCreateConnectionSubmit = async () => {
     const label = createForm.label.trim();
-    const username = requiresAuthFields.value ? createForm.username.trim() : "";
+    const username =
+        requiresAuthFields.value && isSmbProtocol.value && createForm.group.trim()
+            ? `${createForm.group.trim()};${createForm.username.trim()}`
+            : requiresAuthFields.value
+              ? createForm.username.trim()
+              : "";
     const defaultPath = createForm.defaultPath.trim() || "/";
     const isEditing = Boolean(editingConnectionId.value);
 
@@ -405,10 +441,12 @@ const onCreateConnectionSubmit = async () => {
     try {
         const baseUrl = buildConnectionBaseUrl();
         const normalizedLabel = label || buildAutoConnectionLabel(baseUrl);
+        const shouldRefreshBrowserAfterSave =
+            isEditing && viewMode.value === "browser";
         if (isEditing) {
             selectedConnection.value = editingConnectionId.value ?? "";
         } else {
-            onCreateConnection();
+            onCreateConnection(createForm.protocol);
         }
         const connection = selectedConnectionConfig.value as
             | NetworkConnection
@@ -426,6 +464,9 @@ const onCreateConnectionSubmit = async () => {
         isCreateModalOpen.value = false;
         editingConnectionId.value = null;
         resetCreateForm();
+        if (shouldRefreshBrowserAfterSave) {
+            await onRefresh();
+        }
     } catch (error) {
         createError.value = toErrorMessage(
             error,

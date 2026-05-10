@@ -1,5 +1,6 @@
 export const SOIA_WEBDAV_KEY_PREFIX = "soia-webdav://";
 export const SOIA_DLNA_KEY_PREFIX = "soia-dlna://";
+export const SOIA_SMB_KEY_PREFIX = "soia-smb://";
 
 export type PlaybackSource =
     | {
@@ -23,7 +24,9 @@ export type PlaybackSource =
     | {
           type: "smb";
           key: string;
-          url: string;
+          url?: string;
+          connectionId?: string;
+          filePath?: string;
       };
 
 const normalizeFilePath = (path: string) => {
@@ -89,6 +92,14 @@ const toRuntimeWebdavConnectionId = (connectionIdInKey: string): string =>
         ? `webdav-${connectionIdInKey}`
         : connectionIdInKey;
 
+const toSmbKeyConnectionId = (connectionId: string): string =>
+    connectionId.trim().replace(/^smb-(?=\d+$)/i, "");
+
+const toRuntimeSmbConnectionId = (connectionIdInKey: string): string =>
+    /^\d+$/.test(connectionIdInKey)
+        ? `smb-${connectionIdInKey}`
+        : connectionIdInKey;
+
 export const createWebdavPlaybackKey = (
     connectionId: string,
     filePath: string,
@@ -106,6 +117,43 @@ export const createDlnaPlaybackKey = (
     return normalizedParent
         ? `${base}/${encodeURIComponent(normalizedParent)}`
         : base;
+};
+
+export const createSmbPlaybackKey = (
+    connectionId: string,
+    filePath: string,
+): string =>
+    `${SOIA_SMB_KEY_PREFIX}${encodeURIComponent(toSmbKeyConnectionId(connectionId))}${normalizeFilePath(filePath)}`;
+
+export const createSmbPlaybackUrl = (
+    baseUrl: string,
+    filePath: string,
+): string => {
+    const normalizedPath = normalizeFilePath(filePath);
+    try {
+        const url = new URL(baseUrl.trim());
+        if (url.protocol.toLowerCase() !== "smb:") {
+            throw new Error("Invalid SMB URL");
+        }
+        const baseSegments = url.pathname
+            .split("/")
+            .filter(Boolean)
+            .map((segment) => decodeURIComponent(segment));
+        const fileSegments =
+            normalizedPath === "/"
+                ? []
+                : normalizedPath
+                      .replace(/^\/+/, "")
+                      .split("/")
+                      .filter(Boolean);
+        const encodedPath = [...baseSegments, ...fileSegments]
+            .map((segment) => encodeURIComponent(segment))
+            .join("/");
+        return `smb://${url.host}/${encodedPath}`;
+    } catch {
+        const base = baseUrl.trim().replace(/\/+$/, "");
+        return `${base}${normalizedPath}`;
+    }
 };
 
 export const parsePlaybackSource = (key: string): PlaybackSource => {
@@ -127,6 +175,18 @@ export const parsePlaybackSource = (key: string): PlaybackSource => {
             connectionId: soiaDlna.connectionId,
             resourceUrl: soiaDlna.resourceUrl,
             parentPath: soiaDlna.parentPath,
+        };
+    }
+
+    const soiaSmb = parseWebdavKey(key, SOIA_SMB_KEY_PREFIX);
+    if (soiaSmb) {
+        return {
+            type: "smb",
+            key,
+            connectionId: toRuntimeSmbConnectionId(
+                decodeURIComponent(soiaSmb.connectionId),
+            ),
+            filePath: soiaSmb.filePath,
         };
     }
 
@@ -176,7 +236,10 @@ export const getPlaybackDisplayPath = (key: string): string => {
         return source.resourceUrl;
     }
     if (source.type === "smb") {
-        return source.url;
+        if (source.url) return source.url;
+        const host = source.connectionId?.replace(/^smb-/i, "") || "smb";
+        const normalizedPath = source.filePath?.replace(/^\/+/, "") ?? "";
+        return normalizedPath ? `smb://${host}/${normalizedPath}` : `smb://${host}`;
     }
     return source.path;
 };

@@ -4,11 +4,32 @@ import type { NetworkConnection } from "../types/network";
 
 const shouldUseMockConnections = import.meta.env.DEV;
 
-const createConnectionId = () => `webdav-${Date.now()}`;
+const protocolIdPrefix = (protocol: string) => {
+    const normalized = protocol.trim().toLowerCase();
+    if (normalized === "smb" || normalized === "samba") return "smb";
+    if (normalized === "http-dlna" || normalized === "dlna") return "dlna";
+    if (normalized === "ftp") return "ftp";
+    return "webdav";
+};
+
+const createConnectionId = (protocol = "webdav") =>
+    `${protocolIdPrefix(protocol)}-${Date.now()}`;
 const createDlnaConnectionId = (usn: string, index: number) =>
     `dlna-${usn.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || index}`;
 const createSmbConnectionId = (usn: string, index: number) =>
     `smb-${usn.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || index}`;
+
+const normalizeGeneratedConnectionIdForProtocol = (
+    id: string,
+    protocol: string,
+) => {
+    const expectedPrefix = protocolIdPrefix(protocol);
+    const generatedMatch = id.trim().match(/^(webdav|smb|dlna|ftp)-(\d+)$/i);
+    if (!generatedMatch) return id;
+    const currentPrefix = generatedMatch[1]?.toLowerCase();
+    if (currentPrefix === expectedPrefix) return id;
+    return `${expectedPrefix}-${generatedMatch[2]}`;
+};
 
 type DiscoveredNetworkConnection = {
     protocol: string;
@@ -150,10 +171,10 @@ const mockDiscoveredConnections: NetworkConnection[] = [
     },
 ];
 
-const createDraftConnection = (): NetworkConnection => ({
-    id: createConnectionId(),
+const createDraftConnection = (protocol = "webdav"): NetworkConnection => ({
+    id: createConnectionId(protocol),
     label: "WebDAV",
-    protocol: "webdav",
+    protocol,
     baseUrl: "",
     username: "",
     password: "",
@@ -198,8 +219,8 @@ export const useNetworkConnections = () => {
         ensureSelection();
     };
 
-    const createConnection = () => {
-        const connection = createDraftConnection();
+    const createConnection = (protocol = "webdav") => {
+        const connection = createDraftConnection(protocol);
         connections.value.push(connection);
         selectedConnectionId.value = connection.id;
     };
@@ -207,9 +228,20 @@ export const useNetworkConnections = () => {
     const saveSelectedConnection = async () => {
         const connection = selectedConnection.value;
         if (!connection) return;
-        const saved = await invoke<NetworkConnection[]>("save_network_connection", {
+        const oldId = connection.id;
+        connection.id = normalizeGeneratedConnectionIdForProtocol(
+            connection.id,
+            connection.protocol,
+        );
+        let saved = await invoke<NetworkConnection[]>("save_network_connection", {
             connection,
         });
+        if (oldId !== connection.id) {
+            saved = await invoke<NetworkConnection[]>("delete_network_connection", {
+                connectionId: oldId,
+            });
+            selectedConnectionId.value = connection.id;
+        }
         connections.value = saved;
         ensureSelection();
     };
