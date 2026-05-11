@@ -19,14 +19,9 @@ You can also go to System Settings > Privacy & Security and click "Open Anyway" 
 
 The app is open-source and its code is publicly available for anyone to inspect.
 
-## [0.2.0] - 2026-05-10
+## [0.2.1] - 2026-05-12
 
-### Highlights
+### Hotfixes
 
-- SMB Browsing and Playback: Added SMB/Samba network share discovery, browsing, and direct playback support.
-- Advanced Subtitle Appearance: Added persistent controls for subtitle font, color, size, and position, including separate primary and secondary subtitle positioning for dual subtitles.
-
-### Fixes
-
-- Improved network connection dialog interactions and path entry.
-- Fixed the network browser so the currently playing item is revealed in the file list.
+- Fixed Windows/Linux SMB connection issues.
+- Fixed Linux video rendering issues.

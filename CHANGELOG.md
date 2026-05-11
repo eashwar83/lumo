@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1] - 2026-05-12
+
+### Hotfixes
+
+- Fixed Windows/Linux SMB connection issues.
+- Fixed Linux video rendering issues.
+
 ## [0.2.0] - 2026-05-10
 
 ### Features
