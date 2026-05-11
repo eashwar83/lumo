@@ -8,6 +8,7 @@ import PlaybackOverlays from "./components/PlaybackOverlays.vue";
 import PlaylistPeekButton from "./components/PlaylistPeekButton.vue";
 import PlaylistDrawer from "./components/PlaylistDrawer.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
+import WindowResizeRegions from "./components/WindowResizeRegions.vue";
 import { usePlaybackShortcuts } from "./composables/usePlaybackShortcuts";
 import { usePlaybackFlow } from "./composables/usePlaybackFlow";
 import { useAppUiPersistence } from "./composables/useAppUiPersistence";
@@ -133,6 +134,8 @@ const playbackNavigation = usePlaybackNavigation({
 
 const isWindowsPlatform =
     typeof navigator !== "undefined" && /\bwindows\b/i.test(navigator.userAgent);
+const isLinuxPlatform =
+    typeof navigator !== "undefined" && /\blinux\b/i.test(navigator.userAgent);
 const playerHeaderCompactModeEnabled = computed(
     () => compactModeEnabled.value || (isWindowsPlatform && isPipEnabled.value),
 );
@@ -624,6 +627,10 @@ useAppStartupBindings({
                 </p>
             </div>
         </ConfirmDialog>
+
+        <WindowResizeRegions
+            v-if="isLinuxPlatform && !player.state.window.isFullscreen"
+        />
     </main>
 </template>
 
