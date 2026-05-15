@@ -30,6 +30,7 @@ type HistoryApi = {
         duration: number,
         title?: string,
     ) => void;
+    updateTitle: (path: string, title: string) => void;
 };
 
 type PlaylistApi = {
@@ -336,6 +337,14 @@ export const usePlaybackFlow = ({
         return normalizedWithExtension;
     };
 
+    const applyResolvedMediaTitle = (url: string, title?: string | null) => {
+        const normalizedTitle = title?.trim() || "";
+        if (!normalizedTitle) return;
+        if (player.state.media.url !== url) return;
+        player.state.media.title = rememberPreferredTitle(url, normalizedTitle);
+        history.updateTitle(url, player.state.media.title);
+    };
+
     const playLocalPath = async (path: string, preferredTitle?: string) => {
         if (!path) return;
         await triggerPlaybackIntent();
@@ -354,7 +363,8 @@ export const usePlaybackFlow = ({
         await player.setPlaybackSpeed(preferences.defaultSpeed);
         const resumePosition = getStartPosition(path, preferences.skipIntroSeconds);
         pendingResume.value = { url: path, position: resumePosition };
-        await player.loadFile(resumePosition, preferences.autoPlay);
+        const result = await player.loadFile(resumePosition, preferences.autoPlay);
+        applyResolvedMediaTitle(path, result.title);
     };
 
     const playWebdav = async (
@@ -427,11 +437,12 @@ export const usePlaybackFlow = ({
             url: playbackKey,
             position: resumePosition,
         };
-        await player.loadFileAtUrl(
+        const result = await player.loadFileAtUrl(
             resourceUrl,
             resumePosition,
             preferences.autoPlay,
         );
+        applyResolvedMediaTitle(playbackKey, result.title);
     };
 
     const playSmb = async (url: string, preferredTitle?: string) => {
@@ -457,7 +468,12 @@ export const usePlaybackFlow = ({
             url,
             position: resumePosition,
         };
-        await player.loadFileAtUrl(url, resumePosition, preferences.autoPlay);
+        const result = await player.loadFileAtUrl(
+            url,
+            resumePosition,
+            preferences.autoPlay,
+        );
+        applyResolvedMediaTitle(url, result.title);
     };
 
     const playSmbNetwork = async (
@@ -687,7 +703,8 @@ export const usePlaybackFlow = ({
             url: player.state.media.url,
             position: resumePosition,
         };
-        await player.loadFile(resumePosition, preferences.autoPlay);
+        const result = await player.loadFile(resumePosition, preferences.autoPlay);
+        applyResolvedMediaTitle(player.state.media.url, result.title);
         if (!player.state.media.isFileLoaded) {
             hideHistory.value = false;
         }

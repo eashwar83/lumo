@@ -28,6 +28,7 @@ struct Candidate {
 
 pub(crate) struct ResolvedMedia {
     pub(crate) url: String,
+    pub(crate) title: Option<String>,
 }
 
 pub(crate) async fn resolve(app: &AppHandle, raw_url: &str) -> Result<Option<ResolvedMedia>, String> {
@@ -65,9 +66,13 @@ pub(crate) async fn resolve(app: &AppHandle, raw_url: &str) -> Result<Option<Res
     };
     log_selected_candidate("selected", &candidate);
     let playback_url = proxied_candidate_url(&candidate);
+    let title = extract_media_title(&value);
 
     info!("yt-dlp: resolved url through stream proxy");
-    Ok(Some(ResolvedMedia { url: playback_url }))
+    Ok(Some(ResolvedMedia {
+        url: playback_url,
+        title,
+    }))
 }
 
 pub(crate) async fn try_resolve(app: &AppHandle, raw_url: &str) -> Option<ResolvedMedia> {
@@ -312,6 +317,16 @@ fn log_selected_candidate(label: &str, candidate: &Candidate) {
         candidate.resolution.as_deref().unwrap_or("<unknown>"),
         candidate.score
     );
+}
+
+fn extract_media_title(value: &Value) -> Option<String> {
+    value
+        .get("title")
+        .or_else(|| value.get("fulltitle"))
+        .and_then(Value::as_str)
+        .map(|title| title.trim())
+        .filter(|title| !title.is_empty())
+        .map(|title| title.split_whitespace().collect::<Vec<_>>().join(" "))
 }
 
 fn format_candidate(format: &Value, top_headers: &[(String, String)]) -> Option<Candidate> {

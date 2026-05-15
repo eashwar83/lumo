@@ -21,6 +21,10 @@ export type ParsedPlaylistEntry = {
   title?: string | null;
 };
 
+export type LoadFileResult = {
+  title?: string | null;
+};
+
 export const usePlaybackCommands = (
   state: PlayerEffectState,
   currentWindow: CurrentWindow,
@@ -49,21 +53,22 @@ export const usePlaybackCommands = (
   const loadFile = async (
     resumePosition?: number,
     autoPlay = true,
-  ): Promise<void> => {
+  ): Promise<LoadFileResult> => {
     if (state.media.url) {
-      await invoke("load_file", {
+      return await invoke<LoadFileResult>("load_file", {
         payload: { url: state.media.url, resumePosition, autoPlay },
       });
     }
+    return {};
   };
 
   const loadFileAtUrl = async (
     url: string,
     resumePosition?: number,
     autoPlay = true,
-  ): Promise<void> => {
-    if (!url) return;
-    await invoke("load_file", {
+  ): Promise<LoadFileResult> => {
+    if (!url) return {};
+    return await invoke<LoadFileResult>("load_file", {
       payload: { url, resumePosition, autoPlay },
     });
   };

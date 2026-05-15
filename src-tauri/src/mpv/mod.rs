@@ -1,14 +1,14 @@
 mod event_loop;
 mod ffi;
 mod handle;
-mod resolve_with_ytdlp;
+mod ytdlp_resolver;
 mod stream_https;
 mod stream_proxy;
 
 #[cfg(target_os = "macos")]
 pub(crate) use ffi::SoiaUtils;
 pub(crate) use handle::MpvHandle;
-pub(crate) use resolve_with_ytdlp::try_resolve as try_resolve_with_ytdlp;
+pub(crate) use ytdlp_resolver::try_resolve as try_resolve_with_ytdlp;
 pub(crate) use stream_proxy::rewrite_https_stream_url;
 
 pub(crate) fn register_https_basic_auth(playback_url: &str, username: &str, password: &str) {

@@ -1,6 +1,10 @@
 import { computed, reactive } from "vue";
 import { Window } from "@tauri-apps/api/window";
-import { usePlaybackCommands, type ParsedPlaylistEntry } from "./usePlaybackCommands";
+import {
+  usePlaybackCommands,
+  type LoadFileResult,
+  type ParsedPlaylistEntry,
+} from "./usePlaybackCommands";
 import { formatTime } from "../utils/formatTime";
 
 type PlayerState = {
@@ -31,12 +35,12 @@ export type PlayerApi = {
   bufferedPercent: { value: number };
   isUrlModified: { value: boolean };
   formatTime: (seconds: number) => string;
-  loadFile: (resumePosition?: number, autoPlay?: boolean) => Promise<void>;
+  loadFile: (resumePosition?: number, autoPlay?: boolean) => Promise<LoadFileResult>;
   loadFileAtUrl: (
     url: string,
     resumePosition?: number,
     autoPlay?: boolean,
-  ) => Promise<void>;
+  ) => Promise<LoadFileResult>;
   loadNetworkFile: (
     protocol: string,
     connectionId: string,
