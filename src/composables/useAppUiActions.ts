@@ -41,7 +41,7 @@ type UseAppUiActionsOptions = {
     hideAllMenus: () => void;
     schedulePointerRefresh: () => void;
     onStopPlayback: () => Promise<void>;
-    playPath: (path: string) => Promise<void>;
+    playPath: (path: string, preferredTitle?: string) => Promise<void>;
     playPreviousTrack: () => Promise<void>;
     playNextTrack: () => Promise<void>;
 };
@@ -174,7 +174,7 @@ export const useAppUiActions = ({
     const onPlayPlaylist = async (entry: PlaylistEntry) => {
         playlistState.markActivePlaylistAsPlayback();
         closePlaylist();
-        await playPath(entry.path);
+        await playPath(entry.path, entry.title?.trim() || undefined);
     };
 
     const onEnterPlaylist = (playlistId: string) => {

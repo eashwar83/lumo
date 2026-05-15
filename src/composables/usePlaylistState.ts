@@ -426,6 +426,17 @@ export const usePlaylistState = () => {
         return list[(currentIndex + 1) % list.length]?.path ?? null;
     };
 
+    const getTitleForPath = (path: string): string | undefined => {
+        const normalizedPath = path.trim();
+        if (!normalizedPath) return undefined;
+        const playlistId = resolvePlaybackPlaylistId(normalizedPath);
+        if (!playlistId) return undefined;
+        const entry = getOrderedEntriesByPlaylistId(playlistId).find(
+            (item) => item.path === normalizedPath,
+        );
+        return entry?.title?.trim() || undefined;
+    };
+
     const markActivePlaylistAsPlayback = () => {
         if (!activePlaylist.value) return;
         playbackPlaylistId.value = activePlaylist.value.id;
@@ -473,6 +484,7 @@ export const usePlaylistState = () => {
         cycleSortMode,
         getAdjacentPath,
         getPathForEnd,
+        getTitleForPath,
         toggleLoopOne,
         togglePlaylistLoop,
     };

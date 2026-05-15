@@ -318,7 +318,19 @@ fn resolve_playlist_entry_path(base: &PlaylistBase<'_>, raw: &str) -> Option<Str
 }
 
 fn parse_extinf_title(line: &str) -> Option<String> {
-    let comma_index = line.find(',')?;
+    let mut in_quotes = false;
+    let mut comma_index = None;
+    for (index, ch) in line.char_indices() {
+        if ch == '"' {
+            in_quotes = !in_quotes;
+            continue;
+        }
+        if ch == ',' && !in_quotes {
+            comma_index = Some(index);
+            break;
+        }
+    }
+    let comma_index = comma_index?;
     let title = line[(comma_index + 1)..].trim();
     if title.is_empty() {
         None

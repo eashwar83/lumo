@@ -11,12 +11,13 @@ type PlaylistApi = {
         direction: PlaybackDirection,
     ) => string | null;
     getPathForEnd: (currentPath: string) => string | null;
+    getTitleForPath: (path: string) => string | undefined;
 };
 
 type UsePlaybackNavigationOptions = {
     player: PlayerApi;
     playlistState: PlaylistApi;
-    playPath: (path: string) => Promise<void>;
+    playPath: (path: string, preferredTitle?: string) => Promise<void>;
 };
 
 export const usePlaybackNavigation = ({
@@ -35,7 +36,7 @@ export const usePlaybackNavigation = ({
     const playTrack = async (direction: PlaybackDirection) => {
         const nextPath = await resolveTrackPath(direction);
         if (!nextPath) return;
-        await playPath(nextPath);
+        await playPath(nextPath, playlistState.getTitleForPath(nextPath));
     };
 
     const playNextAfterEnd = async () => {
@@ -47,7 +48,7 @@ export const usePlaybackNavigation = ({
             resolveDirectoryPath: resolveAdjacentPathInSameDirectory,
         });
         if (!nextPath) return;
-        await playPath(nextPath);
+        await playPath(nextPath, playlistState.getTitleForPath(nextPath));
     };
 
     return {
