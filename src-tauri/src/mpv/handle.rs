@@ -8,6 +8,7 @@ use super::ffi::{
     soia_utils_render_context_update, soia_utils_render_target_resize, soia_utils_uses_render_context,
     SoiaUtils,
 };
+use super::stream_https::HttpsStreamRegistry;
 use crate::check_update::SoiaAuthToken;
 use log::info;
 use std::ffi::{c_void, CStr, CString};
@@ -43,6 +44,7 @@ pub struct MpvHandle {
     render_loop_stop: Arc<AtomicBool>,
     render_loop_handle: Mutex<Option<JoinHandle<()>>>,
     soia_utils: AtomicPtr<SoiaUtils>,
+    _https_stream_registry: Option<Box<HttpsStreamRegistry>>,
 }
 
 unsafe impl Send for MpvHandle {}
@@ -235,12 +237,21 @@ impl MpvHandle {
             return Err("Failed to create SoiaUtils instance".to_string());
         }
 
+        if let Err(error) = super::stream_proxy::start(app_handle.clone()) {
+            log::warn!("stream proxy: failed to start: {error}");
+        }
+        let mut https_stream_registry = Box::new(HttpsStreamRegistry::new(app_handle.clone()));
+        if let Err(error) = https_stream_registry.register(soia_utils) {
+            log::warn!("{error}");
+        }
+
         let handle = MpvHandle {
             ctx: AtomicPtr::new(ctx),
             is_playing: Arc::new(AtomicBool::new(false)),
             is_rendering: Arc::new(AtomicBool::new(false)),
             eof_reached: Arc::new(AtomicBool::new(false)),
             soia_utils: AtomicPtr::new(soia_utils),
+            _https_stream_registry: Some(https_stream_registry),
             app_handle,
             event_loop_stop: Arc::new(AtomicBool::new(false)),
             event_loop_handle: Mutex::new(None),

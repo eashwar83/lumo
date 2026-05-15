@@ -29,7 +29,7 @@ roxmltree = "0.20"
 socket2 = "0.5"
 url = "2.5"
 percent-encoding = "2.3"
-tokio = { version = "1", features = ["net", "time"] }
+tokio = { version = "1", features = ["io-util", "net", "rt-multi-thread", "time"] }
 libc = "0.2"
 cfg-if = "1.0"
 log = "0.4"

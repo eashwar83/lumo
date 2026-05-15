@@ -227,6 +227,95 @@ pub(crate) struct SoiaUtils {
     _private: [u8; 0],
 }
 
+pub(crate) type SoiaStreamReadFn =
+    unsafe extern "C" fn(cookie: *mut c_void, buf: *mut c_char, nbytes: u64) -> i64;
+pub(crate) type SoiaStreamSeekFn = unsafe extern "C" fn(cookie: *mut c_void, offset: i64) -> i64;
+pub(crate) type SoiaStreamSizeFn = unsafe extern "C" fn(cookie: *mut c_void) -> i64;
+pub(crate) type SoiaStreamCloseFn = unsafe extern "C" fn(cookie: *mut c_void);
+pub(crate) type SoiaStreamCancelFn = unsafe extern "C" fn(cookie: *mut c_void);
+
+#[repr(C)]
+pub(crate) struct SoiaStreamCbInfo {
+    pub cookie: *mut c_void,
+    pub read_fn: Option<SoiaStreamReadFn>,
+    pub seek_fn: Option<SoiaStreamSeekFn>,
+    pub size_fn: Option<SoiaStreamSizeFn>,
+    pub close_fn: Option<SoiaStreamCloseFn>,
+    pub cancel_fn: Option<SoiaStreamCancelFn>,
+}
+
+pub(crate) type SoiaStreamOpenRoFn = unsafe extern "C" fn(
+    userdata: *mut c_void,
+    uri: *mut c_char,
+    info: *mut SoiaStreamCbInfo,
+) -> c_int;
+
+type SoiaUtilsRegisterStreamProtocolFn = unsafe extern "C" fn(
+    utils: *mut SoiaUtils,
+    protocol: *const c_char,
+    userdata: *mut c_void,
+    open_fn: Option<SoiaStreamOpenRoFn>,
+) -> c_int;
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn resolve_soia_utils_register_stream_protocol() -> Option<SoiaUtilsRegisterStreamProtocolFn> {
+    let symbol = unsafe {
+        libc::dlsym(
+            libc::RTLD_DEFAULT,
+            b"soia_utils_register_stream_protocol\0".as_ptr().cast(),
+        )
+    };
+    if symbol.is_null() {
+        None
+    } else {
+        Some(unsafe {
+            std::mem::transmute::<*mut c_void, SoiaUtilsRegisterStreamProtocolFn>(symbol)
+        })
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn resolve_soia_utils_register_stream_protocol() -> Option<SoiaUtilsRegisterStreamProtocolFn> {
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetModuleHandleA(name: *const c_char) -> *mut c_void;
+        fn GetProcAddress(module: *mut c_void, name: *const c_char) -> *mut c_void;
+    }
+
+    let module = unsafe { GetModuleHandleA(b"soia_utils.dll\0".as_ptr().cast()) };
+    if module.is_null() {
+        return None;
+    }
+    let symbol = unsafe {
+        GetProcAddress(
+            module,
+            b"soia_utils_register_stream_protocol\0".as_ptr().cast(),
+        )
+    };
+    if symbol.is_null() {
+        None
+    } else {
+        Some(unsafe {
+            std::mem::transmute::<*mut c_void, SoiaUtilsRegisterStreamProtocolFn>(symbol)
+        })
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+fn resolve_soia_utils_register_stream_protocol() -> Option<SoiaUtilsRegisterStreamProtocolFn> {
+    None
+}
+
+pub(crate) unsafe fn soia_utils_register_stream_protocol(
+    utils: *mut SoiaUtils,
+    protocol: *const c_char,
+    userdata: *mut c_void,
+    open_fn: Option<SoiaStreamOpenRoFn>,
+) -> Option<c_int> {
+    resolve_soia_utils_register_stream_protocol()
+        .map(|register| unsafe { register(utils, protocol, userdata, open_fn) })
+}
+
 #[link(name = "soia_utils")]
 unsafe extern "C" {
     pub(super) fn soia_utils_create(
