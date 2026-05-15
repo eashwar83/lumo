@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.2] - 2026-05-15
+
+### Features
+
+- Added yt-dlp powered web stream resolution with proxy playback support.
+- Added Rust-side network-adjacent source resolution for smoother next/previous playback across network media.
+- Added automatic fuzzy matching for sibling subtitle files.
+- Enriched audio and subtitle track menus with clearer labels and metadata.
+
+### Fixes
+
+- Preserved resolved yt-dlp titles in playback and history.
+- Preserved IPTV playlist titles when opening playlist items.
+
 ## [0.2.1] - 2026-05-12
 
 ### Hotfixes

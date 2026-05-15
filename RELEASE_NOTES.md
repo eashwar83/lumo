@@ -19,9 +19,11 @@ You can also go to System Settings > Privacy & Security and click "Open Anyway" 
 
 The app is open-source and its code is publicly available for anyone to inspect.
 
-## [0.2.1] - 2026-05-12
+## [0.2.2] - 2026-05-15
 
-### Hotfixes
+### Improvements
 
-- Fixed Windows/Linux SMB connection issues.
-- Fixed Linux video rendering issues.
+- Added fuzzy matching for sibling subtitle files.
+- Added richer metadata to audio/subtitle track selection menus.
+- Improved HTTPS connection stability and playback behavior.
+- Fixed incorrect IPTV title display in playback history.
