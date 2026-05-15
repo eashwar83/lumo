@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use crate::playback_source::{
+    parse_playback_source, path_extension, path_file_name, path_parent, path_stem,
+    resolve_local_media_path, PlaybackSource,
+};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -20,29 +23,6 @@ struct SubtitleMatchEntry {
     path: String,
 }
 
-enum SubtitleMatchSource {
-    Local {
-        path: String,
-    },
-    Webdav {
-        connection_id: String,
-        file_path: String,
-    },
-    Dlna {
-        connection_id: String,
-        resource_url: String,
-        parent_path: String,
-    },
-    Smb {
-        connection_id: String,
-        file_path: String,
-    },
-}
-
-const SOIA_WEBDAV_KEY_PREFIX: &str = "soia-webdav://";
-const SOIA_DLNA_KEY_PREFIX: &str = "soia-dlna://";
-const SOIA_SMB_KEY_PREFIX: &str = "soia-smb://";
-
 const SUBTITLE_FILE_EXTENSIONS: &[&str] = &[
     "srt", "ass", "ssa", "vtt", "sub", "idx", "sup", "smi", "smil", "lrc", "ttml", "dfxp",
 ];
@@ -54,159 +34,6 @@ const IGNORED_SUBTITLE_MATCH_TOKENS: &[&str] = &[
     "multi", "chs", "cht", "chi", "zho", "zh", "cn", "gb", "big5", "eng", "en", "jpn", "jp",
     "kor", "kr", "sc", "tc",
 ];
-
-fn resolve_local_media_path(path: &str) -> Option<PathBuf> {
-    let trimmed = path.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    if trimmed.starts_with("file://") {
-        let parsed = url::Url::parse(trimmed).ok()?;
-        if parsed.scheme() == "file" {
-            return parsed.to_file_path().ok();
-        }
-        return None;
-    }
-    Some(PathBuf::from(trimmed))
-}
-
-fn decode_url_component(value: &str) -> String {
-    percent_encoding::percent_decode_str(value)
-        .decode_utf8_lossy()
-        .to_string()
-}
-
-fn normalize_key_file_path(path: &str) -> String {
-    let trimmed = path.trim();
-    if trimmed.is_empty() || trimmed == "/" {
-        return "/".to_string();
-    }
-    let with_leading = if trimmed.starts_with('/') {
-        trimmed.to_string()
-    } else {
-        format!("/{trimmed}")
-    };
-    with_leading.trim_end_matches('/').to_string()
-}
-
-fn runtime_connection_id(prefix: &str, value: &str) -> String {
-    let trimmed = value.trim();
-    if trimmed.chars().all(|item| item.is_ascii_digit()) {
-        format!("{prefix}-{trimmed}")
-    } else {
-        trimmed.to_string()
-    }
-}
-
-fn parse_webdav_like_key(key: &str, prefix: &str) -> Option<(String, String)> {
-    if !key.starts_with(prefix) {
-        return None;
-    }
-    let value = &key[prefix.len()..];
-    let slash_index = value.find('/')?;
-    if slash_index == 0 {
-        return None;
-    }
-    let connection_id = &value[..slash_index];
-    let file_path = normalize_key_file_path(&value[slash_index..]);
-    if connection_id.trim().is_empty() {
-        return None;
-    }
-    Some((connection_id.to_string(), file_path))
-}
-
-fn parse_dlna_key(key: &str) -> Option<(String, String, String)> {
-    if !key.starts_with(SOIA_DLNA_KEY_PREFIX) {
-        return None;
-    }
-    let value = &key[SOIA_DLNA_KEY_PREFIX.len()..];
-    let slash_index = value.find('/')?;
-    if slash_index == 0 {
-        return None;
-    }
-    let encoded_connection_id = &value[..slash_index];
-    let encoded_parts = value[slash_index + 1..].split('/').collect::<Vec<_>>();
-    let encoded_resource_url = encoded_parts.first().copied().unwrap_or_default();
-    if encoded_connection_id.is_empty() || encoded_resource_url.is_empty() {
-        return None;
-    }
-    let connection_id = decode_url_component(encoded_connection_id);
-    let resource_url = decode_url_component(encoded_resource_url);
-    let parent_path = encoded_parts
-        .get(1)
-        .map(|value| decode_url_component(value))
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| "0".to_string());
-    Some((connection_id, resource_url, parent_path))
-}
-
-fn parse_subtitle_match_source(playback_key: &str) -> SubtitleMatchSource {
-    if let Some((connection_id, file_path)) =
-        parse_webdav_like_key(playback_key, SOIA_WEBDAV_KEY_PREFIX)
-    {
-        return SubtitleMatchSource::Webdav {
-            connection_id: runtime_connection_id("webdav", &connection_id),
-            file_path,
-        };
-    }
-    if let Some((connection_id, resource_url, parent_path)) = parse_dlna_key(playback_key) {
-        return SubtitleMatchSource::Dlna {
-            connection_id,
-            resource_url,
-            parent_path,
-        };
-    }
-    if let Some((connection_id, file_path)) =
-        parse_webdav_like_key(playback_key, SOIA_SMB_KEY_PREFIX)
-    {
-        return SubtitleMatchSource::Smb {
-            connection_id: runtime_connection_id("smb", &decode_url_component(&connection_id)),
-            file_path,
-        };
-    }
-    SubtitleMatchSource::Local {
-        path: playback_key.to_string(),
-    }
-}
-
-fn path_file_name(path: &str) -> String {
-    path.split(['?', '#'])
-        .next()
-        .unwrap_or(path)
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or(path)
-        .to_string()
-}
-
-fn path_parent(path: &str) -> Option<String> {
-    let normalized = normalize_key_file_path(path);
-    if normalized == "/" {
-        return None;
-    }
-    let index = normalized.rfind('/')?;
-    if index == 0 {
-        Some("/".to_string())
-    } else {
-        Some(normalized[..index].to_string())
-    }
-}
-
-fn path_extension(path: &str) -> String {
-    let file_name = path_file_name(path);
-    file_name
-        .rsplit_once('.')
-        .map(|(_, ext)| ext.to_ascii_lowercase())
-        .unwrap_or_default()
-}
-
-fn path_stem(path: &str) -> String {
-    let file_name = path_file_name(path);
-    file_name
-        .rsplit_once('.')
-        .map(|(stem, _)| stem.to_string())
-        .unwrap_or(file_name)
-}
 
 fn is_subtitle_file(path: &str) -> bool {
     let ext = path_extension(path);
@@ -517,8 +344,8 @@ pub(crate) async fn find_fuzzy_external_subtitle_matches(
     app: tauri::AppHandle,
     payload: ExternalSubtitleMatchesPayload,
 ) -> Result<Vec<ExternalSubtitleMatch>, String> {
-    match parse_subtitle_match_source(&payload.playback_key) {
-        SubtitleMatchSource::Local { path } => {
+    match parse_playback_source(&payload.playback_key) {
+        PlaybackSource::Local { path } => {
             let Some(local_path) = resolve_local_media_path(&path) else {
                 return Ok(Vec::new());
             };
@@ -599,7 +426,7 @@ pub(crate) async fn find_fuzzy_external_subtitle_matches(
                 .map(|entry| ExternalSubtitleMatch { path: entry.path })
                 .collect())
         }
-        SubtitleMatchSource::Webdav {
+        PlaybackSource::Webdav {
             connection_id,
             file_path,
         } => {
@@ -616,11 +443,12 @@ pub(crate) async fn find_fuzzy_external_subtitle_matches(
             )
             .await
         }
-        SubtitleMatchSource::Dlna {
+        PlaybackSource::Dlna {
             connection_id,
             resource_url,
             parent_path,
         } => {
+            let parent_path = parent_path.unwrap_or_else(|| "0".to_string());
             network_subtitle_matches(
                 &app,
                 &connection_id,
@@ -631,9 +459,10 @@ pub(crate) async fn find_fuzzy_external_subtitle_matches(
             )
             .await
         }
-        SubtitleMatchSource::Smb {
-            connection_id,
-            file_path,
+        PlaybackSource::Smb {
+            connection_id: Some(connection_id),
+            file_path: Some(file_path),
+            ..
         } => {
             let Some(parent_path) = path_parent(&file_path) else {
                 return Ok(Vec::new());
@@ -648,5 +477,6 @@ pub(crate) async fn find_fuzzy_external_subtitle_matches(
             )
             .await
         }
+        PlaybackSource::Smb { .. } | PlaybackSource::DirectSmbUrl => Ok(Vec::new()),
     }
 }

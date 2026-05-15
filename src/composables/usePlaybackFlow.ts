@@ -1,7 +1,7 @@
 import { computed, onMounted, onUnmounted, ref, type Ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { HistoryEntry } from "../types/history";
-import type { NetworkConnection, NetworkPlayRequest } from "../types/network";
+import type { NetworkPlayRequest } from "../types/network";
 import { parsePlaybackSource } from "../utils/playbackSource";
 import type { PlayerApi } from "./usePlaybackController";
 import { loadUiState } from "./useUiStateStore";
@@ -93,74 +93,17 @@ type PlaybackPreferences = {
     subtitlesDisabled: boolean;
 };
 
-const isSmbProtocol = (protocol: string) => {
-    const normalized = protocol.trim().toLowerCase();
-    return normalized === "smb" || normalized === "samba";
-};
-
-const decodeUrlSegment = (segment: string) => {
-    try {
-        return decodeURIComponent(segment);
-    } catch {
-        return segment;
-    }
-};
-
-const splitDecodedPathSegments = (path: string) =>
-    path.split("/").filter(Boolean).map(decodeUrlSegment);
-
-const normalizePathFromSegments = (segments: string[]) =>
-    segments.length ? `/${segments.join("/")}` : "/";
-
-const resolveSmbUrlFromSavedConnection = async (
-    url: string,
-): Promise<{
+type SmbPlaybackSourceResolution = {
     connectionId: string;
     filePath: string;
-} | null> => {
-    let parsed: URL;
-    try {
-        parsed = new URL(url);
-    } catch {
-        return null;
-    }
-    if (parsed.protocol.toLowerCase() !== "smb:") return null;
-
-    const connections = await invoke<NetworkConnection[]>("list_network_connections");
-    const urlHost = parsed.host.toLowerCase();
-    const urlSegments = splitDecodedPathSegments(parsed.pathname);
-
-    let bestMatch: { connectionId: string; filePath: string; score: number } | null = null;
-    for (const connection of connections) {
-        if (!isSmbProtocol(connection.protocol)) continue;
-        let base: URL;
-        try {
-            base = new URL(connection.baseUrl);
-        } catch {
-            continue;
-        }
-        if (base.protocol.toLowerCase() !== "smb:") continue;
-        if (base.host.toLowerCase() !== urlHost) continue;
-
-        const baseSegments = splitDecodedPathSegments(base.pathname);
-        const isPrefix = baseSegments.every(
-            (segment, index) => urlSegments[index] === segment,
-        );
-        if (!isPrefix) continue;
-
-        const filePath = normalizePathFromSegments(urlSegments.slice(baseSegments.length));
-        const score = baseSegments.length;
-        if (!bestMatch || score > bestMatch.score) {
-            bestMatch = {
-                connectionId: connection.id,
-                filePath,
-                score,
-            };
-        }
-    }
-
-    return bestMatch;
+    playbackKey: string;
 };
+
+const resolveSmbPlaybackSourceFromUrl = (url: string) =>
+    invoke<SmbPlaybackSourceResolution | null>(
+        "resolve_smb_playback_source_from_url",
+        { url },
+    );
 
 const DEFAULT_PLAYBACK_PREFERENCES: PlaybackPreferences = {
     skipIntroSeconds: 0,
@@ -543,12 +486,12 @@ export const usePlaybackFlow = ({
                 return;
             }
             if (source.url) {
-                const networkSource = await resolveSmbUrlFromSavedConnection(source.url);
+                const networkSource = await resolveSmbPlaybackSourceFromUrl(source.url);
                 if (networkSource) {
                     await playSmbNetwork(
                         networkSource.connectionId,
                         networkSource.filePath,
-                        source.url,
+                        networkSource.playbackKey,
                         preferredTitle,
                     );
                     return;
@@ -752,12 +695,12 @@ export const usePlaybackFlow = ({
                 return;
             }
             if (source.url) {
-                const networkSource = await resolveSmbUrlFromSavedConnection(source.url);
+                const networkSource = await resolveSmbPlaybackSourceFromUrl(source.url);
                 if (networkSource) {
                     await playSmbNetwork(
                         networkSource.connectionId,
                         networkSource.filePath,
-                        source.url,
+                        networkSource.playbackKey,
                         preferredTitle,
                     );
                     return;

@@ -10,6 +10,7 @@ mod media_extensions;
 mod mpv;
 mod network;
 mod platform;
+mod playback_source;
 mod subtitles;
 use mpv::MpvHandle;
 use tauri::{Emitter, Manager};
@@ -309,6 +310,8 @@ pub fn run() {
             commands::playback::get_runtime_versions,
             commands::playback::get_media_file_size,
             commands::playback::list_local_media_siblings,
+            playback_source::resolve_adjacent_playback_source,
+            playback_source::resolve_smb_playback_source_from_url,
             subtitles::find_fuzzy_external_subtitle_matches,
             commands::playback::parse_playlist_file,
             commands::playback::parse_playlist_source,
