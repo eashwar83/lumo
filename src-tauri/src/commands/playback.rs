@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::{
-    build_load_file_command_args, json_value_to_string, mpv_command_checked,
+    build_load_file_command_args_with_options, json_value_to_string, mpv_command_checked,
     mpv_set_option_string_checked, with_mpv, AppState, OpenFileState,
 };
 
@@ -53,13 +53,22 @@ fn restart_from_beginning_after_eof(mpv_guard: &crate::mpv::MpvHandle) -> Result
 }
 
 #[tauri::command]
-pub(crate) fn load_file(
+pub(crate) async fn load_file(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     payload: LoadFilePayload,
 ) -> Result<(), String> {
     let resume_position = payload.resume_position.unwrap_or(0.0);
     let auto_play = payload.auto_play.unwrap_or(true);
-    let command_args = build_load_file_command_args(&payload.url, resume_position);
+    let resolved_media = crate::mpv::try_resolve_with_ytdlp(&app, &payload.url).await;
+    let playback_url = resolved_media
+        .as_ref()
+        .map(|resolved| resolved.url.as_str())
+        .unwrap_or(&payload.url);
+    let command_args =
+        build_load_file_command_args_with_options(&playback_url, resume_position, &[
+            "ytdl=no".to_string(),
+        ]);
     let command_refs: Vec<&str> = command_args.iter().map(String::as_str).collect();
     with_mpv(&state, |mpv_guard| {
         mpv_command_checked(mpv_guard, &command_refs)?;

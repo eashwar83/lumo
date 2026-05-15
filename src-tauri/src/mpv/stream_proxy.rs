@@ -1,9 +1,11 @@
-use log::{info, warn};
+use log::{debug, info, warn};
 use percent_encoding::{percent_decode_str, utf8_percent_encode, NON_ALPHANUMERIC};
 use reqwest::header::{
-    ACCEPT_ENCODING, ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, RANGE, USER_AGENT,
+    HeaderName, HeaderValue, ACCEPT_ENCODING, ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE,
+    CONTENT_TYPE, RANGE, USER_AGENT,
 };
 use reqwest::{Client, RequestBuilder, Response};
+use std::collections::HashMap;
 use std::net::TcpListener as StdTcpListener;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
@@ -13,17 +15,26 @@ use tokio::net::{TcpListener, TcpStream};
 use url::Url;
 
 const HTTP_USER_AGENT: &str = "Lavf/61.7.100";
+const MAX_REQUEST_HEADER_BYTES: usize = 128 * 1024;
 
 type BasicAuth = (String, String);
+pub(crate) type ProxyHeaders = Vec<(String, String)>;
 
 static STREAM_PROXY_BASE_URL: OnceLock<String> = OnceLock::new();
-static STREAM_PROXY_BASIC_AUTH: OnceLock<Mutex<std::collections::HashMap<String, BasicAuth>>> =
-    OnceLock::new();
+static STREAM_PROXY_BASIC_AUTH: OnceLock<Mutex<HashMap<String, BasicAuth>>> = OnceLock::new();
+static STREAM_PROXY_HEADERS: OnceLock<Mutex<HashMap<String, ProxyHeaders>>> = OnceLock::new();
 static STREAM_PROXY_CLIENT: OnceLock<Mutex<Option<CachedClient>>> = OnceLock::new();
 
 struct CachedClient {
     proxy_key: Option<String>,
     client: Client,
+}
+
+enum RequestHeaderRead {
+    Empty,
+    Complete(Vec<u8>),
+    TooLarge,
+    Incomplete,
 }
 
 pub(crate) fn register_basic_auth(playback_url: &str, username: &str, password: &str) {
@@ -39,6 +50,32 @@ pub(crate) fn register_basic_auth(playback_url: &str, username: &str, password: 
             playback_url.to_string(),
             (username.to_string(), password.to_string()),
         );
+    }
+}
+
+pub(crate) fn rewrite_stream_url_with_headers(
+    url: &str,
+    headers: &[(String, String)],
+) -> Option<String> {
+    if !is_http_url(url) {
+        return None;
+    }
+    register_headers(url, headers);
+    let proxied = proxy_url_for(url)?;
+    info!("stream proxy: rewrote yt-dlp stream url={}", redact_url(url));
+    Some(proxied)
+}
+
+pub(crate) fn register_headers(playback_url: &str, headers: &[(String, String)]) {
+    let normalized = normalize_headers(headers);
+    if normalized.is_empty() {
+        return;
+    }
+    if let Ok(mut headers_map) = STREAM_PROXY_HEADERS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+    {
+        headers_map.insert(playback_url.to_string(), normalized);
     }
 }
 
@@ -94,6 +131,13 @@ pub(crate) fn rewrite_https_stream_url(url: &str) -> Option<String> {
     Some(proxied)
 }
 
+fn is_http_url(raw: &str) -> bool {
+    let Ok(url) = Url::parse(raw) else {
+        return false;
+    };
+    matches!(url.scheme(), "http" | "https")
+}
+
 fn is_https_url(raw: &str) -> bool {
     let Ok(url) = Url::parse(raw) else {
         return false;
@@ -118,7 +162,15 @@ fn redact_url(raw: &str) -> String {
         let _ = url.set_username("<user>");
         let _ = url.set_password(Some("<redacted>"));
     }
+    url.set_query(None);
+    url.set_fragment(None);
     url.to_string()
+}
+
+fn is_client_disconnect_error(error: &str) -> bool {
+    error.contains("Broken pipe")
+        || error.contains("Connection reset by peer")
+        || error.contains("connection reset by peer")
 }
 
 async fn serve(listener: TcpListener, app_handle: AppHandle) {
@@ -128,7 +180,11 @@ async fn serve(listener: TcpListener, app_handle: AppHandle) {
                 let app_handle = app_handle.clone();
                 tokio::spawn(async move {
                     if let Err(error) = handle_connection(stream, &app_handle).await {
-                        warn!("stream proxy: request failed: {error}");
+                        if is_client_disconnect_error(&error) {
+                            debug!("stream proxy: client disconnected: {error}");
+                        } else {
+                            warn!("stream proxy: request failed: {error}");
+                        }
                     }
                 });
             }
@@ -138,16 +194,26 @@ async fn serve(listener: TcpListener, app_handle: AppHandle) {
 }
 
 async fn handle_connection(mut stream: TcpStream, app_handle: &AppHandle) -> Result<(), String> {
-    let mut buffer = [0_u8; 16 * 1024];
-    let read = stream
-        .read(&mut buffer)
-        .await
-        .map_err(|error| error.to_string())?;
-    if read == 0 {
-        return Ok(());
-    }
+    let request_bytes = match read_request_header(&mut stream).await? {
+        RequestHeaderRead::Empty => return Ok(()),
+        RequestHeaderRead::Complete(bytes) => bytes,
+        RequestHeaderRead::TooLarge => {
+            write_status(
+                &mut stream,
+                431,
+                "Request Header Fields Too Large",
+                b"request header too large",
+            )
+            .await?;
+            return Ok(());
+        }
+        RequestHeaderRead::Incomplete => {
+            write_status(&mut stream, 400, "Bad Request", b"incomplete request header").await?;
+            return Ok(());
+        }
+    };
 
-    let request = String::from_utf8_lossy(&buffer[..read]);
+    let request = String::from_utf8_lossy(&request_bytes);
     let (method, target, range) = parse_request(&request)?;
     if method != "GET" && method != "HEAD" {
         write_status(&mut stream, 405, "Method Not Allowed", b"method not allowed").await?;
@@ -160,7 +226,17 @@ async fn handle_connection(mut stream: TcpStream, app_handle: &AppHandle) -> Res
     };
     info!("stream proxy: fetch {}", redact_url(&remote_url));
 
-    let response = fetch_remote(app_handle, &remote_url, range.as_deref()).await?;
+    let response = match fetch_remote(app_handle, &remote_url, range.as_deref()).await {
+        Ok(response) => response,
+        Err(error) => {
+            warn!(
+                "stream proxy: upstream fetch failed url={} error={error}",
+                redact_url(&remote_url)
+            );
+            write_status(&mut stream, 502, "Bad Gateway", error.as_bytes()).await?;
+            return Ok(());
+        }
+    };
     let status = response.status();
     if !status.is_success() {
         let code = status.as_u16();
@@ -175,7 +251,8 @@ async fn handle_connection(mut stream: TcpStream, app_handle: &AppHandle) -> Res
         let reason = status.canonical_reason().unwrap_or("OK").to_string();
         let bytes = response.bytes().await.map_err(|error| error.to_string())?;
         let text = String::from_utf8_lossy(&bytes);
-        let body = rewrite_playlist(&remote_url, &text).into_bytes();
+        let inherited_headers = lookup_headers(&remote_url);
+        let body = rewrite_playlist(&remote_url, &text, inherited_headers.as_deref()).into_bytes();
         write_response(
             &mut stream,
             status.as_u16(),
@@ -196,6 +273,43 @@ async fn handle_connection(mut stream: TcpStream, app_handle: &AppHandle) -> Res
     }
 
     stream_response(&mut stream, &method, response).await
+}
+
+async fn read_request_header(stream: &mut TcpStream) -> Result<RequestHeaderRead, String> {
+    let mut bytes = Vec::with_capacity(16 * 1024);
+    let mut buffer = [0_u8; 4096];
+    loop {
+        let read = stream
+            .read(&mut buffer)
+            .await
+            .map_err(|error| error.to_string())?;
+        if read == 0 {
+            return if bytes.is_empty() {
+                Ok(RequestHeaderRead::Empty)
+            } else {
+                Ok(RequestHeaderRead::Incomplete)
+            };
+        }
+        bytes.extend_from_slice(&buffer[..read]);
+        if request_header_end(&bytes).is_some() {
+            return Ok(RequestHeaderRead::Complete(bytes));
+        }
+        if bytes.len() > MAX_REQUEST_HEADER_BYTES {
+            return Ok(RequestHeaderRead::TooLarge);
+        }
+    }
+}
+
+fn request_header_end(bytes: &[u8]) -> Option<usize> {
+    bytes
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|index| index + 4)
+        .or_else(|| {
+            bytes.windows(2)
+                .position(|window| window == b"\n\n")
+                .map(|index| index + 2)
+        })
 }
 
 fn parse_request(request: &str) -> Result<(String, String, Option<String>), String> {
@@ -239,6 +353,7 @@ async fn fetch_remote(
         request = request.header(RANGE, range);
     }
     request = apply_basic_auth(request, remote_url);
+    request = apply_headers(request, remote_url);
     request.send().await.map_err(|error| error.to_string())
 }
 
@@ -254,9 +369,12 @@ fn build_client(app_handle: &AppHandle) -> Result<Client, String> {
     }
 
     let builder = Client::builder()
-        .timeout(Duration::from_secs(30))
         .connect_timeout(Duration::from_secs(15))
-        .pool_idle_timeout(Duration::from_secs(30));
+        .pool_idle_timeout(Duration::from_secs(30))
+        .no_gzip()
+        .no_brotli()
+        .no_zstd()
+        .no_deflate();
     let client = configure_client_builder_with_proxy_key(builder, proxy_key.as_deref())?
         .build()
         .map_err(|error| error.to_string())?;
@@ -295,6 +413,50 @@ fn lookup_basic_auth(url: &str) -> Option<BasicAuth> {
         .and_then(|auth_map| auth_map.get(url).cloned())
 }
 
+fn normalize_headers(headers: &[(String, String)]) -> ProxyHeaders {
+    headers
+        .iter()
+        .filter_map(|(name, value)| {
+            let name = name.trim();
+            let value = value.trim();
+            if name.is_empty() || value.is_empty() || !should_forward_registered_header(name) {
+                return None;
+            }
+            Some((name.to_string(), value.to_string()))
+        })
+        .collect()
+}
+
+fn should_forward_registered_header(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "user-agent" | "referer" | "cookie" | "origin" | "accept-language"
+    )
+}
+
+fn apply_headers(mut request: RequestBuilder, remote_url: &str) -> RequestBuilder {
+    let Some(headers) = lookup_headers(remote_url) else {
+        return request;
+    };
+    for (name, value) in headers {
+        let Ok(header_name) = HeaderName::from_bytes(name.as_bytes()) else {
+            continue;
+        };
+        let Ok(header_value) = HeaderValue::from_str(&value) else {
+            continue;
+        };
+        request = request.header(header_name, header_value);
+    }
+    request
+}
+
+fn lookup_headers(url: &str) -> Option<ProxyHeaders> {
+    STREAM_PROXY_HEADERS
+        .get()
+        .and_then(|headers_map| headers_map.lock().ok())
+        .and_then(|headers_map| headers_map.get(url).cloned())
+}
+
 fn should_rewrite_playlist(remote_url: &str, response: &Response) -> bool {
     remote_url.to_ascii_lowercase().contains(".m3u8")
         || content_type(response).to_ascii_lowercase().contains("mpegurl")
@@ -309,25 +471,37 @@ fn content_type(response: &Response) -> String {
         .to_string()
 }
 
-fn rewrite_playlist(base_url: &str, text: &str) -> String {
+fn rewrite_playlist(
+    base_url: &str,
+    text: &str,
+    inherited_headers: Option<&[(String, String)]>,
+) -> String {
     let base = Url::parse(base_url).ok();
     text.lines()
-        .map(|line| rewrite_playlist_line(base.as_ref(), line))
+        .map(|line| rewrite_playlist_line(base.as_ref(), line, inherited_headers))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-fn rewrite_playlist_line(base: Option<&Url>, line: &str) -> String {
+fn rewrite_playlist_line(
+    base: Option<&Url>,
+    line: &str,
+    inherited_headers: Option<&[(String, String)]>,
+) -> String {
     if line.trim().is_empty() {
         return line.to_string();
     }
     if line.starts_with('#') {
-        return rewrite_uri_attributes(base, line);
+        return rewrite_uri_attributes(base, line, inherited_headers);
     }
-    rewrite_playlist_url(base, line).unwrap_or_else(|| line.to_string())
+    rewrite_playlist_url(base, line, inherited_headers).unwrap_or_else(|| line.to_string())
 }
 
-fn rewrite_uri_attributes(base: Option<&Url>, line: &str) -> String {
+fn rewrite_uri_attributes(
+    base: Option<&Url>,
+    line: &str,
+    inherited_headers: Option<&[(String, String)]>,
+) -> String {
     let mut rewritten = String::with_capacity(line.len());
     let mut rest = line;
     while let Some(index) = rest.find("URI=\"") {
@@ -340,21 +514,31 @@ fn rewrite_uri_attributes(base: Option<&Url>, line: &str) -> String {
             return rewritten;
         };
         let uri = &uri_start[..end];
-        rewritten.push_str(&rewrite_playlist_url(base, uri).unwrap_or_else(|| uri.to_string()));
+        rewritten.push_str(
+            &rewrite_playlist_url(base, uri, inherited_headers).unwrap_or_else(|| uri.to_string()),
+        );
         rest = &uri_start[end..];
     }
     rewritten.push_str(rest);
     rewritten
 }
 
-fn rewrite_playlist_url(base: Option<&Url>, value: &str) -> Option<String> {
+fn rewrite_playlist_url(
+    base: Option<&Url>,
+    value: &str,
+    inherited_headers: Option<&[(String, String)]>,
+) -> Option<String> {
     let resolved = if let Ok(url) = Url::parse(value) {
         url
     } else {
         base?.join(value).ok()?
     };
+    if let Some(headers) = inherited_headers {
+        register_headers(resolved.as_str(), headers);
+    }
     match resolved.scheme() {
         "https" => proxy_url_for(resolved.as_str()),
+        "http" if inherited_headers.is_some() => proxy_url_for(resolved.as_str()),
         "http" => Some(resolved.to_string()),
         _ => None,
     }
