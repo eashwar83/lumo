@@ -131,6 +131,15 @@ pub(crate) fn rewrite_https_stream_url(url: &str) -> Option<String> {
     Some(proxied)
 }
 
+pub(crate) fn rewrite_http_stream_url(url: &str) -> Option<String> {
+    if !is_http_url(url) {
+        return None;
+    }
+    let proxied = proxy_url_for(url)?;
+    info!("stream proxy: rewrote HTTP stream url={}", redact_url(url));
+    Some(proxied)
+}
+
 fn is_http_url(raw: &str) -> bool {
     let Ok(url) = Url::parse(raw) else {
         return false;

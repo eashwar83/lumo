@@ -1,24 +1,15 @@
-import { invoke } from "@tauri-apps/api/core";
-import { MEDIA_FILE_EXTENSIONS } from "../constants/media";
 import type { NetworkBrowseEntry, NetworkBrowseResult } from "../types/network";
+import { invoke } from "@tauri-apps/api/core";
+import {
+    isMediaFilePath,
+    listLocalSiblingFiles,
+    normalizeLocalPathForCompare,
+} from "../utils/localMediaSiblings";
 import {
     createDlnaPlaybackKey,
     createWebdavPlaybackKey,
     parsePlaybackSource,
 } from "../utils/playbackSource";
-
-const mediaExtensionSet = new Set(
-    MEDIA_FILE_EXTENSIONS.map((item) => item.toLowerCase()),
-);
-
-const getLowerExt = (path: string): string => {
-    const index = path.lastIndexOf(".");
-    if (index < 0) return "";
-    return path.slice(index + 1).toLowerCase();
-};
-
-const isMediaFilePath = (path: string): boolean =>
-    mediaExtensionSet.has(getLowerExt(path));
 
 const normalizeWebdavPath = (path: string): string => {
     const trimmed = path.trim();
@@ -42,12 +33,13 @@ const resolveAdjacentPathInLocalDirectory = async (
     direction: 1 | -1,
 ): Promise<string | null> => {
     if (!isMediaFilePath(currentPath)) return null;
-    const siblings = await invoke<string[]>("list_local_media_siblings", {
-        path: currentPath,
-    }).catch(() => []);
+    const siblings = await listLocalSiblingFiles(currentPath);
     if (!siblings.length) return null;
     const mediaSiblings = siblings.filter((item) => isMediaFilePath(item));
-    const currentIndex = mediaSiblings.findIndex((item) => item === currentPath);
+    const normalizedCurrentPath = normalizeLocalPathForCompare(currentPath);
+    const currentIndex = mediaSiblings.findIndex(
+        (item) => normalizeLocalPathForCompare(item) === normalizedCurrentPath,
+    );
     const nextIndex = currentIndex + direction;
     if (
         currentIndex < 0 ||

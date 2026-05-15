@@ -2,6 +2,7 @@ import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { MediaTrack } from "../types/media";
+import { normalizeLocalPathForCompare } from "../utils/localMediaSiblings";
 import { useSubtitleState, type SubtitleTarget } from "./useSubtitleState";
 
 type HistoryApi = {
@@ -12,6 +13,25 @@ type HistoryApi = {
         trackPath: string,
     ) => Promise<void>;
 };
+
+type ExternalSubtitleMatch = {
+    path: string;
+};
+
+const subtitleExtensions = [
+    "srt",
+    "ass",
+    "ssa",
+    "vtt",
+    "sub",
+    "idx",
+    "sup",
+    "smi",
+    "smil",
+    "lrc",
+    "ttml",
+    "dfxp",
+];
 
 export const useMediaTracks = (
     getCurrentMediaUrl?: () => string,
@@ -24,20 +44,6 @@ export const useMediaTracks = (
     const showAudioMenu = ref(false);
     const showSubMenu = ref(false);
     const subtitleState = useSubtitleState(subTracks, showSubMenu);
-    const subtitleExtensions = [
-        "srt",
-        "ass",
-        "ssa",
-        "vtt",
-        "sub",
-        "idx",
-        "sup",
-        "smi",
-        "smil",
-        "lrc",
-        "ttml",
-        "dfxp",
-    ];
 
     const normalizeSelectedPaths = (
         selected: string | string[] | null,
@@ -58,6 +64,37 @@ export const useMediaTracks = (
         const mediaKey = getMediaKey();
         if (!mediaKey || !history) return;
         await history.recordExternalTrack(mediaKey, kind, path);
+    };
+
+    const getAutoSubtitlePaths = async (
+        mediaKey: string,
+        mediaTitle?: string,
+    ): Promise<string[]> => {
+        const matches = await invoke<ExternalSubtitleMatch[]>(
+            "find_fuzzy_external_subtitle_matches",
+            {
+                payload: {
+                    playbackKey: mediaKey,
+                    mediaTitle,
+                },
+            },
+        ).catch(() => []);
+        return matches.map((match) => match.path).filter(Boolean);
+    };
+
+    const addExternalSubPath = async (
+        path: string,
+        mode: "select" | "auto",
+        mediaKey?: string,
+    ): Promise<void> => {
+        if (mediaKey && getMediaKey() !== mediaKey) return;
+        try {
+            await invoke("mpv_run_command", {
+                args: ["sub-add", path, mode],
+            });
+        } catch {
+            // ignore if file is missing or mpv rejects it
+        }
     };
 
     const handleTracksUpdate = (payload: { tracks: MediaTrack[] }) => {
@@ -146,12 +183,16 @@ export const useMediaTracks = (
         await invoke("mpv_run_command", { args: ["sub-add", path, "select"] });
     };
 
-    const applyExternalTracksForUrl = async (url: string) => {
+    const applyExternalTracksForUrl = async (url: string, mediaTitle?: string) => {
         const mediaKey = getMediaKey(url);
-        if (!mediaKey || !history) return;
-        const { audio: audioPaths, sub: subPaths } =
-            history.getExternalTracks(mediaKey);
+        if (!mediaKey) return;
+        const { audio: audioPaths, sub: subPaths } = history
+            ? history.getExternalTracks(mediaKey)
+            : { audio: [], sub: [] };
+        const rememberedSubPaths = new Set(subPaths.map(normalizeLocalPathForCompare));
+        if (getMediaKey() !== mediaKey) return;
         for (const audioPath of audioPaths) {
+            if (getMediaKey() !== mediaKey) return;
             try {
                 await invoke("mpv_run_command", {
                     args: ["audio-add", audioPath, "select"],
@@ -160,14 +201,19 @@ export const useMediaTracks = (
                 // ignore if file is missing or mpv rejects it
             }
         }
+        const autoSubPaths = (await getAutoSubtitlePaths(mediaKey, mediaTitle)).filter(
+            (path) => !rememberedSubPaths.has(normalizeLocalPathForCompare(path)),
+        );
+        if (getMediaKey() !== mediaKey) return;
+        for (const [index, subPath] of autoSubPaths.entries()) {
+            await addExternalSubPath(
+                subPath,
+                index === 0 ? "select" : "auto",
+                mediaKey,
+            );
+        }
         for (const subPath of subPaths) {
-            try {
-                await invoke("mpv_run_command", {
-                    args: ["sub-add", subPath, "select"],
-                });
-            } catch {
-                // ignore if file is missing or mpv rejects it
-            }
+            await addExternalSubPath(subPath, "select", mediaKey);
         }
     };
 
