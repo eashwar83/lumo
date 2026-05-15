@@ -4,6 +4,14 @@ import { listen } from "@tauri-apps/api/event";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type { MediaTrack } from "../../types/media";
 import type { SubtitleTarget } from "../../composables/useSubtitleState";
+import {
+    getAudioTrackDetails,
+    getAudioTrackHoverTitle,
+    getAudioTrackTitle,
+    getSubtitleTrackDetails,
+    getSubtitleTrackHoverTitle,
+    getSubtitleTrackTitle,
+} from "../../utils/trackDisplay";
 import ControlSlider from "./ControlSlider.vue";
 
 const props = defineProps<{
@@ -326,7 +334,7 @@ watch(
             <transition name="fade-up">
                 <div
                     v-if="showAudioMenu"
-                    class="track-menu track-menu--wide"
+                    class="track-menu track-menu--wide track-menu--audio"
                 >
                     <div class="track-menu__header">
                         <span>Audio</span>
@@ -350,9 +358,10 @@ watch(
                         <button
                             v-for="track in audioTracks"
                             :key="track.id"
-                            class="track-menu__item"
+                            class="track-menu__item track-menu__item--audio"
                             :class="{ 'track-menu__item--active': track.selected }"
                             type="button"
+                            :title="getAudioTrackHoverTitle(track)"
                             @click="emit('select-audio', track)"
                         >
                             <span class="track-menu__check">
@@ -366,8 +375,22 @@ watch(
                                     />
                                 </svg>
                             </span>
-                            <span class="track-menu__text">
-                                {{ track.title }}
+                            <span class="track-menu__text track-menu__text--audio">
+                                <span class="track-menu__audio-title">
+                                    {{ getAudioTrackTitle(track) }}
+                                </span>
+                                <span
+                                    v-if="getAudioTrackDetails(track).length"
+                                    class="track-menu__audio-details"
+                                >
+                                    <span
+                                        v-for="detail in getAudioTrackDetails(track)"
+                                        :key="detail"
+                                        class="track-menu__audio-detail"
+                                    >
+                                        {{ detail }}
+                                    </span>
+                                </span>
                             </span>
                         </button>
                     </div>
@@ -614,7 +637,7 @@ watch(
                             <button
                                 v-for="track in subTracks"
                                 :key="track.id"
-                                class="track-menu__item"
+                                class="track-menu__item track-menu__item--subtitle"
                                 :class="{
                                     'track-menu__item--active': isSameTrackId(
                                         track.id,
@@ -624,6 +647,7 @@ watch(
                                 }"
                                 type="button"
                                 :disabled="isTrackDisabled(track)"
+                                :title="getSubtitleTrackHoverTitle(track)"
                                 @click="onSelectSubTrack(track)"
                             >
                                 <span class="track-menu__check">
@@ -640,8 +664,22 @@ watch(
                                         />
                                     </svg>
                                 </span>
-                                <span class="track-menu__text">
-                                    {{ track.title }}
+                                <span class="track-menu__text track-menu__text--subtitle">
+                                    <span class="track-menu__subtitle-title">
+                                        {{ getSubtitleTrackTitle(track) }}
+                                    </span>
+                                    <span
+                                        v-if="getSubtitleTrackDetails(track).length"
+                                        class="track-menu__subtitle-details"
+                                    >
+                                        <span
+                                            v-for="detail in getSubtitleTrackDetails(track)"
+                                            :key="detail"
+                                            class="track-menu__subtitle-detail"
+                                        >
+                                            {{ detail }}
+                                        </span>
+                                    </span>
                                 </span>
                             </button>
                         </div>
@@ -1005,6 +1043,106 @@ watch(
     transform: translateX(12px);
 }
 
+.track-menu__item--audio {
+    align-items: center;
+    padding-top: 11px;
+    padding-bottom: 11px;
+}
+
+.track-menu--audio {
+    min-width: 360px;
+}
+
+.track-menu__item--audio .track-menu__check {
+    margin-top: 0;
+}
+
+.track-menu__text--audio {
+    min-width: 0;
+    width: 100%;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    white-space: normal;
+}
+
+.track-menu__audio-title {
+    min-width: 0;
+    flex: 1;
+    color: rgba(255, 255, 255, 0.94);
+    line-height: 1.25;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.track-menu__audio-details {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 4px;
+    margin-left: auto;
+    flex: 0 1 auto;
+}
+
+.track-menu__audio-detail {
+    max-width: 100%;
+    border: 1px solid rgba(255, 255, 255, 0.13);
+    border-radius: 5px;
+    padding: 2px 5px;
+    background: rgba(255, 255, 255, 0.07);
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 11px;
+    line-height: 1.15;
+    overflow-wrap: anywhere;
+}
+
+.track-menu__item--subtitle {
+    align-items: center;
+}
+
+.track-menu__text--subtitle {
+    min-width: 0;
+    width: 100%;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    white-space: normal;
+}
+
+.track-menu__subtitle-title {
+    min-width: 0;
+    flex: 1;
+    color: rgba(255, 255, 255, 0.94);
+    line-height: 1.25;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.track-menu__subtitle-details {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 4px;
+    margin-left: auto;
+    flex: 0 1 auto;
+}
+
+.track-menu__subtitle-detail {
+    max-width: 100%;
+    border: 1px solid rgba(255, 255, 255, 0.13);
+    border-radius: 5px;
+    padding: 2px 5px;
+    background: rgba(255, 255, 255, 0.07);
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 11px;
+    line-height: 1.15;
+    overflow-wrap: anywhere;
+}
+
 .track-menu__section + .track-menu__section {
     border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
@@ -1071,7 +1209,7 @@ watch(
 }
 
 .track-menu--subtitle {
-    min-width: 270px;
+    min-width: 320px;
 }
 
 .track-menu--subtitle-advanced {

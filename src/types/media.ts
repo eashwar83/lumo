@@ -23,6 +23,7 @@ export interface MediaTrack {
     demux_bitrate?: number;
     demux_samplerate?: number;
     demux_channels?: string;
+    demux_channel_count?: number;
     fps?: number;
     w?: number;
     h?: number;
