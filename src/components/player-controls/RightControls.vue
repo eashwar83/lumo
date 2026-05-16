@@ -142,6 +142,14 @@ const primaryTrackId = computed<MediaTrack["id"]>(
 const visibleSubTracks = computed(() =>
     props.subTracks.slice(0, renderedSubtitleTrackCount.value),
 );
+const audioTrackRows = computed(() =>
+    props.audioTracks.map((track) => ({
+        track,
+        title: getAudioTrackTitle(track),
+        details: getAudioTrackDetails(track),
+        hoverTitle: getAudioTrackHoverTitle(track),
+    })),
+);
 
 const cancelSubtitleRenderFrame = () => {
     if (subtitleRenderFrame == null) return;
@@ -198,6 +206,22 @@ const isTrackSelectedByOtherTarget = (track: MediaTrack) => {
     }
     return isSameTrackId(track.id, primaryTrackId.value);
 };
+
+const visibleSubTrackRows = computed(() =>
+    visibleSubTracks.value.map((track) => {
+        const disabled = isTrackDisabled(track);
+        return {
+            track,
+            disabled,
+            selected:
+                isSameTrackId(track.id, activeTrackId.value) && !disabled,
+            selectedByOtherTarget: isTrackSelectedByOtherTarget(track),
+            title: getSubtitleTrackTitle(track),
+            details: getSubtitleTrackDetails(track),
+            hoverTitle: getSubtitleTrackHoverTitle(track),
+        };
+    }),
+);
 
 const onSelectSubTrack = (track: MediaTrack) => {
     emit("select-sub-track", { target: props.activeSubTarget, track });
@@ -419,17 +443,17 @@ watch(
                     </div>
                     <div class="track-menu__list">
                         <button
-                            v-for="track in audioTracks"
-                            :key="track.id"
+                            v-for="row in audioTrackRows"
+                            :key="row.track.id"
                             class="track-menu__item track-menu__item--audio"
-                            :class="{ 'track-menu__item--active': track.selected }"
+                            :class="{ 'track-menu__item--active': row.track.selected }"
                             type="button"
-                            :title="getAudioTrackHoverTitle(track)"
-                            @click="emit('select-audio', track)"
+                            :title="row.hoverTitle"
+                            @click="emit('select-audio', row.track)"
                         >
                             <span class="track-menu__check">
                                 <svg
-                                    v-if="track.selected"
+                                    v-if="row.track.selected"
                                     viewBox="0 0 24 24"
                                     fill="currentColor"
                                 >
@@ -440,14 +464,14 @@ watch(
                             </span>
                             <span class="track-menu__text track-menu__text--audio">
                                 <span class="track-menu__audio-title">
-                                    {{ getAudioTrackTitle(track) }}
+                                    {{ row.title }}
                                 </span>
                                 <span
-                                    v-if="getAudioTrackDetails(track).length"
+                                    v-if="row.details.length"
                                     class="track-menu__audio-details"
                                 >
                                     <span
-                                        v-for="detail in getAudioTrackDetails(track)"
+                                        v-for="detail in row.details"
                                         :key="detail"
                                         class="track-menu__audio-detail"
                                     >
@@ -698,26 +722,23 @@ watch(
                         </div>
                         <div class="track-menu__section">
                             <button
-                                v-for="track in visibleSubTracks"
-                                :key="track.id"
+                                v-for="row in visibleSubTrackRows"
+                                :key="row.track.id"
                                 class="track-menu__item track-menu__item--subtitle"
                                 :class="{
-                                    'track-menu__item--active': isSameTrackId(
-                                        track.id,
-                                        activeTrackId,
-                                    ) && !isTrackDisabled(track),
-                                    'track-menu__item--disabled': isTrackDisabled(track),
+                                    'track-menu__item--active': row.selected,
+                                    'track-menu__item--disabled': row.disabled,
                                 }"
                                 type="button"
-                                :disabled="isTrackDisabled(track)"
-                                :title="getSubtitleTrackHoverTitle(track)"
-                                @click="onSelectSubTrack(track)"
+                                :disabled="row.disabled"
+                                :title="row.hoverTitle"
+                                @click="onSelectSubTrack(row.track)"
                             >
                                 <span class="track-menu__check">
                                     <svg
                                         v-if="
-                                            isSameTrackId(track.id, activeTrackId) ||
-                                            isTrackSelectedByOtherTarget(track)
+                                            row.selected ||
+                                            row.selectedByOtherTarget
                                         "
                                         viewBox="0 0 24 24"
                                         fill="currentColor"
@@ -729,14 +750,14 @@ watch(
                                 </span>
                                 <span class="track-menu__text track-menu__text--subtitle">
                                     <span class="track-menu__subtitle-title">
-                                        {{ getSubtitleTrackTitle(track) }}
+                                        {{ row.title }}
                                     </span>
                                     <span
-                                        v-if="getSubtitleTrackDetails(track).length"
+                                        v-if="row.details.length"
                                         class="track-menu__subtitle-details"
                                     >
                                         <span
-                                            v-for="detail in getSubtitleTrackDetails(track)"
+                                            v-for="detail in row.details"
                                             :key="detail"
                                             class="track-menu__subtitle-detail"
                                         >

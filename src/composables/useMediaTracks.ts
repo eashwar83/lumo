@@ -18,6 +18,21 @@ type ExternalSubtitleMatch = {
     path: string;
 };
 
+type BackgroundSubtitleItem = {
+    path: string;
+    mode: "select" | "auto";
+    mediaKey: string;
+};
+
+type TrackUpdateWaiter = {
+    resolve: () => void;
+    timeoutId: ReturnType<typeof setTimeout>;
+};
+
+const TRACK_UPDATE_WAIT_TIMEOUT_MS = 700;
+const BACKGROUND_TRACK_ADD_GAP_MS = 40;
+const VISIBLE_MENU_TRACK_ADD_GAP_MS = 180;
+
 const subtitleExtensions = [
     "srt",
     "ass",
@@ -44,6 +59,12 @@ export const useMediaTracks = (
     const showAudioMenu = ref(false);
     const showSubMenu = ref(false);
     const subtitleState = useSubtitleState(subTracks, showSubMenu);
+    let pendingTracksUpdate: { tracks: MediaTrack[] } | null = null;
+    let tracksUpdateFrame: number | null = null;
+    let backgroundSubtitleQueue: BackgroundSubtitleItem[] = [];
+    let isAddingBackgroundSubtitle = false;
+    let backgroundSubtitleGeneration = 0;
+    let trackUpdateWaiters: TrackUpdateWaiter[] = [];
 
     const normalizeSelectedPaths = (
         selected: string | string[] | null,
@@ -86,18 +107,107 @@ export const useMediaTracks = (
         path: string,
         mode: "select" | "auto",
         mediaKey?: string,
-    ): Promise<void> => {
-        if (mediaKey && getMediaKey() !== mediaKey) return;
+    ): Promise<boolean> => {
+        if (mediaKey && getMediaKey() !== mediaKey) return false;
         try {
             await invoke("mpv_run_command", {
                 args: ["sub-add", path, mode],
             });
+            return true;
         } catch {
             // ignore if file is missing or mpv rejects it
+            return false;
         }
     };
 
-    const handleTracksUpdate = (payload: { tracks: MediaTrack[] }) => {
+    const waitForBackgroundTrackGap = () =>
+        new Promise<void>((resolve) => {
+            const gapMs =
+                showAudioMenu.value || showSubMenu.value
+                    ? VISIBLE_MENU_TRACK_ADD_GAP_MS
+                    : BACKGROUND_TRACK_ADD_GAP_MS;
+            setTimeout(resolve, gapMs);
+        });
+
+    const waitForNextTracksUpdate = (timeoutMs = TRACK_UPDATE_WAIT_TIMEOUT_MS) => {
+        let waiter: TrackUpdateWaiter | null = null;
+        const promise = new Promise<void>((resolve) => {
+            const finish = () => {
+                if (!waiter) return;
+                trackUpdateWaiters = trackUpdateWaiters.filter((item) => item !== waiter);
+                clearTimeout(waiter.timeoutId);
+                waiter = null;
+                resolve();
+            };
+            waiter = {
+                resolve: finish,
+                timeoutId: setTimeout(finish, timeoutMs),
+            };
+            trackUpdateWaiters.push(waiter);
+        });
+        return {
+            promise,
+            cancel: () => {
+                if (!waiter) return;
+                trackUpdateWaiters = trackUpdateWaiters.filter((item) => item !== waiter);
+                clearTimeout(waiter.timeoutId);
+                waiter = null;
+            },
+        };
+    };
+
+    const notifyTrackUpdateWaiters = () => {
+        const waiters = trackUpdateWaiters;
+        trackUpdateWaiters = [];
+        waiters.forEach((waiter) => waiter.resolve());
+    };
+
+    const clearBackgroundSubtitleQueue = () => {
+        backgroundSubtitleGeneration += 1;
+        backgroundSubtitleQueue = [];
+        notifyTrackUpdateWaiters();
+    };
+
+    const runNextBackgroundSubtitle = async () => {
+        if (isAddingBackgroundSubtitle) return;
+        if (!backgroundSubtitleQueue.length) return;
+        const generation = backgroundSubtitleGeneration;
+        const next = backgroundSubtitleQueue.shift();
+        if (!next) return;
+        if (getMediaKey() !== next.mediaKey) {
+            clearBackgroundSubtitleQueue();
+            return;
+        }
+        isAddingBackgroundSubtitle = true;
+        const trackUpdateWaiter = waitForNextTracksUpdate();
+        const added = await addExternalSubPath(next.path, next.mode, next.mediaKey);
+        if (generation !== backgroundSubtitleGeneration) {
+            trackUpdateWaiter.cancel();
+            isAddingBackgroundSubtitle = false;
+            void runNextBackgroundSubtitle();
+            return;
+        }
+        if (added) {
+            await trackUpdateWaiter.promise;
+        } else {
+            trackUpdateWaiter.cancel();
+        }
+        isAddingBackgroundSubtitle = false;
+        if (generation !== backgroundSubtitleGeneration) {
+            void runNextBackgroundSubtitle();
+            return;
+        }
+        await waitForBackgroundTrackGap();
+        void runNextBackgroundSubtitle();
+    };
+
+    const enqueueBackgroundSubtitles = (items: BackgroundSubtitleItem[]) => {
+        if (!items.length) return;
+        backgroundSubtitleQueue.push(...items);
+        void runNextBackgroundSubtitle();
+    };
+
+    const processTracksUpdate = (payload: { tracks: MediaTrack[] }) => {
         const all = payload.tracks;
         videoTracks.value = all.filter((t) => t.track_type === "video");
         audioTracks.value = all.filter((t) => t.track_type === "audio");
@@ -136,6 +246,25 @@ export const useMediaTracks = (
             },
             ...normalizedSubs,
         ];
+        notifyTrackUpdateWaiters();
+    };
+
+    const handleTracksUpdate = (payload: { tracks: MediaTrack[] }) => {
+        pendingTracksUpdate = payload;
+        if (tracksUpdateFrame != null) return;
+        const flushTracksUpdate = () => {
+            tracksUpdateFrame = null;
+            const latest = pendingTracksUpdate;
+            pendingTracksUpdate = null;
+            if (latest) {
+                processTracksUpdate(latest);
+            }
+        };
+        if (typeof window === "undefined") {
+            setTimeout(flushTracksUpdate, 0);
+            return;
+        }
+        tracksUpdateFrame = window.requestAnimationFrame(flushTracksUpdate);
     };
 
     const selectAudio = async (track: MediaTrack) => {
@@ -186,6 +315,7 @@ export const useMediaTracks = (
     const applyExternalTracksForUrl = async (url: string, mediaTitle?: string) => {
         const mediaKey = getMediaKey(url);
         if (!mediaKey) return;
+        clearBackgroundSubtitleQueue();
         const { audio: audioPaths, sub: subPaths } = history
             ? history.getExternalTracks(mediaKey)
             : { audio: [], sub: [] };
@@ -205,19 +335,27 @@ export const useMediaTracks = (
             (path) => !rememberedSubPaths.has(normalizeLocalPathForCompare(path)),
         );
         if (getMediaKey() !== mediaKey) return;
-        for (const [index, subPath] of autoSubPaths.entries()) {
-            await addExternalSubPath(
-                subPath,
-                index === 0 ? "select" : "auto",
+        enqueueBackgroundSubtitles([
+            ...autoSubPaths.map((path, index) => ({
+                path,
+                mode: index === 0 ? "select" as const : "auto" as const,
                 mediaKey,
-            );
-        }
-        for (const subPath of subPaths) {
-            await addExternalSubPath(subPath, "select", mediaKey);
-        }
+            })),
+            ...subPaths.map((path) => ({
+                path,
+                mode: "select" as const,
+                mediaKey,
+            })),
+        ]);
     };
 
     const resetTracks = () => {
+        clearBackgroundSubtitleQueue();
+        if (tracksUpdateFrame != null && typeof window !== "undefined") {
+            window.cancelAnimationFrame(tracksUpdateFrame);
+        }
+        tracksUpdateFrame = null;
+        pendingTracksUpdate = null;
         videoTracks.value = [];
         audioTracks.value = [];
         subTracks.value = [];
