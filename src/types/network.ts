@@ -14,6 +14,7 @@ export type NetworkBrowseEntry = {
     name: string;
     path: string;
     entryType: "dir" | "file";
+    playbackKey?: string | null;
     size: number | null;
     modifiedAt: string | null;
 };
@@ -27,6 +28,7 @@ export type NetworkFileRow = {
     name: string;
     path: string;
     type: "DIR" | "FILE";
+    playbackKey?: string;
     size: string;
     modified: string;
     isParent?: boolean;
@@ -36,9 +38,6 @@ export type NetworkFileRow = {
 };
 
 export type NetworkPlayRequest = {
-    protocol: string;
-    connectionId: string;
-    filePath: string;
     playbackKey: string;
     displayName: string;
 };

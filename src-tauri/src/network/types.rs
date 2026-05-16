@@ -6,6 +6,7 @@ pub(crate) struct NetworkBrowseEntry {
     pub name: String,
     pub path: String,
     pub entry_type: String,
+    pub playback_key: Option<String>,
     pub size: Option<u64>,
     pub modified_at: Option<String>,
 }

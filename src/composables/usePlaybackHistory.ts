@@ -1,7 +1,7 @@
 import { onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { HistoryEntry } from "../types/history";
-import { normalizePlaybackKey } from "../utils/playbackSource";
+import { normalizePlaybackKey } from "../utils/playbackDisplay";
 
 const MAX_HISTORY = 100;
 const SAVE_DEBOUNCE_MS = 800;

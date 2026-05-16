@@ -57,6 +57,7 @@ const mapBrowseEntry = (entry: NetworkBrowseEntry): NetworkFileRow => ({
     name: entry.name,
     path: entry.path,
     type: entry.entryType === "dir" ? "DIR" : "FILE",
+    playbackKey: entry.playbackKey ?? undefined,
     size: formatSize(entry.size),
     modified: formatModified(entry.modifiedAt),
 });

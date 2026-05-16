@@ -2,9 +2,10 @@ import { ref } from "vue";
 import type { HistoryEntry } from "../types/history";
 import { getPathDisplayName } from "../utils/getPathDisplayName";
 import {
+    getPlaybackDisplayNamePath,
     getPlaybackDisplayPath,
-    parsePlaybackSource,
-} from "../utils/playbackSource";
+    getPlaybackProtocolId,
+} from "../utils/playbackDisplay";
 
 type ProtocolBadge = {
     id: string;
@@ -33,18 +34,8 @@ export const useHistoryPanel = () => {
     const getDisplayName = (entry: HistoryEntry) => {
         const title = typeof entry.title === "string" ? entry.title.trim() : "";
         if (title) return title;
-        const source = parsePlaybackSource(entry.path);
-        if (source.type === "webdav") {
-            return getPathDisplayName(source.filePath, source.filePath);
-        }
-        if (source.type === "dlna") {
-            return getPathDisplayName(source.resourceUrl, source.resourceUrl);
-        }
-        if (source.type === "smb") {
-            const display = source.url ?? source.filePath ?? source.key;
-            return getPathDisplayName(display, display);
-        }
-        return getPathDisplayName(source.path, source.path);
+        const displayNamePath = getPlaybackDisplayNamePath(entry.path);
+        return getPathDisplayName(displayNamePath, displayNamePath);
     };
 
     const getDisplayPath = (path: string) => {
@@ -52,35 +43,7 @@ export const useHistoryPanel = () => {
     };
 
     const getProtocolBadges = (path: string): ProtocolBadge[] => {
-        const source = parsePlaybackSource(path);
-        if (source.type === "webdav") {
-            return [getProtocolBadge("webdav")];
-        }
-        if (source.type === "dlna") {
-            return [getProtocolBadge("dlna")];
-        }
-        if (source.type === "smb") {
-            return [getProtocolBadge("smb")];
-        }
-
-        const normalized = source.path.trim().toLowerCase();
-        if (normalized.startsWith("smb://")) {
-            return [getProtocolBadge("smb")];
-        }
-        if (normalized.startsWith("ftps://")) {
-            return [getProtocolBadge("ftps")];
-        }
-        if (normalized.startsWith("ftp://")) {
-            return [getProtocolBadge("ftp")];
-        }
-        if (normalized.startsWith("https://")) {
-            return [getProtocolBadge("https")];
-        }
-        if (normalized.startsWith("http://")) {
-            return [getProtocolBadge("http")];
-        }
-
-        return [getProtocolBadge("local")];
+        return [getProtocolBadge(getPlaybackProtocolId(path))];
     };
 
     const middleEllipsis = (value: string, maxLength = 68) => {

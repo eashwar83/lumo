@@ -6,10 +6,11 @@ import type {
     NetworkFileRow,
     NetworkPlayRequest,
 } from "../types/network";
+import { normalizePlaybackKey } from "../utils/playbackDisplay";
 import {
-    normalizePlaybackKey,
-    parsePlaybackSource,
-} from "../utils/playbackSource";
+    resolvePlaybackSource,
+    type ResolvedPlaybackSource,
+} from "../utils/resolvePlaybackSource";
 import { useNetworkPanel } from "../composables/useNetworkPanel";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
 import NetworkConnectionsView from "../components/network/NetworkConnectionsView.vue";
@@ -65,6 +66,8 @@ const isSwitchingView = ref(false);
 const isDiscovering = ref(false);
 const editingConnectionId = ref<string | null>(null);
 const canDiscoverConnections = true;
+const currentResolvedSource = ref<ResolvedPlaybackSource | null>(null);
+let resolveCurrentSourceSequence = 0;
 
 watch(
     () => props.isVisible,
@@ -72,6 +75,29 @@ watch(
         if (!isVisible || wasVisible) return;
         void resetBrowserToRootWhenVisible();
     },
+);
+
+watch(
+    () => props.currentUrl,
+    async (currentUrl) => {
+        const sequence = ++resolveCurrentSourceSequence;
+        const trimmed = currentUrl.trim();
+        if (!trimmed) {
+            currentResolvedSource.value = null;
+            return;
+        }
+        try {
+            const source = await resolvePlaybackSource(trimmed);
+            if (sequence === resolveCurrentSourceSequence) {
+                currentResolvedSource.value = source;
+            }
+        } catch {
+            if (sequence === resolveCurrentSourceSequence) {
+                currentResolvedSource.value = null;
+            }
+        }
+    },
+    { immediate: true },
 );
 
 type SupportedProtocol = "webdav" | "smb" | "ftp" | "http-dlna";
@@ -227,7 +253,11 @@ const closeDeleteModal = (force = false) => {
 
 const onEntryClick = async (entry: NetworkFileRow) => {
     if (entry.type === "FILE") {
-        emit("play-network", buildPlayRequest(entry));
+        try {
+            emit("play-network", buildPlayRequest(entry));
+        } catch (error) {
+            maybeOpenSmbCredentialsEditor(error);
+        }
         return;
     }
     if (isLoading.value) return;
@@ -255,13 +285,15 @@ const visibleNetworkEntries = computed(() =>
         const historyByPath = new Map(
             props.history.map((entry) => [normalizePlaybackKey(entry.path), entry]),
         );
-        const normalizedCurrentUrl = normalizePlaybackKey(props.currentUrl);
-        const currentSource = parsePlaybackSource(normalizedCurrentUrl);
+        const currentSource = currentResolvedSource.value;
+        const normalizedCurrentUrl = normalizePlaybackKey(
+            currentSource?.playbackKey ?? props.currentUrl,
+        );
         const selectedProtocol =
             selectedConnectionConfig.value?.protocol?.trim().toLowerCase() ?? "";
         const activeFolderPaths = new Set<string>();
 
-        if (currentSource.type === "webdav") {
+        if (currentSource?.kind === "webdav") {
             const selectedConnectionId = selectedConnectionConfig.value?.id ?? "";
             if (
                 selectedProtocol === "webdav" &&
@@ -271,7 +303,7 @@ const visibleNetworkEntries = computed(() =>
                     activeFolderPaths.add(path),
                 );
             }
-        } else if (currentSource.type === "dlna") {
+        } else if (currentSource?.kind === "dlna") {
             const selectedConnectionId = selectedConnectionConfig.value?.id ?? "";
             if (
                 (selectedProtocol === "http-dlna" || selectedProtocol === "dlna") &&
@@ -285,7 +317,7 @@ const visibleNetworkEntries = computed(() =>
                     );
                 }
             }
-        } else if (currentSource.type === "smb") {
+        } else if (currentSource?.kind === "smb") {
             const selectedConnectionId = selectedConnectionConfig.value?.id ?? "";
             if (
                 (selectedProtocol === "smb" || selectedProtocol === "samba") &&
@@ -308,7 +340,15 @@ const visibleNetworkEntries = computed(() =>
                         containsActive: activeFolderPaths.has(entry.path),
                     };
                 }
-                const playbackKey = buildPlayRequest(entry).playbackKey;
+                const playbackKey = entry.playbackKey;
+                if (!playbackKey) {
+                    return {
+                        ...entry,
+                        playbackProgressText: "",
+                        isActive: false,
+                        containsActive: false,
+                    };
+                }
                 const historyEntry = historyByPath.get(playbackKey);
                 const duration = historyEntry?.duration ?? 0;
                 const position = historyEntry?.lastPosition ?? 0;

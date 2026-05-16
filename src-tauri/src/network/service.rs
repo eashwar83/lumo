@@ -108,6 +108,72 @@ pub(crate) fn resolve_browse_path(
     normalize_input_path(path, protocol)
 }
 
+fn create_network_playback_key(
+    connection_id: &str,
+    protocol: BrowseProtocol,
+    file_path: &str,
+    parent_path: &str,
+) -> String {
+    match protocol {
+        BrowseProtocol::Webdav => {
+            crate::playback_source::create_webdav_playback_key(connection_id, file_path)
+        }
+        BrowseProtocol::Dlna => crate::playback_source::create_dlna_playback_key(
+            connection_id,
+            file_path,
+            Some(parent_path),
+        ),
+        BrowseProtocol::Smb => {
+            crate::playback_source::create_smb_playback_key(connection_id, file_path)
+        }
+    }
+}
+
+struct NetworkBrowseEntryInput {
+    name: String,
+    path: String,
+    is_dir: bool,
+    size: Option<u64>,
+    modified_at: Option<String>,
+}
+
+impl NetworkBrowseEntryInput {
+    fn new(
+        name: String,
+        path: String,
+        is_dir: bool,
+        size: Option<u64>,
+        modified_at: Option<String>,
+    ) -> Self {
+        Self {
+            name,
+            path,
+            is_dir,
+            size,
+            modified_at,
+        }
+    }
+}
+
+fn network_browse_entry(
+    connection_id: &str,
+    protocol: BrowseProtocol,
+    parent_path: &str,
+    input: NetworkBrowseEntryInput,
+) -> NetworkBrowseEntry {
+    let playback_key = (!input.is_dir).then(|| {
+        create_network_playback_key(connection_id, protocol, &input.path, parent_path)
+    });
+    NetworkBrowseEntry {
+        name: input.name,
+        path: input.path,
+        entry_type: if input.is_dir { "dir".into() } else { "file".into() },
+        playback_key,
+        size: input.size,
+        modified_at: input.modified_at,
+    }
+}
+
 pub(crate) async fn browse_connection(
     app: &tauri::AppHandle,
     connection: &NetworkConnectionRecord,
@@ -119,21 +185,25 @@ pub(crate) async fn browse_connection(
             ensure_protocol(connection, &["webdav"])?;
             let result =
                 crate::network::protocols::webdav::list_directory(app, connection, path).await?;
+            let parent_path = result.path.clone();
             Ok(NetworkBrowseResult {
                 path: result.path,
                 entries: result
                     .entries
                     .into_iter()
-                    .map(|entry| NetworkBrowseEntry {
-                        name: entry.name,
-                        path: entry.path,
-                        entry_type: if entry.is_dir {
-                            "dir".into()
-                        } else {
-                            "file".into()
-                        },
-                        size: entry.size,
-                        modified_at: entry.modified_at,
+                    .map(|entry| {
+                        network_browse_entry(
+                            &connection.id,
+                            protocol,
+                            &parent_path,
+                            NetworkBrowseEntryInput::new(
+                                entry.name,
+                                entry.path,
+                                entry.is_dir,
+                                entry.size,
+                                entry.modified_at,
+                            ),
+                        )
                     })
                     .collect(),
             })
@@ -142,21 +212,25 @@ pub(crate) async fn browse_connection(
             ensure_protocol(connection, &["http-dlna", "dlna"])?;
             let result =
                 crate::network::protocols::dlna::browse_directory(app, connection, path).await?;
+            let parent_path = result.path.clone();
             Ok(NetworkBrowseResult {
                 path: result.path,
                 entries: result
                     .entries
                     .into_iter()
-                    .map(|entry| NetworkBrowseEntry {
-                        name: entry.name,
-                        path: entry.path,
-                        entry_type: if entry.is_dir {
-                            "dir".into()
-                        } else {
-                            "file".into()
-                        },
-                        size: entry.size,
-                        modified_at: entry.modified_at,
+                    .map(|entry| {
+                        network_browse_entry(
+                            &connection.id,
+                            protocol,
+                            &parent_path,
+                            NetworkBrowseEntryInput::new(
+                                entry.name,
+                                entry.path,
+                                entry.is_dir,
+                                entry.size,
+                                entry.modified_at,
+                            ),
+                        )
                     })
                     .collect(),
             })
@@ -164,21 +238,25 @@ pub(crate) async fn browse_connection(
         BrowseProtocol::Smb => {
             ensure_protocol(connection, &["smb", "samba"])?;
             let result = crate::network::protocols::smb::list_directory(connection, path).await?;
+            let parent_path = result.path.clone();
             Ok(NetworkBrowseResult {
                 path: result.path,
                 entries: result
                     .entries
                     .into_iter()
-                    .map(|entry| NetworkBrowseEntry {
-                        name: entry.name,
-                        path: entry.path,
-                        entry_type: if entry.is_dir {
-                            "dir".into()
-                        } else {
-                            "file".into()
-                        },
-                        size: entry.size,
-                        modified_at: entry.modified_at,
+                    .map(|entry| {
+                        network_browse_entry(
+                            &connection.id,
+                            protocol,
+                            &parent_path,
+                            NetworkBrowseEntryInput::new(
+                                entry.name,
+                                entry.path,
+                                entry.is_dir,
+                                entry.size,
+                                entry.modified_at,
+                            ),
+                        )
                     })
                     .collect(),
             })

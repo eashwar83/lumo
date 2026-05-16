@@ -86,7 +86,11 @@ const isWindowsPlatform =
 const isPipEnabled = ref(false);
 const isTogglingPip = ref(false);
 const showSubtitleAdvancedSettings = ref(false);
+const renderedSubtitleTrackCount = ref(0);
 let unlistenNativePipChanged: (() => void) | null = null;
+let subtitleRenderFrame: number | null = null;
+
+const SUBTITLE_RENDER_BATCH_SIZE = 48;
 
 const subtitleFontOptions = [
     "",
@@ -135,6 +139,47 @@ const activeTrackId = computed<MediaTrack["id"]>(() =>
 const primaryTrackId = computed<MediaTrack["id"]>(
     () => props.subTracks.find((track) => track.selected)?.id ?? 0,
 );
+const visibleSubTracks = computed(() =>
+    props.subTracks.slice(0, renderedSubtitleTrackCount.value),
+);
+
+const cancelSubtitleRenderFrame = () => {
+    if (subtitleRenderFrame == null) return;
+    window.cancelAnimationFrame(subtitleRenderFrame);
+    subtitleRenderFrame = null;
+};
+
+const scheduleSubtitleTrackRendering = () => {
+    cancelSubtitleRenderFrame();
+    if (!props.showSubMenu || showSubtitleAdvancedSettings.value) return;
+    const total = props.subTracks.length;
+    if (!total) {
+        renderedSubtitleTrackCount.value = 0;
+        return;
+    }
+    renderedSubtitleTrackCount.value = Math.min(
+        Math.max(renderedSubtitleTrackCount.value, SUBTITLE_RENDER_BATCH_SIZE),
+        total,
+    );
+    const renderNextBatch = () => {
+        if (!props.showSubMenu || showSubtitleAdvancedSettings.value) {
+            subtitleRenderFrame = null;
+            return;
+        }
+        renderedSubtitleTrackCount.value = Math.min(
+            renderedSubtitleTrackCount.value + SUBTITLE_RENDER_BATCH_SIZE,
+            props.subTracks.length,
+        );
+        if (renderedSubtitleTrackCount.value < props.subTracks.length) {
+            subtitleRenderFrame = window.requestAnimationFrame(renderNextBatch);
+        } else {
+            subtitleRenderFrame = null;
+        }
+    };
+    if (renderedSubtitleTrackCount.value < total) {
+        subtitleRenderFrame = window.requestAnimationFrame(renderNextBatch);
+    }
+};
 
 const isTrackDisabled = (track: MediaTrack) => {
     if (!props.dualSubEnabled) return false;
@@ -240,6 +285,7 @@ onMounted(async () => {
 onUnmounted(() => {
     unlistenNativePipChanged?.();
     unlistenNativePipChanged = null;
+    cancelSubtitleRenderFrame();
 });
 
 watch(
@@ -247,7 +293,24 @@ watch(
     (showSubMenu) => {
         if (!showSubMenu) {
             showSubtitleAdvancedSettings.value = false;
+            renderedSubtitleTrackCount.value = 0;
+            cancelSubtitleRenderFrame();
+            return;
         }
+        renderedSubtitleTrackCount.value = 0;
+        scheduleSubtitleTrackRendering();
+    },
+);
+
+watch(
+    () => [props.subTracks.length, showSubtitleAdvancedSettings.value] as const,
+    () => {
+        if (!props.showSubMenu) return;
+        if (showSubtitleAdvancedSettings.value) {
+            cancelSubtitleRenderFrame();
+            return;
+        }
+        scheduleSubtitleTrackRendering();
     },
 );
 </script>
@@ -635,7 +698,7 @@ watch(
                         </div>
                         <div class="track-menu__section">
                             <button
-                                v-for="track in subTracks"
+                                v-for="track in visibleSubTracks"
                                 :key="track.id"
                                 class="track-menu__item track-menu__item--subtitle"
                                 :class="{
