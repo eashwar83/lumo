@@ -1131,10 +1131,15 @@ watch(
     align-items: center;
     padding-top: 11px;
     padding-bottom: 11px;
+    width: max-content;
+    min-width: 100%;
+    max-width: 360px;
 }
 
 .track-menu--audio {
-    min-width: 360px;
+    width: max-content;
+    min-width: 240px;
+    max-width: 360px;
 }
 
 .track-menu__item--audio .track-menu__check {
@@ -1144,6 +1149,7 @@ watch(
 .track-menu__text--audio {
     min-width: 0;
     width: 100%;
+    max-width: calc(360px - 68px);
     flex: 1;
     display: flex;
     align-items: center;
