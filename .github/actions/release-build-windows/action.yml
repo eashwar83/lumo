@@ -2,6 +2,10 @@ name: "Build Soia Windows NSIS"
 description: "Shared Windows release build steps"
 
 inputs:
+  arch:
+    description: "Target architecture (x64 or arm64). Drives MPV runtime selection and is used as a cache scope key."
+    required: false
+    default: "x64"
   github_token:
     description: "GitHub token for release API requests"
     required: true
@@ -28,6 +32,7 @@ runs:
       uses: Swatinem/rust-cache@v2
       with:
         workspaces: src-tauri -> target
+        key: ${{ inputs.arch }}
 
     - name: Install pnpm dependencies
       shell: pwsh
@@ -37,6 +42,7 @@ runs:
       shell: pwsh
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
+        MPV_TARGET_ARCH: ${{ inputs.arch }}
       run: pnpm setup:libs
 
     - name: Build Windows NSIS bundle
