@@ -172,13 +172,14 @@ function selectAssetUrl(releaseJson, explicitUrl) {
   );
   if (candidate) return candidate;
 
-  candidate = urls.find((url) => isWindowsAsset(url) && hasSupportedExtension(url));
-  if (candidate) return candidate;
-
-  candidate = urls.find((url) => hasSupportedExtension(url));
-  if (candidate) return candidate;
-
-  return "";
+  const available = urls
+    .map((url) => basename(url.split("?")[0]))
+    .join(", ");
+  throw new Error(
+    `[ERROR] No Windows ${arch.name} asset found in release. ` +
+      `Provide an asset whose name matches ${arch.pattern} (or 'universal'/'all'). ` +
+      `Available assets: ${available || "(none)"}`
+  );
 }
 
 async function downloadAsset(assetUrl, outputFile) {
