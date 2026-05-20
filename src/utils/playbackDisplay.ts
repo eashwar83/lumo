@@ -1,29 +1,26 @@
-export const SOIA_WEBDAV_KEY_PREFIX = "soia-webdav://";
-export const SOIA_DLNA_KEY_PREFIX = "soia-dlna://";
+const SOIA_WEBDAV_KEY_PREFIX = "soia-webdav://";
+const SOIA_DLNA_KEY_PREFIX = "soia-dlna://";
+const SOIA_SMB_KEY_PREFIX = "soia-smb://";
 
-export type PlaybackSource =
+type PlaybackDisplaySource =
     | {
-          type: "local";
-          key: string;
+          kind: "local";
           path: string;
       }
     | {
-          type: "webdav";
-          key: string;
+          kind: "webdav";
           connectionId: string;
           filePath: string;
       }
     | {
-          type: "dlna";
-          key: string;
-          connectionId: string;
+          kind: "dlna";
           resourceUrl: string;
-          parentPath?: string;
       }
     | {
-          type: "smb";
-          key: string;
-          url: string;
+          kind: "smb";
+          url?: string;
+          connectionId?: string;
+          filePath?: string;
       };
 
 const normalizeFilePath = (path: string) => {
@@ -53,9 +50,7 @@ const parseWebdavKey = (
 const parseDlnaKey = (
     key: string,
 ): {
-    connectionId: string;
     resourceUrl: string;
-    parentPath?: string;
 } | null => {
     if (!key.startsWith(SOIA_DLNA_KEY_PREFIX)) return null;
     const value = key.slice(SOIA_DLNA_KEY_PREFIX.length);
@@ -67,54 +62,22 @@ const parseDlnaKey = (
     const encodedParentPath = encodedParts[1] ?? "";
     if (!encodedConnectionId || !encodedResourceUrl) return null;
     try {
-        const parsed = {
-            connectionId: decodeURIComponent(encodedConnectionId),
-            resourceUrl: decodeURIComponent(encodedResourceUrl),
-        };
-        if (!encodedParentPath) return parsed;
+        decodeURIComponent(encodedConnectionId);
+        if (encodedParentPath) decodeURIComponent(encodedParentPath);
         return {
-            ...parsed,
-            parentPath: decodeURIComponent(encodedParentPath).trim() || "0",
+            resourceUrl: decodeURIComponent(encodedResourceUrl),
         };
     } catch {
         return null;
     }
 };
 
-const toWebdavKeyConnectionId = (connectionId: string): string =>
-    connectionId.trim().replace(/^webdav-(?=\d+$)/i, "");
-
-const toRuntimeWebdavConnectionId = (connectionIdInKey: string): string =>
-    /^\d+$/.test(connectionIdInKey)
-        ? `webdav-${connectionIdInKey}`
-        : connectionIdInKey;
-
-export const createWebdavPlaybackKey = (
-    connectionId: string,
-    filePath: string,
-): string =>
-    `${SOIA_WEBDAV_KEY_PREFIX}${toWebdavKeyConnectionId(connectionId)}${normalizeFilePath(filePath)}`;
-
-export const createDlnaPlaybackKey = (
-    connectionId: string,
-    resourceUrl: string,
-    parentPath?: string,
-): string => {
-    const base =
-        `${SOIA_DLNA_KEY_PREFIX}${encodeURIComponent(connectionId.trim())}/${encodeURIComponent(resourceUrl.trim())}`;
-    const normalizedParent = parentPath?.trim();
-    return normalizedParent
-        ? `${base}/${encodeURIComponent(normalizedParent)}`
-        : base;
-};
-
-export const parsePlaybackSource = (key: string): PlaybackSource => {
+const parsePlaybackDisplaySource = (key: string): PlaybackDisplaySource => {
     const soiaWebdav = parseWebdavKey(key, SOIA_WEBDAV_KEY_PREFIX);
     if (soiaWebdav) {
         return {
-            type: "webdav",
-            key,
-            connectionId: toRuntimeWebdavConnectionId(soiaWebdav.connectionId),
+            kind: "webdav",
+            connectionId: soiaWebdav.connectionId,
             filePath: soiaWebdav.filePath,
         };
     }
@@ -122,31 +85,41 @@ export const parsePlaybackSource = (key: string): PlaybackSource => {
     const soiaDlna = parseDlnaKey(key);
     if (soiaDlna) {
         return {
-            type: "dlna",
-            key,
-            connectionId: soiaDlna.connectionId,
+            kind: "dlna",
             resourceUrl: soiaDlna.resourceUrl,
-            parentPath: soiaDlna.parentPath,
         };
+    }
+
+    const soiaSmb = parseWebdavKey(key, SOIA_SMB_KEY_PREFIX);
+    if (soiaSmb) {
+        try {
+            return {
+                kind: "smb",
+                connectionId: decodeURIComponent(soiaSmb.connectionId),
+                filePath: soiaSmb.filePath,
+            };
+        } catch {
+            return {
+                kind: "local",
+                path: key,
+            };
+        }
     }
 
     if (/^smb:\/\//i.test(key)) {
         return {
-            type: "smb",
-            key,
+            kind: "smb",
             url: key,
         };
     }
 
     return {
-        type: "local",
-        key,
+        kind: "local",
         path: key,
     };
 };
 
-export const normalizePlaybackKey = (key: string): string =>
-    parsePlaybackSource(key).key;
+export const normalizePlaybackKey = (key: string): string => key;
 
 const formatWebdavDisplayHost = (connectionId: string): string => {
     const trimmed = connectionId.trim();
@@ -164,19 +137,22 @@ export const formatPathWithHomePrefix = (path: string): string => {
 };
 
 export const getPlaybackDisplayPath = (key: string): string => {
-    const source = parsePlaybackSource(key);
-    if (source.type === "webdav") {
+    const source = parsePlaybackDisplaySource(key);
+    if (source.kind === "webdav") {
         const host = formatWebdavDisplayHost(source.connectionId);
         const normalizedPath = source.filePath.replace(/^\/+/, "");
         return normalizedPath
             ? `webdav://${host}/${normalizedPath}`
             : `webdav://${host}`;
     }
-    if (source.type === "dlna") {
+    if (source.kind === "dlna") {
         return source.resourceUrl;
     }
-    if (source.type === "smb") {
-        return source.url;
+    if (source.kind === "smb") {
+        if (source.url) return source.url;
+        const host = source.connectionId?.replace(/^smb-/i, "") || "smb";
+        const normalizedPath = source.filePath?.replace(/^\/+/, "") ?? "";
+        return normalizedPath ? `smb://${host}/${normalizedPath}` : `smb://${host}`;
     }
     return source.path;
 };
@@ -185,3 +161,27 @@ export const getPlaybackDisplayPathWithHomePrefix = (key: string): string => {
     const display = getPlaybackDisplayPath(key);
     return display === key ? formatPathWithHomePrefix(display) : display;
 };
+
+export const getPlaybackDisplayNamePath = (key: string): string => {
+    const source = parsePlaybackDisplaySource(key);
+    if (source.kind === "webdav") return source.filePath;
+    if (source.kind === "dlna") return source.resourceUrl;
+    if (source.kind === "smb") return source.url ?? source.filePath ?? key;
+    return source.path;
+};
+
+export const getPlaybackProtocolId = (key: string): string => {
+    const source = parsePlaybackDisplaySource(key);
+    if (source.kind !== "local") return source.kind;
+
+    const normalized = source.path.trim().toLowerCase();
+    if (normalized.startsWith("smb://")) return "smb";
+    if (normalized.startsWith("ftps://")) return "ftps";
+    if (normalized.startsWith("ftp://")) return "ftp";
+    if (normalized.startsWith("https://")) return "https";
+    if (normalized.startsWith("http://")) return "http";
+    return "local";
+};
+
+export const isLikelyNetworkPlaybackKey = (key: string): boolean =>
+    getPlaybackProtocolId(key) !== "local";

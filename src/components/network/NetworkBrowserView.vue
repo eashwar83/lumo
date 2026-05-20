@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed, nextTick, ref, watch } from "vue";
 import type { NetworkFileRow } from "../../types/network";
 
 const props = defineProps<{
@@ -11,13 +12,48 @@ const props = defineProps<{
 const emit = defineEmits<{
     (e: "entry-click", entry: NetworkFileRow): void;
 }>();
+
+const listEl = ref<HTMLElement | null>(null);
+
+const activeEntryScrollKey = computed(() => {
+    if (props.isLoading) return "";
+    const activeEntry = props.entries.find(
+        (entry) => entry.isActive || entry.containsActive,
+    );
+    return activeEntry ? `${props.networkPath}:${activeEntry.path}` : "";
+});
+
+const scrollActiveEntryIntoView = async () => {
+    if (!activeEntryScrollKey.value) return;
+    await nextTick();
+    const list = listEl.value;
+    const activeEntry = list?.querySelector<HTMLElement>(
+        ".network-entry--active, .network-entry--contains-active",
+    );
+    if (!list || !activeEntry) return;
+
+    const targetTop =
+        activeEntry.offsetTop - list.clientHeight / 2 + activeEntry.clientHeight / 2;
+    list.scrollTo({
+        top: Math.max(0, targetTop),
+        behavior: "auto",
+    });
+};
+
+watch(
+    activeEntryScrollKey,
+    () => {
+        void scrollActiveEntryIntoView();
+    },
+    { immediate: true },
+);
 </script>
 
 <template>
     <div class="panel__stack">
         <div class="panel__section panel__section--grow network-browser__section">
             <div class="panel__table panel__table--card panel__table--grow">
-                <div class="network-browser-list">
+                <div ref="listEl" class="network-browser-list">
                     <div
                         v-if="props.isLoading"
                         class="network-folder-loading"

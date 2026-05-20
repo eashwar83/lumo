@@ -8,7 +8,7 @@ import type {
     PlaylistSortMode,
 } from "../types/playlist";
 import { getPathDisplayName } from "../utils/getPathDisplayName";
-import { getPlaybackDisplayPathWithHomePrefix } from "../utils/playbackSource";
+import { getPlaybackDisplayPathWithHomePrefix } from "../utils/playbackDisplay";
 
 type PlaylistDrawerEntry = PlaylistEntry & {
     playedRatio?: number;

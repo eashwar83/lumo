@@ -249,7 +249,7 @@ fn configure_mpv_startup(app: &tauri::App) -> Result<(), Box<dyn Error>> {
         }
     }
 
-    let ytdl_path = resolve_ytdl_path(app);
+    let ytdl_path = resolve_ytdl_path(&app.handle());
     if let Some(ytdl_path) = ytdl_path {
         mpv_guard.set_option_string("ytdl", "yes");
 
@@ -391,8 +391,8 @@ fn to_mpv_msg_level(level: &str) -> &'static str {
     }
 }
 
-fn resolve_ytdl_path(app: &tauri::App) -> Option<String> {
-    if let Some(configured_path) = load_setting_value(&app.handle(), YTDL_PATH_SETTING_LABEL) {
+pub(crate) fn resolve_ytdl_path(app: &tauri::AppHandle) -> Option<String> {
+    if let Some(configured_path) = load_setting_value(app, YTDL_PATH_SETTING_LABEL) {
         let resolved = normalize_existing_ytdl_path(configured_path);
         if resolved.is_none() {
             warn!("Configured yt-dlp path is unavailable; skipping ytdl startup options");

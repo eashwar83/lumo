@@ -9,7 +9,7 @@ import {
 import type { MediaTrack } from "../types/media";
 import { applyRenderingSettings, loadUiState } from "../composables/useUiStateStore";
 import { getPathDisplayName } from "../utils/getPathDisplayName";
-import { getPlaybackDisplayPathWithHomePrefix } from "../utils/playbackSource";
+import { getPlaybackDisplayPathWithHomePrefix } from "../utils/playbackDisplay";
 
 const props = defineProps<{
     isMacOs: boolean;

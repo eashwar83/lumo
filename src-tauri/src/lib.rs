@@ -10,6 +10,8 @@ mod media_extensions;
 mod mpv;
 mod network;
 mod platform;
+mod playback_source;
+mod subtitles;
 use mpv::MpvHandle;
 use tauri::{Emitter, Manager};
 mod store;
@@ -93,15 +95,32 @@ fn with_now_playing_mut<R>(
 }
 
 fn mpv_command_checked(mpv: &MpvHandle, args: &[&str]) -> AppResult<()> {
-    let result_code = mpv.command(args);
+    let rewritten_args = rewrite_mpv_command_urls(args);
+    let command_args: Vec<&str> = rewritten_args
+        .as_ref()
+        .map(|args| args.iter().map(String::as_str).collect())
+        .unwrap_or_else(|| args.to_vec());
+    let result_code = mpv.command(&command_args);
     if result_code == 0 {
         Ok(())
     } else {
         Err(format!(
             "MPV command {:?} failed with error code: {}",
-            args, result_code
+            command_args, result_code
         ))
     }
+}
+
+fn rewrite_mpv_command_urls(args: &[&str]) -> Option<Vec<String>> {
+    if args.len() < 2 || args.first().copied() != Some("loadfile") {
+        return None;
+    }
+
+    let rewritten_url = crate::mpv::rewrite_https_stream_url(args[1])
+        .or_else(|| crate::mpv::rewrite_https_callback_url(args[1]))?;
+    let mut rewritten: Vec<String> = args.iter().map(|arg| (*arg).to_string()).collect();
+    rewritten[1] = rewritten_url;
+    Some(rewritten)
 }
 
 fn mpv_set_option_string_checked(mpv: &MpvHandle, name: &str, value: &str) -> AppResult<()> {
@@ -291,6 +310,9 @@ pub fn run() {
             commands::playback::get_runtime_versions,
             commands::playback::get_media_file_size,
             commands::playback::list_local_media_siblings,
+            playback_source::resolve::resolve_playback_source,
+            playback_source::adjacency::resolve_adjacent_playback_source,
+            subtitles::find_fuzzy_external_subtitle_matches,
             commands::playback::parse_playlist_file,
             commands::playback::parse_playlist_source,
             commands::network::list_network_connections,

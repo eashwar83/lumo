@@ -1,7 +1,7 @@
 import { onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { HistoryEntry } from "../types/history";
-import { normalizePlaybackKey } from "../utils/playbackSource";
+import { normalizePlaybackKey } from "../utils/playbackDisplay";
 
 const MAX_HISTORY = 100;
 const SAVE_DEBOUNCE_MS = 800;
@@ -251,6 +251,22 @@ export const usePlaybackHistory = () => {
         );
     };
 
+    const updateTitle = (path: string, title: string) => {
+        const normalizedPath = normalizePlaybackKey(path);
+        const normalizedTitle = title.trim();
+        if (!normalizedPath || !normalizedTitle) return;
+        const existing = history.value.find(
+            (item) => item.path === normalizedPath,
+        );
+        if (!existing || existing.title === normalizedTitle) return;
+        const nextEntry: HistoryEntry = {
+            ...existing,
+            title: normalizedTitle,
+        };
+        upsertEntry(nextEntry);
+        void saveHistoryEntry(nextEntry);
+    };
+
     const togglePinned = (path: string) => {
         const normalizedPath = normalizePlaybackKey(path);
         const target = history.value.find((item) => item.path === normalizedPath);
@@ -321,6 +337,7 @@ export const usePlaybackHistory = () => {
         markPlayed,
         recordProgress,
         recordStop,
+        updateTitle,
         clearHistory,
         removeEntry,
         togglePinned,

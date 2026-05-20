@@ -1,7 +1,7 @@
 import { computed, type Ref } from "vue";
 import type { HistoryEntry } from "../types/history";
 import type { PlaylistEntry } from "../types/playlist";
-import { normalizePlaybackKey } from "../utils/playbackSource";
+import { normalizePlaybackKey } from "../utils/playbackDisplay";
 
 export const usePlaylistEntriesWithProgress = (
     orderedPlaylist: Readonly<Ref<PlaylistEntry[]>>,

@@ -10,6 +10,53 @@ pub(super) fn ensure_numeric_locale_for_mpv() {
     }
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[repr(C)]
+struct DlInfo {
+    dli_fname: *const c_char,
+    dli_fbase: *mut c_void,
+    dli_sname: *const c_char,
+    dli_saddr: *mut c_void,
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+unsafe extern "C" {
+    fn dladdr(addr: *const c_void, info: *mut DlInfo) -> c_int;
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) fn resolve_linked_library_path(symbol: *const c_void) -> Option<String> {
+    if symbol.is_null() {
+        return None;
+    }
+
+    let mut info = DlInfo {
+        dli_fname: std::ptr::null(),
+        dli_fbase: std::ptr::null_mut(),
+        dli_sname: std::ptr::null(),
+        dli_saddr: std::ptr::null_mut(),
+    };
+
+    let result = unsafe { dladdr(symbol, &mut info) };
+    if result == 0 || info.dli_fname.is_null() {
+        return None;
+    }
+
+    let raw_path = unsafe { std::ffi::CStr::from_ptr(info.dli_fname) }
+        .to_string_lossy()
+        .into_owned();
+
+    std::fs::canonicalize(&raw_path)
+        .map(|path| path.to_string_lossy().into_owned())
+        .ok()
+        .or(Some(raw_path))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+pub(crate) fn resolve_linked_library_path(_symbol: *const c_void) -> Option<String> {
+    None
+}
+
 #[repr(C)]
 #[derive(Debug, PartialEq)]
 #[allow(non_camel_case_types)]
@@ -178,6 +225,95 @@ unsafe extern "C" {
 #[repr(C)]
 pub(crate) struct SoiaUtils {
     _private: [u8; 0],
+}
+
+pub(crate) type SoiaStreamReadFn =
+    unsafe extern "C" fn(cookie: *mut c_void, buf: *mut c_char, nbytes: u64) -> i64;
+pub(crate) type SoiaStreamSeekFn = unsafe extern "C" fn(cookie: *mut c_void, offset: i64) -> i64;
+pub(crate) type SoiaStreamSizeFn = unsafe extern "C" fn(cookie: *mut c_void) -> i64;
+pub(crate) type SoiaStreamCloseFn = unsafe extern "C" fn(cookie: *mut c_void);
+pub(crate) type SoiaStreamCancelFn = unsafe extern "C" fn(cookie: *mut c_void);
+
+#[repr(C)]
+pub(crate) struct SoiaStreamCbInfo {
+    pub cookie: *mut c_void,
+    pub read_fn: Option<SoiaStreamReadFn>,
+    pub seek_fn: Option<SoiaStreamSeekFn>,
+    pub size_fn: Option<SoiaStreamSizeFn>,
+    pub close_fn: Option<SoiaStreamCloseFn>,
+    pub cancel_fn: Option<SoiaStreamCancelFn>,
+}
+
+pub(crate) type SoiaStreamOpenRoFn = unsafe extern "C" fn(
+    userdata: *mut c_void,
+    uri: *mut c_char,
+    info: *mut SoiaStreamCbInfo,
+) -> c_int;
+
+type SoiaUtilsRegisterStreamProtocolFn = unsafe extern "C" fn(
+    utils: *mut SoiaUtils,
+    protocol: *const c_char,
+    userdata: *mut c_void,
+    open_fn: Option<SoiaStreamOpenRoFn>,
+) -> c_int;
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn resolve_soia_utils_register_stream_protocol() -> Option<SoiaUtilsRegisterStreamProtocolFn> {
+    let symbol = unsafe {
+        libc::dlsym(
+            libc::RTLD_DEFAULT,
+            b"soia_utils_register_stream_protocol\0".as_ptr().cast(),
+        )
+    };
+    if symbol.is_null() {
+        None
+    } else {
+        Some(unsafe {
+            std::mem::transmute::<*mut c_void, SoiaUtilsRegisterStreamProtocolFn>(symbol)
+        })
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn resolve_soia_utils_register_stream_protocol() -> Option<SoiaUtilsRegisterStreamProtocolFn> {
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetModuleHandleA(name: *const c_char) -> *mut c_void;
+        fn GetProcAddress(module: *mut c_void, name: *const c_char) -> *mut c_void;
+    }
+
+    let module = unsafe { GetModuleHandleA(b"soia_utils.dll\0".as_ptr().cast()) };
+    if module.is_null() {
+        return None;
+    }
+    let symbol = unsafe {
+        GetProcAddress(
+            module,
+            b"soia_utils_register_stream_protocol\0".as_ptr().cast(),
+        )
+    };
+    if symbol.is_null() {
+        None
+    } else {
+        Some(unsafe {
+            std::mem::transmute::<*mut c_void, SoiaUtilsRegisterStreamProtocolFn>(symbol)
+        })
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+fn resolve_soia_utils_register_stream_protocol() -> Option<SoiaUtilsRegisterStreamProtocolFn> {
+    None
+}
+
+pub(crate) unsafe fn soia_utils_register_stream_protocol(
+    utils: *mut SoiaUtils,
+    protocol: *const c_char,
+    userdata: *mut c_void,
+    open_fn: Option<SoiaStreamOpenRoFn>,
+) -> Option<c_int> {
+    resolve_soia_utils_register_stream_protocol()
+        .map(|register| unsafe { register(utils, protocol, userdata, open_fn) })
 }
 
 #[link(name = "soia_utils")]

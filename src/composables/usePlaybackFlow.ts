@@ -1,9 +1,12 @@
 import { computed, onMounted, onUnmounted, ref, type Ref } from "vue";
 import type { HistoryEntry } from "../types/history";
 import type { NetworkPlayRequest } from "../types/network";
-import { parsePlaybackSource } from "../utils/playbackSource";
 import type { PlayerApi } from "./usePlaybackController";
 import { loadUiState } from "./useUiStateStore";
+import {
+    resolvePlaybackSource,
+    type ResolvedPlaybackSource,
+} from "../utils/resolvePlaybackSource";
 import {
     ALLOW_URL_INPUT_DURING_PLAYBACK_SETTING_LABEL,
     DEFAULT_SPEED_SETTING_LABEL,
@@ -29,6 +32,7 @@ type HistoryApi = {
         duration: number,
         title?: string,
     ) => void;
+    updateTitle: (path: string, title: string) => void;
 };
 
 type PlaylistApi = {
@@ -266,6 +270,14 @@ export const usePlaybackFlow = ({
         return normalizedWithExtension;
     };
 
+    const applyResolvedMediaTitle = (url: string, title?: string | null) => {
+        const normalizedTitle = title?.trim() || "";
+        if (!normalizedTitle) return;
+        if (player.state.media.url !== url) return;
+        player.state.media.title = rememberPreferredTitle(url, normalizedTitle);
+        history.updateTitle(url, player.state.media.title);
+    };
+
     const playLocalPath = async (path: string, preferredTitle?: string) => {
         if (!path) return;
         await triggerPlaybackIntent();
@@ -284,7 +296,8 @@ export const usePlaybackFlow = ({
         await player.setPlaybackSpeed(preferences.defaultSpeed);
         const resumePosition = getStartPosition(path, preferences.skipIntroSeconds);
         pendingResume.value = { url: path, position: resumePosition };
-        await player.loadFile(resumePosition, preferences.autoPlay);
+        const result = await player.loadFile(resumePosition, preferences.autoPlay);
+        applyResolvedMediaTitle(path, result.title);
     };
 
     const playWebdav = async (
@@ -357,33 +370,125 @@ export const usePlaybackFlow = ({
             url: playbackKey,
             position: resumePosition,
         };
-        await player.loadFileAtUrl(
+        const result = await player.loadFileAtUrl(
             resourceUrl,
+            resumePosition,
+            preferences.autoPlay,
+        );
+        applyResolvedMediaTitle(playbackKey, result.title);
+    };
+
+    const playSmb = async (url: string, preferredTitle?: string) => {
+        await triggerPlaybackIntent();
+        hideHistory.value = true;
+        nowPlaying.clearArtwork();
+        tracks.resetTracks();
+        player.state.media.url = url;
+        player.state.media.title = rememberPreferredTitle(url, preferredTitle);
+        player.state.playback.isBuffering = false;
+        player.state.playback.downloadSpeedBps = 0;
+        player.state.playback.hwdecCurrent = "";
+        loadingUrl.value = url;
+        isLoading.value = true;
+        await ensurePlaybackPreferencesLoaded();
+        const preferences = playbackPreferences.value;
+        await player.setPlaybackSpeed(preferences.defaultSpeed);
+        const resumePosition = getStartPosition(
+            url,
+            preferences.skipIntroSeconds,
+        );
+        pendingResume.value = {
+            url,
+            position: resumePosition,
+        };
+        const result = await player.loadFileAtUrl(
+            url,
+            resumePosition,
+            preferences.autoPlay,
+        );
+        applyResolvedMediaTitle(url, result.title);
+    };
+
+    const playSmbNetwork = async (
+        connectionId: string,
+        filePath: string,
+        playbackKey: string,
+        preferredTitle?: string,
+    ) => {
+        await triggerPlaybackIntent();
+        hideHistory.value = true;
+        nowPlaying.clearArtwork();
+        tracks.resetTracks();
+        player.state.media.url = playbackKey;
+        player.state.media.title = rememberPreferredTitle(
+            playbackKey,
+            preferredTitle,
+        );
+        player.state.playback.isBuffering = false;
+        player.state.playback.downloadSpeedBps = 0;
+        player.state.playback.hwdecCurrent = "";
+        loadingUrl.value = playbackKey;
+        isLoading.value = true;
+        await ensurePlaybackPreferencesLoaded();
+        const preferences = playbackPreferences.value;
+        await player.setPlaybackSpeed(preferences.defaultSpeed);
+        const resumePosition = getStartPosition(
+            playbackKey,
+            preferences.skipIntroSeconds,
+        );
+        pendingResume.value = {
+            url: playbackKey,
+            position: resumePosition,
+        };
+        await player.loadNetworkFile(
+            "smb",
+            connectionId,
+            filePath,
             resumePosition,
             preferences.autoPlay,
         );
     };
 
-    const playPath = async (path: string, preferredTitle?: string) => {
-        if (!path) return;
-        const source = parsePlaybackSource(path);
-        if (source.type === "webdav") {
+    const playResolvedSource = async (
+        source: ResolvedPlaybackSource,
+        preferredTitle?: string,
+    ) => {
+        if (source.kind === "webdav") {
             await playWebdav(
                 source.connectionId,
                 source.filePath,
-                source.key,
+                source.playbackKey,
                 preferredTitle,
             );
             return;
         }
-        if (source.type === "dlna") {
-            await playDlna(source.resourceUrl, source.key, preferredTitle);
+        if (source.kind === "dlna") {
+            await playDlna(
+                source.resourceUrl,
+                source.playbackKey,
+                preferredTitle,
+            );
             return;
         }
-        if (source.type === "smb") {
-            throw new Error("SMB playback is not implemented yet");
+        if (source.kind === "smb") {
+            await playSmbNetwork(
+                source.connectionId,
+                source.filePath,
+                source.playbackKey,
+                preferredTitle,
+            );
+            return;
         }
-        await playLocalPath(source.path, preferredTitle);
+        if (source.kind === "directSmb") {
+            await playSmb(source.resourceUrl, preferredTitle);
+            return;
+        }
+        await playLocalPath(source.filePath, preferredTitle);
+    };
+
+    const playPath = async (path: string, preferredTitle?: string) => {
+        if (!path) return;
+        await playResolvedSource(await resolvePlaybackSource(path), preferredTitle);
     };
 
     const openWithSelected = async (selected: string[]) => {
@@ -509,26 +614,7 @@ export const usePlaybackFlow = ({
                 // Fall through to default load when playlist parsing fails.
             }
         }
-        triggerPlaybackIntent();
-        hideHistory.value = true;
-        tracks.resetTracks();
-        player.state.playback.isBuffering = false;
-        player.state.playback.downloadSpeedBps = 0;
-        player.state.playback.hwdecCurrent = "";
-        loadingUrl.value = player.state.media.url;
-        isLoading.value = true;
-        await ensurePlaybackPreferencesLoaded();
-        const preferences = playbackPreferences.value;
-        await player.setPlaybackSpeed(preferences.defaultSpeed);
-        const resumePosition = getStartPosition(
-            player.state.media.url,
-            preferences.skipIntroSeconds,
-        );
-        pendingResume.value = {
-            url: player.state.media.url,
-            position: resumePosition,
-        };
-        await player.loadFile(resumePosition, preferences.autoPlay);
+        await playPath(player.state.media.url);
         if (!player.state.media.isFileLoaded) {
             hideHistory.value = false;
         }
@@ -547,52 +633,15 @@ export const usePlaybackFlow = ({
 
     const onPlayHistory = async (entry: HistoryEntry) => {
         const preferredTitle = entry.title?.trim() || "";
-        const source = parsePlaybackSource(entry.path);
-        if (source.type === "webdav") {
-            await playWebdav(
-                source.connectionId,
-                source.filePath,
-                source.key,
-                preferredTitle,
-            );
-            return;
-        }
-        if (source.type === "dlna") {
-            await playDlna(
-                source.resourceUrl,
-                source.key,
-                preferredTitle,
-            );
-            return;
-        }
-        if (source.type === "smb") {
-            throw new Error("SMB playback is not implemented yet");
-        }
-        hideHistory.value = true;
-        await playPath(source.path, preferredTitle);
+        await playPath(entry.path, preferredTitle);
     };
 
     const onPlayNetwork = async (payload: NetworkPlayRequest) => {
         const displayName = payload.displayName?.trim() || "";
-        const protocol = payload.protocol.trim().toLowerCase();
-        if (protocol === "http-dlna" || protocol === "dlna") {
-            await playDlna(
-                payload.filePath,
-                payload.playbackKey,
-                displayName,
-            );
-            return;
-        }
-        if (protocol === "webdav") {
-            await playWebdav(
-                payload.connectionId,
-                payload.filePath,
-                payload.playbackKey,
-                displayName,
-            );
-            return;
-        }
-        throw new Error(`Unsupported network protocol for playback: ${payload.protocol}`);
+        await playResolvedSource(
+            await resolvePlaybackSource(payload.playbackKey),
+            displayName,
+        );
     };
 
     const onUpdateUrl = (value: string) => {

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+
 type ProtocolOption = {
     value: string;
     label: string;
@@ -10,6 +12,7 @@ type ConnectionForm = {
     baseUrl: string;
     host: string;
     share: string;
+    group: string;
     port: string;
     username: string;
     password: string;
@@ -36,6 +39,204 @@ const emit = defineEmits<{
     (e: "close"): void;
     (e: "submit"): void;
 }>();
+
+const isProtocolSelectOpen = ref(false);
+const activeProtocolOptionIndex = ref(0);
+const protocolSelectTrigger = ref<HTMLElement | null>(null);
+const protocolSelectMenuStyle = ref<Record<string, string>>({});
+
+const selectedProtocolOption = computed(
+    () =>
+        props.protocolOptions.find(
+            (option) => option.value === props.createForm.protocol,
+        ) ?? props.protocolOptions[0],
+);
+
+const selectedProtocolOptionLabel = computed(
+    () => selectedProtocolOption.value?.label ?? props.selectedProtocolLabel,
+);
+
+const getProtocolOptionIndex = () => {
+    const index = props.protocolOptions.findIndex(
+        (option) => option.value === props.createForm.protocol,
+    );
+    return index >= 0 ? index : 0;
+};
+
+const clampProtocolOptionIndex = (index: number): number => {
+    if (!props.protocolOptions.length) return 0;
+    if (index < 0) return props.protocolOptions.length - 1;
+    if (index >= props.protocolOptions.length) return 0;
+    return index;
+};
+
+const updateProtocolSelectMenuPosition = () => {
+    if (!isProtocolSelectOpen.value || !protocolSelectTrigger.value) return;
+
+    const trigger = protocolSelectTrigger.value;
+    const rect = trigger.getBoundingClientRect();
+    const viewportHeight = window.innerHeight;
+    const spaceAbove = rect.top;
+    const spaceBelow = viewportHeight - rect.bottom;
+    const estimatedMenuHeight = 240;
+    const shouldOpenTop =
+        spaceBelow < estimatedMenuHeight && spaceAbove > spaceBelow;
+    const gap = 6;
+    const maxHeight = Math.max(
+        120,
+        Math.min(320, shouldOpenTop ? spaceAbove - 10 : spaceBelow - 10),
+    );
+    const triggerStyles = getComputedStyle(trigger);
+    const menuThemeVars: Record<string, string> = {
+        "--panel-select-card-border": triggerStyles
+            .getPropertyValue("--panel-select-card-border")
+            .trim(),
+        "--panel-select-card-text": triggerStyles
+            .getPropertyValue("--panel-select-card-text")
+            .trim(),
+        "--panel-select-card-hover-bg": triggerStyles
+            .getPropertyValue("--panel-select-card-hover-bg")
+            .trim(),
+        "--panel-select-card-focus-bg": triggerStyles
+            .getPropertyValue("--panel-select-card-focus-bg")
+            .trim(),
+        "--panel-select-card-focus-border": triggerStyles
+            .getPropertyValue("--panel-select-card-focus-border")
+            .trim(),
+        "--panel-select-menu-bg": triggerStyles
+            .getPropertyValue("--panel-select-menu-bg")
+            .trim(),
+        "--panel-select-menu-border": triggerStyles
+            .getPropertyValue("--panel-select-menu-border")
+            .trim(),
+        "--panel-select-menu-hover-bg": triggerStyles
+            .getPropertyValue("--panel-select-menu-hover-bg")
+            .trim(),
+        "--panel-select-menu-selected-bg": triggerStyles
+            .getPropertyValue("--panel-select-menu-selected-bg")
+            .trim(),
+        "--panel-select-menu-selected-border": triggerStyles
+            .getPropertyValue("--panel-select-menu-selected-border")
+            .trim(),
+    };
+
+    protocolSelectMenuStyle.value = shouldOpenTop
+        ? {
+              ...menuThemeVars,
+              left: `${rect.left}px`,
+              width: `${rect.width}px`,
+              bottom: `${viewportHeight - rect.top + gap}px`,
+              maxHeight: `${maxHeight}px`,
+          }
+        : {
+              ...menuThemeVars,
+              left: `${rect.left}px`,
+              width: `${rect.width}px`,
+              top: `${rect.bottom + gap}px`,
+              maxHeight: `${maxHeight}px`,
+          };
+};
+
+const openProtocolSelect = () => {
+    isProtocolSelectOpen.value = true;
+    activeProtocolOptionIndex.value = getProtocolOptionIndex();
+    nextTick(() => {
+        updateProtocolSelectMenuPosition();
+    });
+};
+
+const closeProtocolSelect = () => {
+    isProtocolSelectOpen.value = false;
+};
+
+const toggleProtocolSelect = () => {
+    if (isProtocolSelectOpen.value) {
+        closeProtocolSelect();
+        return;
+    }
+    openProtocolSelect();
+};
+
+const chooseProtocolOption = (option: ProtocolOption) => {
+    props.createForm.protocol = option.value;
+    closeProtocolSelect();
+};
+
+const setActiveProtocolOption = (step: number) => {
+    activeProtocolOptionIndex.value = clampProtocolOptionIndex(
+        activeProtocolOptionIndex.value + step,
+    );
+};
+
+const onProtocolSelectKeydown = (event: KeyboardEvent) => {
+    if (!props.protocolOptions.length) return;
+
+    if (event.key === "ArrowDown") {
+        event.preventDefault();
+        if (!isProtocolSelectOpen.value) {
+            openProtocolSelect();
+            return;
+        }
+        setActiveProtocolOption(1);
+        return;
+    }
+
+    if (event.key === "ArrowUp") {
+        event.preventDefault();
+        if (!isProtocolSelectOpen.value) {
+            openProtocolSelect();
+            return;
+        }
+        setActiveProtocolOption(-1);
+        return;
+    }
+
+    if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        if (!isProtocolSelectOpen.value) {
+            openProtocolSelect();
+            return;
+        }
+        const nextOption = props.protocolOptions[activeProtocolOptionIndex.value];
+        if (nextOption) {
+            chooseProtocolOption(nextOption);
+        }
+        return;
+    }
+
+    if (event.key === "Escape" && isProtocolSelectOpen.value) {
+        event.preventDefault();
+        closeProtocolSelect();
+    }
+};
+
+const onDocumentPointerDown = (event: PointerEvent) => {
+    if (!isProtocolSelectOpen.value) return;
+    const target = event.target as HTMLElement | null;
+    if (target?.closest(".panel__custom-select, .panel__custom-select-menu")) {
+        return;
+    }
+    closeProtocolSelect();
+};
+
+watch(
+    () => props.open,
+    (open) => {
+        if (!open) closeProtocolSelect();
+    },
+);
+
+onMounted(() => {
+    document.addEventListener("pointerdown", onDocumentPointerDown);
+    document.addEventListener("scroll", updateProtocolSelectMenuPosition, true);
+    window.addEventListener("resize", updateProtocolSelectMenuPosition);
+});
+
+onBeforeUnmount(() => {
+    document.removeEventListener("pointerdown", onDocumentPointerDown);
+    document.removeEventListener("scroll", updateProtocolSelectMenuPosition, true);
+    window.removeEventListener("resize", updateProtocolSelectMenuPosition);
+});
 </script>
 
 <template>
@@ -55,19 +256,58 @@ const emit = defineEmits<{
         <div class="network-modal__form">
             <label class="network-modal__field">
                 <span>Protocol</span>
-                <div class="panel__select-wrap">
-                    <select
-                        v-model="props.createForm.protocol"
-                        class="panel__select panel__select--card network-modal__input network-modal__select"
+                <div
+                    class="panel__custom-select"
+                    :class="{
+                        'panel__custom-select--open': isProtocolSelectOpen,
+                    }"
+                >
+                    <button
+                        ref="protocolSelectTrigger"
+                        type="button"
+                        class="panel__custom-select-trigger network-modal__input network-modal__custom-select-trigger"
+                        :aria-expanded="isProtocolSelectOpen"
+                        aria-haspopup="listbox"
+                        @click="toggleProtocolSelect"
+                        @keydown="onProtocolSelectKeydown"
                     >
-                        <option
-                            v-for="option in props.protocolOptions"
-                            :key="option.value"
-                            :value="option.value"
+                        <span class="panel__custom-select-value">
+                            {{ selectedProtocolOptionLabel }}
+                        </span>
+                        <span class="panel__custom-select-arrow" aria-hidden="true">
+                            <svg viewBox="0 0 12 12">
+                                <path d="M2.25 4.5L6 8.25L9.75 4.5" />
+                            </svg>
+                        </span>
+                    </button>
+                    <Teleport to="body">
+                        <div
+                            v-if="isProtocolSelectOpen"
+                            class="panel__custom-select-menu"
+                            :style="protocolSelectMenuStyle"
+                            role="listbox"
+                            aria-label="Protocol"
                         >
-                            {{ option.label }}
-                        </option>
-                    </select>
+                            <button
+                                v-for="(option, optionIndex) in props.protocolOptions"
+                                :key="option.value"
+                                type="button"
+                                class="panel__custom-select-option"
+                                :class="{
+                                    'panel__custom-select-option--selected':
+                                        option.value === props.createForm.protocol,
+                                    'panel__custom-select-option--active':
+                                        optionIndex === activeProtocolOptionIndex,
+                                }"
+                                role="option"
+                                :aria-selected="option.value === props.createForm.protocol"
+                                @mouseenter="activeProtocolOptionIndex = optionIndex"
+                                @click="chooseProtocolOption(option)"
+                            >
+                                {{ option.label }}
+                            </button>
+                        </div>
+                    </Teleport>
                 </div>
             </label>
             <label class="network-modal__field">
@@ -91,12 +331,12 @@ const emit = defineEmits<{
                     />
                 </label>
                 <label class="network-modal__field">
-                    <span>Share</span>
+                    <span>Share (optional)</span>
                     <input
                         v-model="props.createForm.share"
                         class="panel__input panel__input--path network-modal__input"
                         type="text"
-                        placeholder="media"
+                        placeholder="Leave empty to browse shares"
                     />
                 </label>
             </template>
@@ -151,6 +391,18 @@ const emit = defineEmits<{
                         v-model="props.createForm.password"
                         class="panel__input panel__input--path network-modal__input"
                         type="password"
+                        placeholder="Optional"
+                    />
+                </label>
+                <label
+                    v-if="props.isSmbProtocol"
+                    class="network-modal__field"
+                >
+                    <span>Group</span>
+                    <input
+                        v-model="props.createForm.group"
+                        class="panel__input panel__input--path network-modal__input"
+                        type="text"
                         placeholder="Optional"
                     />
                 </label>

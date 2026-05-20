@@ -40,10 +40,14 @@ struct ContentDirectoryService {
     control_url: Url,
 }
 
-pub async fn discover_devices(
+pub async fn discover_devices_with_callback<F>(
     app: &tauri::AppHandle,
     timeout_secs: u64,
-) -> Result<Vec<DlnaDevice>, String> {
+    mut on_device: F,
+) -> Result<Vec<DlnaDevice>, String>
+where
+    F: FnMut(DlnaDevice),
+{
     log::info!(
         "SSDP scan started: st={}, timeout={}s",
         SSDP_ST_MEDIA_SERVER,
@@ -134,13 +138,15 @@ pub async fn discover_devices(
             location,
             server.clone().unwrap_or_else(|| "-".to_string())
         );
-        found.push(DlnaDevice {
+        let device = DlnaDevice {
             usn,
             location,
             friendly_name: None,
             server,
             st,
-        });
+        };
+        on_device(device.clone());
+        found.push(device);
     }
 
     let client = crate::network::proxy::configure_client_builder(

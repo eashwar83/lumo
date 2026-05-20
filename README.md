@@ -6,7 +6,7 @@
 </h1>
 
 <p align="center">
-⚡ mpv-based · 🎬 HDR & Dolby Vision · 🌐 WebDAV + DLNA Streaming · 🖥 Cross-platform
+🎬 HDR & Dolby Vision · 🌐 WebDAV + DLNA + SMB Streaming · 🖥 Cross-platform
 </p>
 
 <p align="center">
@@ -16,7 +16,7 @@
 ![Soia App Preview](https://github.com/user-attachments/assets/9896ae38-d082-413e-8a01-bdb28e687bf7)
 > A modern mpv frontend focused on performance and clean design.
 
-**Soia** is a high-performance video player built on mpv, designed for smooth playback of everything from local Dolby Vision content to remote WebDAV and DLNA streams — all in one fast, elegant, cross-platform experience.
+**Soia** is a high-performance video player built on mpv, designed for smooth playback of everything from local Dolby Vision content to remote WebDAV, DLNA, and SMB streams — all in one fast, elegant, cross-platform experience.
 
 ## ✨ Key Features
 
@@ -25,6 +25,7 @@
 - **mpv-powered playback** with hardware acceleration (4K, HDR, Dolby Vision*)
 - Picture in Picture (PiP) on macOS and Windows
 - Dual subtitles for bilingual viewing
+- Advanced subtitle appearance controls for font, color, size, and position
 - Custom shaders for high-quality scaling and rendering
 - Anime mode with auto-detection and shader auto-apply
 
@@ -32,8 +33,9 @@
 
 ### Streaming & Remote Media
 
-- Discover, browse, and play media from DLNA devices
 - WebDAV browsing and streaming
+- DLNA and SMB/Samba discovery, browsing, and playback
+- M3U (IPTV) parsing and playback
 - Smart buffering with real-time speed indicators
 - Multiple playlists with sort, loop, and shuffle
 - Resume playback with history tracking
@@ -129,11 +131,6 @@ App data is stored in Tauri's local app data directory and includes:
 - `network_connections.json`: saved network connections
 - `thumbnails/`: captured artwork for Now Playing
 
-## Network Notes
-
-- WebDAV and DLNA browse/playback are implemented in the Rust backend.
-- SMB and FTP entries are visible in the UI, but backend browse/playback support is currently focused on WebDAV and DLNA.
-
 ## Security Note
 
 Saved network credentials are currently persisted in `network_connections.json` as plain text. Avoid using sensitive production credentials on shared machines.
@@ -166,7 +163,7 @@ pnpm setup:libs
 ```
 
 - If `pnpm setup:libs` fails, confirm release access to:
-  - `https://github.com/FengZeng/mpv/releases/tag/v0.41.0-r4`
+  - `https://github.com/FengZeng/mpv/releases/tag/v0.41.0-r7`
   - or set `MPV_RELEASE_ASSET_URL` to a direct asset URL and retry.
 
 - If Linux/Windows bundle scripts report missing runtime manifest, generate it on the target platform:

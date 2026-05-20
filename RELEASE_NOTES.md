@@ -19,15 +19,11 @@ You can also go to System Settings > Privacy & Security and click "Open Anyway" 
 
 The app is open-source and its code is publicly available for anyone to inspect.
 
-## [0.1.9] - 2026-05-04
+## [0.2.2] - 2026-05-15
 
-### Highlights
+### Improvements
 
-- Improved macOS SDR Rendering: Optimized color accuracy for a more precise visual experience on macOS.
-- DLNA Auto-Play: Added support for automatically playing the next item in the queue when streaming via DLNA.
-- M3U (IPTV) Parsing: You can now import M3U files to automatically parse channels and generate organized playlists.
-
-### Fixes
-
-- Fixed incorrect play/pause button state.
-- Fixed inability to manually play the next item.
+- Added fuzzy matching for sibling subtitle files.
+- Added richer metadata to audio/subtitle track selection menus.
+- Improved HTTPS connection stability and playback behavior.
+- Fixed incorrect IPTV title display in playback history.

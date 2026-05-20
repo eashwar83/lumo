@@ -22,6 +22,7 @@ pub(crate) async fn discover_network_connections(
         &app,
         payload.as_ref().and_then(|item| item.protocol.as_deref()),
         payload.as_ref().and_then(|item| item.timeout_secs),
+        payload.as_ref().and_then(|item| item.scan_id.as_deref()),
     )
     .await
 }
@@ -77,21 +78,33 @@ pub(crate) fn load_network_file(
         &app,
         &payload.connection_id,
     )?;
-    let playback_url = crate::network::service::resolve_webdav_playback_url(
+    let mut playback_url = crate::network::service::resolve_network_playback_url(
         &connection,
         payload.protocol.as_deref(),
         &payload.file_path,
     )?;
     let mut load_options: Vec<String> = Vec::new();
+    let protocol = payload
+        .protocol
+        .as_deref()
+        .unwrap_or(&connection.protocol)
+        .trim()
+        .to_ascii_lowercase();
+    if protocol == "webdav" {
+        if let Some(rewritten) = crate::mpv::rewrite_https_callback_url(&playback_url) {
+            playback_url = rewritten;
+        }
+    }
     let username = connection.username.trim();
-    if !username.is_empty() {
+    if protocol == "webdav" && !username.is_empty() {
         let auth_value = STANDARD.encode(format!("{}:{}", username, connection.password));
         load_options.push(format!(
             "http-header-fields=Authorization: Basic {}",
             auth_value
         ));
+        crate::mpv::register_https_basic_auth(&playback_url, username, &connection.password);
     }
-    // WebDAV URLs should not trigger yt-dlp probing on failure.
+    // Network URLs should not trigger yt-dlp probing on failure.
     load_options.push("ytdl=no".to_string());
     let resume_position = payload.resume_position.unwrap_or(0.0);
     let auto_play = payload.auto_play.unwrap_or(true);

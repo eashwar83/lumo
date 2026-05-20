@@ -8,6 +8,7 @@ import PlaybackOverlays from "./components/PlaybackOverlays.vue";
 import PlaylistPeekButton from "./components/PlaylistPeekButton.vue";
 import PlaylistDrawer from "./components/PlaylistDrawer.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
+import WindowResizeRegions from "./components/WindowResizeRegions.vue";
 import { usePlaybackShortcuts } from "./composables/usePlaybackShortcuts";
 import { usePlaybackFlow } from "./composables/usePlaybackFlow";
 import { useAppUiPersistence } from "./composables/useAppUiPersistence";
@@ -33,6 +34,7 @@ const {
     tracks,
     speed,
     adjustments,
+    subtitleAppearance,
     history,
     playlistState,
     playlists,
@@ -132,6 +134,8 @@ const playbackNavigation = usePlaybackNavigation({
 
 const isWindowsPlatform =
     typeof navigator !== "undefined" && /\bwindows\b/i.test(navigator.userAgent);
+const isLinuxPlatform =
+    typeof navigator !== "undefined" && /\blinux\b/i.test(navigator.userAgent);
 const playerHeaderCompactModeEnabled = computed(
     () => compactModeEnabled.value || (isWindowsPlatform && isPipEnabled.value),
 );
@@ -309,6 +313,7 @@ const onFileLoaded = async () => {
         await tracks.setSubtitlesDisabled(true);
     }
     await adjustments.applyColorAdjustmentsForMedia(player.state.media.url);
+    await subtitleAppearance.applySubtitleAppearanceOptions();
 };
 
 useAppRuntimeBindings({
@@ -500,6 +505,14 @@ useAppStartupBindings({
             :dual-sub-enabled="tracks.dualSubEnabled.value"
             :secondary-sub-id="tracks.secondarySubId.value"
             :active-sub-target="tracks.activeSubTarget.value"
+            :primary-sub-font-family="subtitleAppearance.primaryFontFamily.value"
+            :secondary-sub-font-family="subtitleAppearance.secondaryFontFamily.value"
+            :primary-sub-font-size="subtitleAppearance.primaryFontSize.value"
+            :secondary-sub-font-size="subtitleAppearance.secondaryFontSize.value"
+            :primary-sub-font-color="subtitleAppearance.primaryFontColor.value"
+            :secondary-sub-font-color="subtitleAppearance.secondaryFontColor.value"
+            :primary-sub-pos="subtitleAppearance.primarySubPos.value"
+            :secondary-sub-pos="subtitleAppearance.secondarySubPos.value"
             :show-sub-menu="tracks.showSubMenu.value"
             :has-audio-tracks="hasAudioTracks"
             :has-sub-tracks="hasSubTracks"
@@ -514,6 +527,11 @@ useAppStartupBindings({
             @set-speed="speed.setSpeed"
             @set-audio-delay="adjustments.setAudioDelay"
             @set-sub-delay-for-target="adjustments.setSubDelayForTarget"
+            @set-sub-font-family="subtitleAppearance.setSubtitleFontFamily"
+            @set-sub-font-size="subtitleAppearance.setSubtitleFontSize"
+            @set-sub-font-color="subtitleAppearance.setSubtitleFontColor"
+            @set-sub-position="subtitleAppearance.setSubtitlePosition"
+            @reset-sub-appearance="subtitleAppearance.resetSubtitleAppearance"
             @set-brightness="adjustments.setBrightness"
             @set-contrast="adjustments.setContrast"
             @set-saturation="adjustments.setSaturation"
@@ -609,6 +627,10 @@ useAppStartupBindings({
                 </p>
             </div>
         </ConfirmDialog>
+
+        <WindowResizeRegions
+            v-if="isLinuxPlatform && !player.state.window.isFullscreen"
+        />
     </main>
 </template>
 

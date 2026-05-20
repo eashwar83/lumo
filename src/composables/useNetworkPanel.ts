@@ -4,10 +4,6 @@ import {
     NETWORK_START_AT_ROOT_SETTING_LABEL,
     SETTINGS_UPDATED_EVENT,
 } from "../mock/settings";
-import {
-    createDlnaPlaybackKey,
-    createWebdavPlaybackKey,
-} from "../utils/playbackSource";
 import { useNetworkConnections } from "./useNetworkConnections";
 import { useNetworkBrowser } from "./useNetworkBrowser";
 import {
@@ -205,8 +201,8 @@ export const useNetworkPanel = () => {
         }
     };
 
-    const onCreateConnection = () => {
-        createConnection();
+    const onCreateConnection = (protocol = "webdav") => {
+        createConnection(protocol);
         viewMode.value = "connections";
     };
 
@@ -238,21 +234,15 @@ export const useNetworkPanel = () => {
         await browser.openDirectory(path);
     };
 
-    const buildPlayRequest = (entry: NetworkFileRow): NetworkPlayRequest => ({
-        protocol: selectedConnection.value?.protocol || "webdav",
-        connectionId: selectedConnectionId.value,
-        filePath: entry.path,
-        playbackKey:
-            selectedConnection.value?.protocol === "http-dlna" ||
-            selectedConnection.value?.protocol === "dlna"
-                ? createDlnaPlaybackKey(
-                    selectedConnectionId.value,
-                    entry.path,
-                    browser.networkPath.value,
-                )
-                : createWebdavPlaybackKey(selectedConnectionId.value, entry.path),
-        displayName: entry.name,
-    });
+    const buildPlayRequest = (entry: NetworkFileRow): NetworkPlayRequest => {
+        if (!entry.playbackKey) {
+            throw new Error("Network file is missing playback key");
+        }
+        return {
+            playbackKey: entry.playbackKey,
+            displayName: entry.name,
+        };
+    };
 
     watch([selectedConnectionId, browser.networkPath], saveUiState);
 

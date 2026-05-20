@@ -1,11 +1,37 @@
 use crate::network::types::{DiscoveredNetworkConnection, NetworkBrowseEntry, NetworkBrowseResult};
 use crate::store::network_connection_store::NetworkConnectionRecord;
+use serde::Serialize;
 use std::borrow::Cow;
+use tauri::Emitter;
+
+const NETWORK_DISCOVERY_FOUND_EVENT: &str = "network-discovery-found";
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NetworkDiscoveryFoundPayload {
+    scan_id: Option<String>,
+    connection: DiscoveredNetworkConnection,
+}
+
+fn emit_discovered_connection(
+    app: &tauri::AppHandle,
+    scan_id: Option<&str>,
+    connection: DiscoveredNetworkConnection,
+) {
+    let payload = NetworkDiscoveryFoundPayload {
+        scan_id: scan_id.map(ToString::to_string),
+        connection,
+    };
+    if let Err(error) = app.emit(NETWORK_DISCOVERY_FOUND_EVENT, payload) {
+        log::debug!("Failed to emit network discovery item: {}", error);
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BrowseProtocol {
     Webdav,
     Dlna,
+    Smb,
 }
 
 fn ensure_protocol(connection: &NetworkConnectionRecord, expected: &[&str]) -> Result<(), String> {
@@ -26,6 +52,7 @@ pub(crate) fn protocol_from_str(value: &str) -> Option<BrowseProtocol> {
     match value.trim().to_ascii_lowercase().as_str() {
         "webdav" => Some(BrowseProtocol::Webdav),
         "http-dlna" | "dlna" => Some(BrowseProtocol::Dlna),
+        "smb" | "samba" => Some(BrowseProtocol::Smb),
         _ => None,
     }
 }
@@ -81,6 +108,72 @@ pub(crate) fn resolve_browse_path(
     normalize_input_path(path, protocol)
 }
 
+fn create_network_playback_key(
+    connection_id: &str,
+    protocol: BrowseProtocol,
+    file_path: &str,
+    parent_path: &str,
+) -> String {
+    match protocol {
+        BrowseProtocol::Webdav => {
+            crate::playback_source::create_webdav_playback_key(connection_id, file_path)
+        }
+        BrowseProtocol::Dlna => crate::playback_source::create_dlna_playback_key(
+            connection_id,
+            file_path,
+            Some(parent_path),
+        ),
+        BrowseProtocol::Smb => {
+            crate::playback_source::create_smb_playback_key(connection_id, file_path)
+        }
+    }
+}
+
+struct NetworkBrowseEntryInput {
+    name: String,
+    path: String,
+    is_dir: bool,
+    size: Option<u64>,
+    modified_at: Option<String>,
+}
+
+impl NetworkBrowseEntryInput {
+    fn new(
+        name: String,
+        path: String,
+        is_dir: bool,
+        size: Option<u64>,
+        modified_at: Option<String>,
+    ) -> Self {
+        Self {
+            name,
+            path,
+            is_dir,
+            size,
+            modified_at,
+        }
+    }
+}
+
+fn network_browse_entry(
+    connection_id: &str,
+    protocol: BrowseProtocol,
+    parent_path: &str,
+    input: NetworkBrowseEntryInput,
+) -> NetworkBrowseEntry {
+    let playback_key = (!input.is_dir).then(|| {
+        create_network_playback_key(connection_id, protocol, &input.path, parent_path)
+    });
+    NetworkBrowseEntry {
+        name: input.name,
+        path: input.path,
+        entry_type: if input.is_dir { "dir".into() } else { "file".into() },
+        playback_key,
+        size: input.size,
+        modified_at: input.modified_at,
+    }
+}
+
 pub(crate) async fn browse_connection(
     app: &tauri::AppHandle,
     connection: &NetworkConnectionRecord,
@@ -92,21 +185,25 @@ pub(crate) async fn browse_connection(
             ensure_protocol(connection, &["webdav"])?;
             let result =
                 crate::network::protocols::webdav::list_directory(app, connection, path).await?;
+            let parent_path = result.path.clone();
             Ok(NetworkBrowseResult {
                 path: result.path,
                 entries: result
                     .entries
                     .into_iter()
-                    .map(|entry| NetworkBrowseEntry {
-                        name: entry.name,
-                        path: entry.path,
-                        entry_type: if entry.is_dir {
-                            "dir".into()
-                        } else {
-                            "file".into()
-                        },
-                        size: entry.size,
-                        modified_at: entry.modified_at,
+                    .map(|entry| {
+                        network_browse_entry(
+                            &connection.id,
+                            protocol,
+                            &parent_path,
+                            NetworkBrowseEntryInput::new(
+                                entry.name,
+                                entry.path,
+                                entry.is_dir,
+                                entry.size,
+                                entry.modified_at,
+                            ),
+                        )
                     })
                     .collect(),
             })
@@ -115,21 +212,51 @@ pub(crate) async fn browse_connection(
             ensure_protocol(connection, &["http-dlna", "dlna"])?;
             let result =
                 crate::network::protocols::dlna::browse_directory(app, connection, path).await?;
+            let parent_path = result.path.clone();
             Ok(NetworkBrowseResult {
                 path: result.path,
                 entries: result
                     .entries
                     .into_iter()
-                    .map(|entry| NetworkBrowseEntry {
-                        name: entry.name,
-                        path: entry.path,
-                        entry_type: if entry.is_dir {
-                            "dir".into()
-                        } else {
-                            "file".into()
-                        },
-                        size: entry.size,
-                        modified_at: entry.modified_at,
+                    .map(|entry| {
+                        network_browse_entry(
+                            &connection.id,
+                            protocol,
+                            &parent_path,
+                            NetworkBrowseEntryInput::new(
+                                entry.name,
+                                entry.path,
+                                entry.is_dir,
+                                entry.size,
+                                entry.modified_at,
+                            ),
+                        )
+                    })
+                    .collect(),
+            })
+        }
+        BrowseProtocol::Smb => {
+            ensure_protocol(connection, &["smb", "samba"])?;
+            let result = crate::network::protocols::smb::list_directory(connection, path).await?;
+            let parent_path = result.path.clone();
+            Ok(NetworkBrowseResult {
+                path: result.path,
+                entries: result
+                    .entries
+                    .into_iter()
+                    .map(|entry| {
+                        network_browse_entry(
+                            &connection.id,
+                            protocol,
+                            &parent_path,
+                            NetworkBrowseEntryInput::new(
+                                entry.name,
+                                entry.path,
+                                entry.is_dir,
+                                entry.size,
+                                entry.modified_at,
+                            ),
+                        )
                     })
                     .collect(),
             })
@@ -141,6 +268,7 @@ pub(crate) async fn discover_connections(
     app: &tauri::AppHandle,
     protocol: Option<&str>,
     timeout_secs: Option<u64>,
+    scan_id: Option<&str>,
 ) -> Result<Vec<DiscoveredNetworkConnection>, String> {
     let protocol = protocol
         .map(|value| value.trim().to_ascii_lowercase())
@@ -150,7 +278,25 @@ pub(crate) async fn discover_connections(
 
     let mut result: Vec<DiscoveredNetworkConnection> = Vec::new();
     if protocol == "all" || protocol == "http-dlna" || protocol == "dlna" {
-        let devices = crate::network::protocols::dlna::discover_devices(app, timeout_secs).await?;
+        let devices = crate::network::protocols::dlna::discover_devices_with_callback(
+            app,
+            timeout_secs,
+            |item| {
+                emit_discovered_connection(
+                    app,
+                    scan_id,
+                    DiscoveredNetworkConnection {
+                        protocol: "http-dlna".to_string(),
+                        usn: Some(item.usn),
+                        location: item.location,
+                        friendly_name: item.friendly_name,
+                        server: item.server,
+                        st: Some(item.st),
+                    },
+                );
+            },
+        )
+        .await?;
         result.extend(devices.into_iter().map(|item| DiscoveredNetworkConnection {
             protocol: "http-dlna".to_string(),
             usn: Some(item.usn),
@@ -161,27 +307,58 @@ pub(crate) async fn discover_connections(
         }));
     }
     if protocol == "all" || protocol == "smb" || protocol == "samba" {
-        log::debug!("SMB discovery is not implemented yet");
+        let devices = crate::network::protocols::smb::discover_devices_with_callback(
+            timeout_secs,
+            |item| {
+                emit_discovered_connection(
+                    app,
+                    scan_id,
+                    DiscoveredNetworkConnection {
+                        protocol: "smb".to_string(),
+                        usn: Some(item.instance_name),
+                        location: item.location,
+                        friendly_name: item.friendly_name,
+                        server: item.server,
+                        st: Some(item.service_type),
+                    },
+                );
+            },
+        )
+        .await?;
+        result.extend(devices.into_iter().map(|item| DiscoveredNetworkConnection {
+            protocol: "smb".to_string(),
+            usn: Some(item.instance_name),
+            location: item.location,
+            friendly_name: item.friendly_name,
+            server: item.server,
+            st: Some(item.service_type),
+        }));
     }
 
     Ok(result)
 }
 
-pub(crate) fn resolve_webdav_playback_url(
+pub(crate) fn resolve_network_playback_url(
     connection: &NetworkConnectionRecord,
     protocol_hint: Option<&str>,
     file_path: &str,
 ) -> Result<String, String> {
     let protocol = resolve_protocol_with_hint(connection, protocol_hint)?;
 
-    if protocol != BrowseProtocol::Webdav {
-        return Err(format!(
-            "load_network_file currently supports webdav only, got {}",
+    match protocol {
+        BrowseProtocol::Webdav => {
+            ensure_protocol(connection, &["webdav"])?;
+            crate::network::protocols::webdav::build_playback_url(connection, file_path)
+        }
+        BrowseProtocol::Smb => {
+            ensure_protocol(connection, &["smb", "samba"])?;
+            crate::network::protocols::smb::build_playback_url(connection, file_path)
+        }
+        BrowseProtocol::Dlna => Err(format!(
+            "load_network_file does not support DLNA playback URL resolution for {}",
             connection.protocol
-        ));
+        )),
     }
-    ensure_protocol(connection, &["webdav"])?;
-    crate::network::protocols::webdav::build_playback_url(connection, file_path)
 }
 
 fn default_browse_path(connection: &NetworkConnectionRecord, protocol: BrowseProtocol) -> String {
@@ -192,6 +369,7 @@ fn default_browse_path(connection: &NetworkConnectionRecord, protocol: BrowsePro
     match protocol {
         BrowseProtocol::Webdav => "/".to_string(),
         BrowseProtocol::Dlna => "0".to_string(),
+        BrowseProtocol::Smb => "/".to_string(),
     }
 }
 
@@ -199,6 +377,7 @@ fn normalize_input_path(path: Option<String>, protocol: BrowseProtocol) -> Strin
     let fallback: Cow<'static, str> = match protocol {
         BrowseProtocol::Webdav => Cow::Borrowed("/"),
         BrowseProtocol::Dlna => Cow::Borrowed("0"),
+        BrowseProtocol::Smb => Cow::Borrowed("/"),
     };
 
     let value = path.unwrap_or_else(|| fallback.to_string());

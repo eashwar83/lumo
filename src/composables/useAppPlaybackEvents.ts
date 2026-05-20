@@ -53,7 +53,7 @@ type NowPlayingApi = {
 };
 
 type TracksApi = {
-    applyExternalTracksForUrl: (url: string) => Promise<void>;
+    applyExternalTracksForUrl: (url: string, mediaTitle?: string) => Promise<void>;
 };
 
 type UseAppPlaybackEventsOptions = {
@@ -125,7 +125,10 @@ export const useAppPlaybackEvents = ({
         nowPlaying.updateNowPlayingMetadata();
         nowPlaying.updateNowPlayingStatus(resumePosition);
         void nowPlaying.captureNowPlayingArtwork();
-        void tracks.applyExternalTracksForUrl(player.state.media.url);
+        void tracks.applyExternalTracksForUrl(
+            player.state.media.url,
+            player.state.media.title,
+        );
         if (player.state.window.isFullscreen) {
             void player.syncMpvRenderTarget();
         }

@@ -4,9 +4,11 @@ use super::ffi::ensure_numeric_locale_for_mpv;
 use super::ffi::{
     mpv_command, mpv_create, mpv_create_client, mpv_destroy, mpv_format, mpv_free,
     mpv_get_property_string, mpv_initialize, mpv_set_option, mpv_set_option_string,
-    mpv_terminate_destroy, soia_utils_create, soia_utils_destroy, soia_utils_render_context_update,
-    soia_utils_render_target_resize, soia_utils_uses_render_context, SoiaUtils,
+    mpv_terminate_destroy, resolve_linked_library_path, soia_utils_create, soia_utils_destroy,
+    soia_utils_render_context_update, soia_utils_render_target_resize, soia_utils_uses_render_context,
+    SoiaUtils,
 };
+use super::stream_https::HttpsStreamRegistry;
 use crate::check_update::SoiaAuthToken;
 use log::info;
 use std::ffi::{c_void, CStr, CString};
@@ -42,6 +44,7 @@ pub struct MpvHandle {
     render_loop_stop: Arc<AtomicBool>,
     render_loop_handle: Mutex<Option<JoinHandle<()>>>,
     soia_utils: AtomicPtr<SoiaUtils>,
+    _https_stream_registry: Option<Box<HttpsStreamRegistry>>,
 }
 
 unsafe impl Send for MpvHandle {}
@@ -105,6 +108,15 @@ fn shutdown_mpv_and_soia(ctx: &AtomicPtr<c_void>, utils: &AtomicPtr<SoiaUtils>, 
     }
 }
 
+fn log_runtime_library_diagnostics() {
+    let mpv_path = resolve_linked_library_path(mpv_create as *const c_void)
+        .unwrap_or_else(|| "<unresolved>".to_string());
+    let soia_utils_path = resolve_linked_library_path(soia_utils_create as *const c_void)
+        .unwrap_or_else(|| "<unresolved>".to_string());
+    info!("Runtime library path: libmpv => {}", mpv_path);
+    info!("Runtime library path: libsoia_utils => {}", soia_utils_path);
+}
+
 #[cfg(target_os = "windows")]
 fn resolve_wallpaper_mode_enabled(app_handle: &AppHandle) -> bool {
     crate::store::ui_state_store::load_setting_value(app_handle, WALLPAPER_MODE_SETTING_LABEL)
@@ -132,6 +144,7 @@ impl MpvHandle {
     ) -> Result<Self, String> {
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         ensure_numeric_locale_for_mpv();
+        log_runtime_library_diagnostics();
 
         let ctx = unsafe { mpv_create() };
         if ctx.is_null() {
@@ -224,12 +237,21 @@ impl MpvHandle {
             return Err("Failed to create SoiaUtils instance".to_string());
         }
 
+        if let Err(error) = super::stream_proxy::start(app_handle.clone()) {
+            log::warn!("stream proxy: failed to start: {error}");
+        }
+        let mut https_stream_registry = Box::new(HttpsStreamRegistry::new(app_handle.clone()));
+        if let Err(error) = https_stream_registry.register(soia_utils) {
+            log::warn!("{error}");
+        }
+
         let handle = MpvHandle {
             ctx: AtomicPtr::new(ctx),
             is_playing: Arc::new(AtomicBool::new(false)),
             is_rendering: Arc::new(AtomicBool::new(false)),
             eof_reached: Arc::new(AtomicBool::new(false)),
             soia_utils: AtomicPtr::new(soia_utils),
+            _https_stream_registry: Some(https_stream_registry),
             app_handle,
             event_loop_stop: Arc::new(AtomicBool::new(false)),
             event_loop_handle: Mutex::new(None),

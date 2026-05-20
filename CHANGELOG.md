@@ -1,5 +1,43 @@
 # Changelog
 
+## [0.2.2] - 2026-05-15
+
+### Features
+
+- Added yt-dlp powered web stream resolution with proxy playback support.
+- Added Rust-side network-adjacent source resolution for smoother next/previous playback across network media.
+- Added automatic fuzzy matching for sibling subtitle files.
+- Enriched audio and subtitle track menus with clearer labels and metadata.
+
+### Fixes
+
+- Preserved resolved yt-dlp titles in playback and history.
+- Preserved IPTV playlist titles when opening playlist items.
+
+## [0.2.1] - 2026-05-12
+
+### Hotfixes
+
+- Fixed Windows/Linux SMB connection issues.
+- Fixed Linux video rendering issues.
+
+## [0.2.0] - 2026-05-10
+
+### Features
+
+- Added persistent advanced subtitle appearance controls for font, color, size, and position.
+- Added separate primary and secondary subtitle position controls for dual subtitles.
+- Added SMB/Samba network share discovery, browsing, and playback support.
+
+### Improvements
+
+- Network discovery now streams discovered connections into the Network panel during scans.
+
+### Fixes
+
+- Fixed the Network panel so the active playback item is revealed in the browser.
+- Polished connection modal interactions for more reliable editing.
+
 ## [0.1.9] - 2026-05-04
 
 ### Features

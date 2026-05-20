@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::{
-    build_load_file_command_args, json_value_to_string, mpv_command_checked,
+    build_load_file_command_args_with_options, json_value_to_string, mpv_command_checked,
     mpv_set_option_string_checked, with_mpv, AppState, OpenFileState,
 };
 
@@ -43,6 +43,12 @@ pub(crate) struct LoadFilePayload {
     auto_play: Option<bool>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LoadFileResult {
+    title: Option<String>,
+}
+
 fn resume_playback(mpv_guard: &crate::mpv::MpvHandle) -> Result<(), String> {
     mpv_command_checked(mpv_guard, &["set", "pause", "no"])
 }
@@ -52,14 +58,37 @@ fn restart_from_beginning_after_eof(mpv_guard: &crate::mpv::MpvHandle) -> Result
     resume_playback(mpv_guard)
 }
 
+fn escape_mpv_load_option_value(value: &str) -> String {
+    value.replace('\\', "\\\\").replace(',', "\\,")
+}
+
 #[tauri::command]
-pub(crate) fn load_file(
+pub(crate) async fn load_file(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     payload: LoadFilePayload,
-) -> Result<(), String> {
+) -> Result<LoadFileResult, String> {
     let resume_position = payload.resume_position.unwrap_or(0.0);
     let auto_play = payload.auto_play.unwrap_or(true);
-    let command_args = build_load_file_command_args(&payload.url, resume_position);
+    let resolved_media = crate::mpv::try_resolve_with_ytdlp(&app, &payload.url).await;
+    let playback_url = resolved_media
+        .as_ref()
+        .map(|resolved| resolved.url.as_str())
+        .unwrap_or(&payload.url);
+    let mut load_options = vec!["ytdl=no".to_string()];
+    if let Some(title) = resolved_media
+        .as_ref()
+        .and_then(|resolved| resolved.title.as_deref())
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+    {
+        load_options.push(format!(
+            "force-media-title={}",
+            escape_mpv_load_option_value(title)
+        ));
+    }
+    let command_args =
+        build_load_file_command_args_with_options(&playback_url, resume_position, &load_options);
     let command_refs: Vec<&str> = command_args.iter().map(String::as_str).collect();
     with_mpv(&state, |mpv_guard| {
         mpv_command_checked(mpv_guard, &command_refs)?;
@@ -69,7 +98,9 @@ pub(crate) fn load_file(
         )?;
         Ok(())
     })?;
-    Ok(())
+    Ok(LoadFileResult {
+        title: resolved_media.and_then(|resolved| resolved.title),
+    })
 }
 
 #[tauri::command]
@@ -287,7 +318,19 @@ fn resolve_playlist_entry_path(base: &PlaylistBase<'_>, raw: &str) -> Option<Str
 }
 
 fn parse_extinf_title(line: &str) -> Option<String> {
-    let comma_index = line.find(',')?;
+    let mut in_quotes = false;
+    let mut comma_index = None;
+    for (index, ch) in line.char_indices() {
+        if ch == '"' {
+            in_quotes = !in_quotes;
+            continue;
+        }
+        if ch == ',' && !in_quotes {
+            comma_index = Some(index);
+            break;
+        }
+    }
+    let comma_index = comma_index?;
     let title = line[(comma_index + 1)..].trim();
     if title.is_empty() {
         None

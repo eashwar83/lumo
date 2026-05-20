@@ -188,6 +188,17 @@ pub(crate) fn configure_client_builder(
     Ok(builder.proxy(proxy))
 }
 
+pub(crate) fn current_proxy_key(app: &tauri::AppHandle) -> Result<Option<String>, String> {
+    #[cfg(debug_assertions)]
+    let settings = load_runtime_settings()
+        .map(Ok)
+        .unwrap_or_else(|| resolve_settings(app, None, None))?;
+    #[cfg(not(debug_assertions))]
+    let settings = resolve_settings(app, None, None)?;
+
+    Ok(settings.proxy_url)
+}
+
 pub(crate) fn configure_blocking_client_builder(
     app: &tauri::AppHandle,
     builder: reqwest::blocking::ClientBuilder,

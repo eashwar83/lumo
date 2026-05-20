@@ -102,6 +102,7 @@ struct MediaTrack {
     demux_bitrate: Option<i64>,
     demux_samplerate: Option<i64>,
     demux_channels: Option<String>,
+    demux_channel_count: Option<i64>,
     fps: Option<f64>,
     w: Option<i64>,
     h: Option<i64>,
@@ -337,6 +338,17 @@ fn observe_property(client: *mut c_void, id: u64, name: &str, format: mpv_format
     let result = unsafe { mpv_observe_property(client, id, c_name.as_ptr(), format) };
     if result < 0 {
         warn!("MPV: observe_property {} failed with {}", name, result);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn sync_render_target_after_file_loaded(app_handle: &AppHandle) {
+    let Some(window) = app_handle.get_webview_window("main") else {
+        warn!("MPV Event Loop: failed to resolve main window for render target sync");
+        return;
+    };
+    if let Err(error) = crate::app_bootstrap::sync_mpv_render_target_to_window(&window) {
+        warn!("MPV Event Loop: failed to sync render target after file load: {error}");
     }
 }
 
@@ -588,6 +600,8 @@ pub(super) fn mpv_event_loop(
                 }
                 mpv_event_id::MPV_EVENT_FILE_LOADED => {
                     is_rendering.store(true, Ordering::Relaxed);
+                    #[cfg(target_os = "linux")]
+                    sync_render_target_after_file_loaded(&app_handle);
                     #[cfg(debug_assertions)]
                     info!("MPV Event Loop: MPV_EVENT_FILE_LOADED received.");
                     notify_start = true;
@@ -1055,6 +1069,7 @@ pub(super) fn mpv_event_loop(
                                                 demux_bitrate: as_i64("demux-bitrate"),
                                                 demux_samplerate: as_i64("demux-samplerate"),
                                                 demux_channels: as_string("demux-channels"),
+                                                demux_channel_count: as_i64("demux-channel-count"),
                                                 fps: as_f64("fps"),
                                                 w: as_i64("w"),
                                                 h: as_i64("h"),
