@@ -1,8 +1,11 @@
 <script setup lang="ts">
+import { computed } from "vue";
+
 const props = defineProps<{
     isPlaying: boolean;
     currentTime: number;
     duration: number;
+    volume: number;
     formatTime: (seconds: number) => string;
     badges: string[];
 }>();
@@ -12,7 +15,22 @@ const emit = defineEmits<{
     (e: "toggle-play-pause"): void;
     (e: "stop-playback"): void;
     (e: "next-track"): void;
+    (e: "set-volume", volume: number): void;
+    (e: "toggle-muted"): void;
 }>();
+
+const volumePercent = computed(() => Math.max(0, Math.min(100, props.volume)));
+const volumeIconPath = computed(() => {
+    if (volumePercent.value <= 0) {
+        return "M792-56 671-177q-25 16-53 27.5T560-131v-82q14-5 27.5-10t25.5-12L480-368v208L280-360H120v-240h128L56-792l56-56 736 736-56 56Zm-8-232-58-58q17-31 25.5-65t8.5-70q0-94-55-168T560-749v-82q124 28 202 125.5T840-481q0 53-14.5 102T784-288ZM650-422l-90-90v-130q47 22 73.5 66t26.5 96q0 15-2.5 29.5T650-422ZM480-592 376-696l104-104v208Zm-80 238v-94l-72-72H200v80h114l86 86Zm-36-130Z";
+    }
+    return "M560-131v-82q90-26 145-100t55-168q0-94-55-168T560-749v-82q124 28 202 125.5T840-481q0 127-78 224.5T560-131ZM120-360v-240h160l200-200v640L280-360H120Zm440 40v-322q47 22 73.5 66t26.5 96q0 51-26.5 94.5T560-320ZM400-606l-86 86H200v80h114l86 86v-252ZM300-480Z";
+});
+
+const onVolumeInput = (event: Event) => {
+    const input = event.target as HTMLInputElement;
+    emit("set-volume", Number(input.value));
+};
 </script>
 
 <template>
@@ -47,6 +65,29 @@ const emit = defineEmits<{
                 <path d="M16 6v12h2V6h-2zm-1.5 6L6 18V6l8.5 6z" />
             </svg>
         </button>
+        <div class="volume-control" :style="{ '--volume-percent': `${volumePercent}%` }">
+            <button
+                class="icon-button icon-button--player volume-control__button"
+                :title="volumePercent > 0 ? `Mute volume ${volumePercent}%` : 'Restore volume'"
+                @click="emit('toggle-muted')"
+            >
+                <svg viewBox="0 -960 960 960" fill="currentColor">
+                    <path :d="volumeIconPath" />
+                </svg>
+            </button>
+            <div class="volume-control__popover">
+                <input
+                    class="volume-control__slider"
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="1"
+                    :value="volumePercent"
+                    :aria-label="`Volume ${volumePercent}%`"
+                    @input="onVolumeInput"
+                />
+            </div>
+        </div>
         <div class="time-display">
             <span>{{ formatTime(currentTime) }}</span>
             <span class="separator">/</span>
@@ -65,6 +106,108 @@ const emit = defineEmits<{
 </template>
 
 <style scoped>
+.volume-control {
+    --volume-percent: 100%;
+    position: relative;
+    display: flex;
+    align-items: center;
+    border-radius: 8px;
+    padding: 2px;
+}
+
+.volume-control:hover,
+.volume-control:focus-within {
+    background: rgba(255, 255, 255, 0.08);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.volume-control__button {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+}
+
+.volume-control__button svg {
+    width: 22px;
+    height: 22px;
+}
+
+.volume-control__popover {
+    position: absolute;
+    left: calc(100% - 2px);
+    top: 50%;
+    width: 0;
+    height: 32px;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-50%) translateX(-4px);
+    transform-origin: left center;
+    transition:
+        width 0.18s ease,
+        opacity 0.16s ease,
+        transform 0.18s ease;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    z-index: 2;
+}
+
+.volume-control:hover .volume-control__popover,
+.volume-control:focus-within .volume-control__popover {
+    width: 114px;
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(-50%) translateX(0);
+}
+
+.volume-control__slider {
+    width: 86px;
+    height: 2px;
+    margin: 0 24px 0 4px;
+    border-radius: 999px;
+    appearance: none;
+    background:
+        linear-gradient(#fff, #fff) 0 / var(--volume-percent) 100% no-repeat,
+        rgba(255, 255, 255, 0.24);
+    cursor: pointer;
+}
+
+.volume-control__slider::-webkit-slider-thumb {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    appearance: none;
+    background: #fff;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
+.volume-control__slider::-moz-range-thumb {
+    width: 9px;
+    height: 9px;
+    border: none;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
+.volume-control__slider:focus-visible {
+    outline: 2px solid rgba(255, 255, 255, 0.55);
+    outline-offset: 5px;
+}
+
+.volume-control:hover + .time-display,
+.volume-control:focus-within + .time-display {
+    opacity: 0;
+    visibility: hidden;
+}
+
+.time-display {
+    margin-left: 0;
+    transition:
+        opacity 0.14s ease,
+        visibility 0.14s ease;
+}
+
 .status-badges {
     display: inline-flex;
     gap: 6px;

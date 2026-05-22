@@ -6,6 +6,9 @@ type PlayerEffectState = {
   media: {
     url: string;
   };
+  playback: {
+    volume: number;
+  };
   window: {
     isFullscreen: boolean;
   };
@@ -29,6 +32,10 @@ export const usePlaybackCommands = (
   state: PlayerEffectState,
   currentWindow: CurrentWindow,
 ) => {
+  let lastAudibleVolume = 100;
+  let volumeApplyQueue: Promise<void> = Promise.resolve();
+  let volumeRequestId = 0;
+
   const MEDIA_FILES_FILTER = [
     {
       name: "Media Files",
@@ -161,6 +168,33 @@ export const usePlaybackCommands = (
     await invoke("mpv_set_option_string", { name: "speed", value: rate });
   };
 
+  const setVolume = async (volume: number): Promise<void> => {
+    const nextVolume = Math.max(0, Math.min(100, Math.round(volume)));
+    const requestId = ++volumeRequestId;
+    state.playback.volume = nextVolume;
+    if (nextVolume > 0) {
+      lastAudibleVolume = nextVolume;
+    }
+    volumeApplyQueue = volumeApplyQueue
+      .catch(() => {})
+      .then(async () => {
+        if (requestId !== volumeRequestId) return;
+        await invoke("mpv_set_option_string", {
+          name: "volume",
+          value: nextVolume,
+        });
+      });
+    await volumeApplyQueue;
+  };
+
+  const toggleMuted = async (): Promise<void> => {
+    if (state.playback.volume > 0) {
+      await setVolume(0);
+      return;
+    }
+    await setVolume(lastAudibleVolume || 100);
+  };
+
   return {
     loadFile,
     loadFileAtUrl,
@@ -178,5 +212,7 @@ export const usePlaybackCommands = (
     seekRelative,
     setLoopFile,
     setPlaybackSpeed,
+    setVolume,
+    toggleMuted,
   };
 };

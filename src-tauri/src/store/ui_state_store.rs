@@ -39,6 +39,8 @@ pub struct UiState {
     #[serde(default)]
     pub playback_adjustments: Option<PlaybackAdjustmentsState>,
     #[serde(default)]
+    pub playback: Option<PlaybackState>,
+    #[serde(default)]
     pub subtitle_appearance: Option<SubtitleAppearanceState>,
     #[serde(default)]
     pub playlist: Option<Vec<PlaylistEntry>>,
@@ -61,6 +63,7 @@ impl Default for UiState {
             settings: None,
             rendering: None,
             playback_adjustments: None,
+            playback: None,
             subtitle_appearance: None,
             playlist: None,
             playlists: None,
@@ -82,6 +85,7 @@ impl UiState {
             playback_adjustments: incoming
                 .playback_adjustments
                 .or(self.playback_adjustments),
+            playback: incoming.playback.or(self.playback),
             subtitle_appearance: incoming.subtitle_appearance.or(self.subtitle_appearance),
             playlist: incoming.playlist.or(self.playlist),
             playlists: incoming.playlists.or(self.playlists),
@@ -114,6 +118,13 @@ pub struct PlaybackAdjustmentsState {
     pub global_color_adjustments_enabled: Option<bool>,
     #[serde(default)]
     pub global_color_adjustments: Option<ColorAdjustmentsState>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaybackState {
+    #[serde(default)]
+    pub volume: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]

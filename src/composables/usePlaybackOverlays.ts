@@ -33,10 +33,12 @@ export const usePlaybackOverlays = ({
     const seekOverlayLeftText = ref("");
     const seekOverlayRightText = ref("");
     const seekOverlayLeftTimelineText = ref("");
+    const volumeOverlayText = ref("");
     const seekOverlayLeftPulseToken = ref(0);
     const seekOverlayRightPulseToken = ref(0);
     let loadingOverlayDelayTimer: ReturnType<typeof setTimeout> | null = null;
     let seekOverlayTimer: ReturnType<typeof setTimeout> | null = null;
+    let volumeOverlayTimer: ReturnType<typeof setTimeout> | null = null;
     let seekOverlayAccumulatedDelta = 0;
     let seekOverlayBaseTime = 0;
 
@@ -51,6 +53,13 @@ export const usePlaybackOverlays = ({
         if (seekOverlayTimer !== null) {
             window.clearTimeout(seekOverlayTimer);
             seekOverlayTimer = null;
+        }
+    };
+
+    const clearVolumeOverlayTimer = () => {
+        if (volumeOverlayTimer !== null) {
+            window.clearTimeout(volumeOverlayTimer);
+            volumeOverlayTimer = null;
         }
     };
 
@@ -106,6 +115,16 @@ export const usePlaybackOverlays = ({
         }, 700);
     };
 
+    const showVolumeOverlay = (volume: number) => {
+        const nextVolume = clampNumber(Math.round(volume), 0, 100);
+        volumeOverlayText.value = `Volume ${nextVolume}`;
+        clearVolumeOverlayTimer();
+        volumeOverlayTimer = window.setTimeout(() => {
+            volumeOverlayText.value = "";
+            volumeOverlayTimer = null;
+        }, 700);
+    };
+
     watch(shouldShowPlaybackLoadingOverlay, (shouldShow) => {
         if (!shouldShow) {
             clearLoadingOverlayDelayTimer();
@@ -123,6 +142,7 @@ export const usePlaybackOverlays = ({
     onBeforeUnmount(() => {
         clearLoadingOverlayDelayTimer();
         clearSeekOverlayTimer();
+        clearVolumeOverlayTimer();
     });
 
     return {
@@ -131,8 +151,10 @@ export const usePlaybackOverlays = ({
         seekOverlayLeftText,
         seekOverlayRightText,
         seekOverlayLeftTimelineText,
+        volumeOverlayText,
         seekOverlayLeftPulseToken,
         seekOverlayRightPulseToken,
         showSeekOverlay,
+        showVolumeOverlay,
     };
 };

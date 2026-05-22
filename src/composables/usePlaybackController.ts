@@ -23,6 +23,7 @@ type PlayerState = {
     bufferedTime: number;
     videoBitrate: number;
     hwdecCurrent: string;
+    volume: number;
   };
   window: {
     isFullscreen: boolean;
@@ -61,6 +62,8 @@ export type PlayerApi = {
   seekRelative: (position: number) => Promise<void>;
   setLoopFile: (enabled: boolean) => Promise<void>;
   setPlaybackSpeed: (rate: number) => Promise<void>;
+  setVolume: (volume: number) => Promise<void>;
+  toggleMuted: () => Promise<void>;
 };
 
 export const usePlaybackController = (): PlayerApi => {
@@ -84,6 +87,7 @@ export const usePlaybackController = (): PlayerApi => {
       bufferedTime: 0,
       videoBitrate: 0,
       hwdecCurrent: "",
+      volume: 100,
     },
     window: {
       isFullscreen: false,
@@ -100,9 +104,10 @@ export const usePlaybackController = (): PlayerApi => {
     return (state.playback.bufferedTime / state.playback.duration) * 100;
   });
 
-  const isUrlModified = computed(
-    () => state.media.url !== state.media.lastLoadedUrl,
-  );
+  const isUrlModified = computed(() => {
+    const nextUrl = state.media.url.trim();
+    return Boolean(nextUrl) && nextUrl !== state.media.lastLoadedUrl;
+  });
 
   const commands = usePlaybackCommands(state, currentWindow);
 

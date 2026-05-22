@@ -12,6 +12,7 @@ const props = defineProps<{
     duration: number;
     progressPercent: number;
     bufferedPercent: number;
+    volume: number;
     formatTime: (seconds: number) => string;
     controlsVisible?: boolean;
     isHidden: boolean;
@@ -59,6 +60,8 @@ const emit = defineEmits<{
     (e: "toggle-menu", menuName: "audio" | "sub" | "speed" | "settings"): void;
     (e: "toggle-loop-one"): void;
     (e: "set-speed", rate: number): void;
+    (e: "set-volume", volume: number): void;
+    (e: "toggle-muted"): void;
     (e: "set-audio-delay", value: number): void;
     (e: "set-sub-delay-for-target", payload: { target: SubtitleTarget; value: number }): void;
     (e: "set-sub-font-family", payload: { target: SubtitleTarget; value: string }): void;
@@ -226,12 +229,15 @@ onUnmounted(() => {
                         :is-playing="isPlaying"
                         :current-time="currentTime"
                         :duration="duration"
+                        :volume="volume"
                         :format-time="formatTime"
                         :badges="props.statusBadges"
                         @prev-track="emit('prev-track')"
                         @toggle-play-pause="emit('toggle-play-pause')"
                         @stop-playback="emit('stop-playback')"
                         @next-track="emit('next-track')"
+                        @set-volume="emit('set-volume', $event)"
+                        @toggle-muted="emit('toggle-muted')"
                     />
                     <RightControls
                         :current-speed="currentSpeed"
@@ -369,7 +375,7 @@ onUnmounted(() => {
 .player-controls-content :deep(.time-display) {
     color: white;
     font-size: 13px;
-    margin-left: 8px;
+    margin-left: 0;
     user-select: none;
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum";

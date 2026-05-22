@@ -11,6 +11,7 @@ const props = defineProps<{
     seekOverlayLeftText?: string;
     seekOverlayRightText?: string;
     seekOverlayLeftTimelineText?: string;
+    volumeOverlayText?: string;
     hideSeekTimeline?: boolean;
     seekOverlayLeftPulseToken?: number;
     seekOverlayRightPulseToken?: number;
@@ -82,6 +83,11 @@ const seekOverlayRightDisplay = computed(() =>
     </transition>
 
     <div class="seek-overlay" aria-hidden="true">
+        <transition name="fade-in">
+            <div v-if="volumeOverlayText" class="volume-overlay__text">
+                {{ volumeOverlayText }}
+            </div>
+        </transition>
         <transition name="fade-in">
             <div
                 v-if="seekOverlayLeftDisplay"
@@ -282,6 +288,23 @@ const seekOverlayRightDisplay = computed(() =>
     left: clamp(8px, 1.8vw, 20px);
 }
 
+.volume-overlay__text {
+    position: absolute;
+    top: clamp(42px, 5.5vh, 66px);
+    left: clamp(16px, 2vw, 28px);
+    padding: 5px 9px;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.38);
+    color: rgba(255, 255, 255, 0.94);
+    font-size: 16px;
+    font-weight: 500;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(8px);
+}
+
 .fade-in-enter-active,
 .fade-in-leave-active {
     transition: opacity 0.2s ease;
@@ -346,6 +369,12 @@ const seekOverlayRightDisplay = computed(() =>
     color: rgba(27, 39, 54, 0.86);
 }
 
+:root[data-theme="light"] .volume-overlay__text {
+    color: rgba(27, 39, 54, 0.9);
+    background: rgba(255, 255, 255, 0.72);
+    text-shadow: none;
+}
+
 :root[data-theme="light"] .loading-spinner {
     border-color: rgba(0, 0, 0, 0.2);
     border-top-color: rgba(57, 108, 216, 0.78);
@@ -374,6 +403,11 @@ const seekOverlayRightDisplay = computed(() =>
 
 :root[data-theme="graphite"] .seek-overlay__timeline {
     color: rgba(235, 241, 249, 0.9);
+}
+
+:root[data-theme="graphite"] .volume-overlay__text {
+    color: rgba(235, 241, 249, 0.94);
+    background: rgba(25, 28, 32, 0.48);
 }
 
 :root[data-theme="graphite"] .loading-spinner {

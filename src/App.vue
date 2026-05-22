@@ -27,6 +27,7 @@ import { useAppStartupBindings } from "./composables/useAppStartupBindings";
 import { usePlaybackSeekActions } from "./composables/usePlaybackSeekActions";
 import { usePlaybackLoadingState } from "./composables/usePlaybackLoadingState";
 import { usePlaybackNavigation } from "./composables/usePlaybackNavigation";
+import { usePlaybackVolumePersistence } from "./composables/usePlaybackVolumePersistence";
 
 const {
     isMacOS,
@@ -160,13 +161,27 @@ const {
     seekOverlayLeftText,
     seekOverlayRightText,
     seekOverlayLeftTimelineText,
+    volumeOverlayText,
     seekOverlayLeftPulseToken,
     seekOverlayRightPulseToken,
     showSeekOverlay,
+    showVolumeOverlay,
 } = usePlaybackOverlays({
     player,
     isLoading,
 });
+
+const playbackVolume = usePlaybackVolumePersistence(player);
+
+const onSetVolume = async (volume: number) => {
+    await playbackVolume.setVolume(volume);
+    showVolumeOverlay(player.state.playback.volume);
+};
+
+const onToggleMuted = async () => {
+    await playbackVolume.toggleMuted();
+    showVolumeOverlay(player.state.playback.volume);
+};
 
 const {
     isClearConfirmOpen,
@@ -232,10 +247,12 @@ const { onKeydown, onDoubleClick } = usePlaybackShortcuts(
         state: player.state,
         togglePlayPause: player.togglePlayPause,
         seekRelative: onSeekRelative,
+        setVolume: playbackVolume.setVolume,
     },
     onToggleFullscreen,
     toggleInfo,
     showSeekOverlay,
+    showVolumeOverlay,
 );
 
 watch(
@@ -419,6 +436,7 @@ useAppStartupBindings({
             :seek-overlay-left-text="seekOverlayLeftText"
             :seek-overlay-right-text="seekOverlayRightText"
             :seek-overlay-left-timeline-text="seekOverlayLeftTimelineText"
+            :volume-overlay-text="volumeOverlayText"
             :hide-seek-timeline="ui.showControls.value"
             :seek-overlay-left-pulse-token="seekOverlayLeftPulseToken"
             :seek-overlay-right-pulse-token="seekOverlayRightPulseToken"
@@ -475,6 +493,7 @@ useAppStartupBindings({
             :is-playing="player.state.playback.isPlaying"
             :current-time="player.state.playback.currentTime"
             :duration="player.state.playback.duration"
+            :volume="player.state.playback.volume"
             :progress-percent="player.progressPercent.value"
             :buffered-percent="player.bufferedPercent.value"
             :format-time="player.formatTime"
@@ -525,6 +544,8 @@ useAppStartupBindings({
             @toggle-menu="toggleMenu"
             @toggle-loop-one="toggleLoopOne"
             @set-speed="speed.setSpeed"
+            @set-volume="onSetVolume"
+            @toggle-muted="onToggleMuted"
             @set-audio-delay="adjustments.setAudioDelay"
             @set-sub-delay-for-target="adjustments.setSubDelayForTarget"
             @set-sub-font-family="subtitleAppearance.setSubtitleFontFamily"

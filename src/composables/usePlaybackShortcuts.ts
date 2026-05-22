@@ -12,6 +12,7 @@ type PlaybackShortcutApi = {
         };
         playback: {
             duration: number;
+            volume: number;
         };
         window: {
             isFullscreen: boolean;
@@ -19,6 +20,7 @@ type PlaybackShortcutApi = {
     };
     togglePlayPause: () => Promise<void>;
     seekRelative: (position: number) => Promise<void>;
+    setVolume: (volume: number) => Promise<void>;
 };
 
 type StoredSettingGroup = {
@@ -27,6 +29,7 @@ type StoredSettingGroup = {
 };
 
 const DEFAULT_SEEK_STEP_SECONDS = 5;
+const VOLUME_STEP = 5;
 
 const parseSeekStepSeconds = (groups?: StoredSettingGroup[]): number => {
     const rawValue = groups
@@ -42,6 +45,7 @@ export const usePlaybackShortcuts = (
     onToggleFullscreen: () => Promise<void>,
     onToggleInfo: () => void,
     onSeekByArrow?: (deltaSeconds: number) => void,
+    onVolumeByArrow?: (volume: number) => void,
 ) => {
     let clickTimer: number | null = null;
     const seekStepSeconds = ref(DEFAULT_SEEK_STEP_SECONDS);
@@ -96,14 +100,6 @@ export const usePlaybackShortcuts = (
             return;
         }
 
-        if (
-            event.code !== "Space" &&
-            event.code !== "ArrowLeft" &&
-            event.code !== "ArrowRight" &&
-            event.code !== "KeyI"
-        ) {
-            return;
-        }
         const target = event.target as HTMLElement | null;
         const tag = target?.tagName?.toLowerCase();
         if (
@@ -113,14 +109,34 @@ export const usePlaybackShortcuts = (
         ) {
             return;
         }
-        event.preventDefault();
+
+        if (
+            event.code !== "Space" &&
+            event.code !== "ArrowLeft" &&
+            event.code !== "ArrowRight" &&
+            event.code !== "ArrowUp" &&
+            event.code !== "ArrowDown" &&
+            event.code !== "KeyI"
+        ) {
+            return;
+        }
         if (event.code === "KeyI") {
             if (!player.state.media.isFileLoaded) return;
+            event.preventDefault();
             onToggleInfo();
             return;
         }
         if (event.code === "Space") {
+            event.preventDefault();
             await player.togglePlayPause();
+            return;
+        }
+        if (event.code === "ArrowUp" || event.code === "ArrowDown") {
+            if (!player.state.media.isFileLoaded) return;
+            event.preventDefault();
+            const delta = event.code === "ArrowUp" ? VOLUME_STEP : -VOLUME_STEP;
+            await player.setVolume(player.state.playback.volume + delta);
+            onVolumeByArrow?.(player.state.playback.volume);
             return;
         }
         if (
@@ -129,6 +145,7 @@ export const usePlaybackShortcuts = (
         ) {
             return;
         }
+        event.preventDefault();
         const delta =
             event.code === "ArrowLeft"
                 ? -seekStepSeconds.value
