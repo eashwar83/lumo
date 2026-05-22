@@ -1,0 +1,120 @@
+name: Manual Build - macOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: "Architecture to build"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - arm64
+          - x64
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-manual-${{ github.ref }}-${{ inputs.arch }}
+  cancel-in-progress: false
+
+jobs:
+  macos-arm64:
+    if: ${{ inputs.arch == 'all' || inputs.arch == 'arm64' }}
+    name: Build macOS DMG (arm64)
+    runs-on: macos-15
+    timeout-minutes: 50
+    permissions:
+      contents: read
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "13.0"
+      SOIA_API: ${{ secrets.SOIA_API }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build Soia App (shared steps)
+        uses: ./.github/actions/release-build-macos
+        with:
+          arch: arm64
+          deployment_target: "13.0"
+          github_token: ${{ github.token }}
+
+      - name: Prepare build artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          LABEL="manual-${GITHUB_RUN_NUMBER}-${GITHUB_SHA:0:7}"
+
+          DMG_COUNT="$(find src-tauri/target/release/bundle/dmg -maxdepth 1 -type f -name '*.dmg' | wc -l | tr -d '[:space:]')"
+          if [ "$DMG_COUNT" -ne 1 ]; then
+            printf 'Expected exactly one .dmg, found %s:\n' "$DMG_COUNT" >&2
+            find src-tauri/target/release/bundle/dmg -maxdepth 1 -type f -name '*.dmg' | sort >&2
+            exit 1
+          fi
+
+          DMG_SOURCE="$(find src-tauri/target/release/bundle/dmg -maxdepth 1 -type f -name '*.dmg' | sort | head -n 1)"
+          DMG_TARGET="release/Soia-${LABEL}-macOS-arm64.dmg"
+          cp "$DMG_SOURCE" "$DMG_TARGET"
+          shasum -a 256 "$DMG_TARGET" > "${DMG_TARGET}.sha256"
+
+          APP_TAR_TARGET="release/Soia-${LABEL}-macOS-arm64.app.tar.gz"
+          tar -C src-tauri/target/release/bundle/macos -czf "$APP_TAR_TARGET" Soia.app
+          shasum -a 256 "$APP_TAR_TARGET" > "${APP_TAR_TARGET}.sha256"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: soia-manual-macos-arm64-${{ github.run_number }}
+          path: release/*
+          compression-level: 0
+
+  macos-x64:
+    if: ${{ inputs.arch == 'all' || inputs.arch == 'x64' }}
+    name: Build macOS DMG (x64)
+    runs-on: macos-15
+    timeout-minutes: 50
+    permissions:
+      contents: read
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "13.0"
+      SOIA_API: ${{ secrets.SOIA_API }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build Soia App (shared steps)
+        uses: ./.github/actions/release-build-macos
+        with:
+          arch: x64
+          deployment_target: "13.0"
+          github_token: ${{ github.token }}
+
+      - name: Prepare build artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          LABEL="manual-${GITHUB_RUN_NUMBER}-${GITHUB_SHA:0:7}"
+
+          DMG_COUNT="$(find src-tauri/target/release/bundle/dmg -maxdepth 1 -type f -name '*.dmg' | wc -l | tr -d '[:space:]')"
+          if [ "$DMG_COUNT" -ne 1 ]; then
+            printf 'Expected exactly one .dmg, found %s:\n' "$DMG_COUNT" >&2
+            find src-tauri/target/release/bundle/dmg -maxdepth 1 -type f -name '*.dmg' | sort >&2
+            exit 1
+          fi
+
+          DMG_SOURCE="$(find src-tauri/target/release/bundle/dmg -maxdepth 1 -type f -name '*.dmg' | sort | head -n 1)"
+          DMG_TARGET="release/Soia-${LABEL}-macOS-x64.dmg"
+          cp "$DMG_SOURCE" "$DMG_TARGET"
+          shasum -a 256 "$DMG_TARGET" > "${DMG_TARGET}.sha256"
+
+          APP_TAR_TARGET="release/Soia-${LABEL}-macOS-x64.app.tar.gz"
+          tar -C src-tauri/target/release/bundle/macos -czf "$APP_TAR_TARGET" Soia.app
+          shasum -a 256 "$APP_TAR_TARGET" > "${APP_TAR_TARGET}.sha256"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: soia-manual-macos-x64-${{ github.run_number }}
+          path: release/*
+          compression-level: 0

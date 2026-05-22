@@ -1,0 +1,126 @@
+name: Manual Build - Linux
+
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: "Architecture to build"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - x64
+          - arm64
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-manual-${{ github.ref }}-${{ inputs.arch }}
+  cancel-in-progress: false
+
+jobs:
+  linux-x64:
+    if: ${{ inputs.arch == 'all' || inputs.arch == 'x64' }}
+    name: Build Linux Wayland Bundles (x64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      SOIA_API: ${{ secrets.SOIA_API }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build Soia Linux bundles (shared steps)
+        uses: ./.github/actions/release-build-linux
+        with:
+          github_token: ${{ github.token }}
+
+      - name: Prepare build artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          LABEL="manual-${GITHUB_RUN_NUMBER}-${GITHUB_SHA:0:7}"
+
+          DEB_COUNT="$(find src-tauri/target/release/bundle/deb -maxdepth 1 -type f -name '*.deb' | wc -l | tr -d '[:space:]')"
+          if [ "$DEB_COUNT" -ne 1 ]; then
+            printf 'Expected exactly one .deb, found %s:\n' "$DEB_COUNT" >&2
+            find src-tauri/target/release/bundle/deb -maxdepth 1 -type f -name '*.deb' | sort >&2
+            exit 1
+          fi
+          DEB_SOURCE="$(find src-tauri/target/release/bundle/deb -maxdepth 1 -type f -name '*.deb' | sort | head -n 1)"
+          DEB_TARGET="release/Soia-${LABEL}-Linux-x64-wayland.deb"
+          cp "$DEB_SOURCE" "$DEB_TARGET"
+          shasum -a 256 "$DEB_TARGET" > "${DEB_TARGET}.sha256"
+
+          APPIMAGE_COUNT="$(find src-tauri/target/release/bundle/appimage -maxdepth 1 -type f \( -name '*.AppImage' -o -name '*.appimage' \) | wc -l | tr -d '[:space:]')"
+          if [ "$APPIMAGE_COUNT" -ne 1 ]; then
+            printf 'Expected exactly one AppImage, found %s:\n' "$APPIMAGE_COUNT" >&2
+            find src-tauri/target/release/bundle/appimage -maxdepth 1 -type f \( -name '*.AppImage' -o -name '*.appimage' \) | sort >&2
+            exit 1
+          fi
+          APPIMAGE_SOURCE="$(find src-tauri/target/release/bundle/appimage -maxdepth 1 -type f \( -name '*.AppImage' -o -name '*.appimage' \) | sort | head -n 1)"
+          APPIMAGE_TARGET="release/Soia-${LABEL}-Linux-x64-wayland.AppImage"
+          cp "$APPIMAGE_SOURCE" "$APPIMAGE_TARGET"
+          shasum -a 256 "$APPIMAGE_TARGET" > "${APPIMAGE_TARGET}.sha256"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: soia-manual-linux-x64-wayland-${{ github.run_number }}
+          path: release/*
+          compression-level: 0
+
+  linux-arm64:
+    if: ${{ inputs.arch == 'all' || inputs.arch == 'arm64' }}
+    name: Build Linux Wayland Bundles (arm64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      SOIA_API: ${{ secrets.SOIA_API }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build Soia Linux bundles (shared steps)
+        uses: ./.github/actions/release-build-linux
+        with:
+          github_token: ${{ github.token }}
+
+      - name: Prepare build artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          LABEL="manual-${GITHUB_RUN_NUMBER}-${GITHUB_SHA:0:7}"
+
+          DEB_COUNT="$(find src-tauri/target/release/bundle/deb -maxdepth 1 -type f -name '*.deb' | wc -l | tr -d '[:space:]')"
+          if [ "$DEB_COUNT" -ne 1 ]; then
+            printf 'Expected exactly one .deb, found %s:\n' "$DEB_COUNT" >&2
+            find src-tauri/target/release/bundle/deb -maxdepth 1 -type f -name '*.deb' | sort >&2
+            exit 1
+          fi
+          DEB_SOURCE="$(find src-tauri/target/release/bundle/deb -maxdepth 1 -type f -name '*.deb' | sort | head -n 1)"
+          DEB_TARGET="release/Soia-${LABEL}-Linux-arm64-wayland.deb"
+          cp "$DEB_SOURCE" "$DEB_TARGET"
+          shasum -a 256 "$DEB_TARGET" > "${DEB_TARGET}.sha256"
+
+          APPIMAGE_COUNT="$(find src-tauri/target/release/bundle/appimage -maxdepth 1 -type f \( -name '*.AppImage' -o -name '*.appimage' \) | wc -l | tr -d '[:space:]')"
+          if [ "$APPIMAGE_COUNT" -ne 1 ]; then
+            printf 'Expected exactly one AppImage, found %s:\n' "$APPIMAGE_COUNT" >&2
+            find src-tauri/target/release/bundle/appimage -maxdepth 1 -type f \( -name '*.AppImage' -o -name '*.appimage' \) | sort >&2
+            exit 1
+          fi
+          APPIMAGE_SOURCE="$(find src-tauri/target/release/bundle/appimage -maxdepth 1 -type f \( -name '*.AppImage' -o -name '*.appimage' \) | sort | head -n 1)"
+          APPIMAGE_TARGET="release/Soia-${LABEL}-Linux-arm64-wayland.AppImage"
+          cp "$APPIMAGE_SOURCE" "$APPIMAGE_TARGET"
+          shasum -a 256 "$APPIMAGE_TARGET" > "${APPIMAGE_TARGET}.sha256"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: soia-manual-linux-arm64-wayland-${{ github.run_number }}
+          path: release/*
+          compression-level: 0

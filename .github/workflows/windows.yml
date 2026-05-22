@@ -1,0 +1,206 @@
+name: Manual Build - Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: "Architecture to build"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - x64
+          - arm64
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-manual-${{ github.ref }}-${{ inputs.arch }}
+  cancel-in-progress: false
+
+jobs:
+  windows-x64:
+    if: ${{ inputs.arch == 'all' || inputs.arch == 'x64' }}
+    name: Build Windows Packages (x64)
+    runs-on: windows-2022
+    timeout-minutes: 50
+    permissions:
+      contents: read
+    env:
+      SOIA_API: ${{ secrets.SOIA_API }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build Soia Windows bundle (shared steps)
+        uses: ./.github/actions/release-build-windows
+        with:
+          arch: x64
+          github_token: ${{ github.token }}
+
+      - name: Prepare build artifacts
+        shell: pwsh
+        env:
+          PACKAGE_ARCH: x64
+        run: |
+          New-Item -ItemType Directory -Path release -Force | Out-Null
+          $label = "manual-$env:GITHUB_RUN_NUMBER-$($env:GITHUB_SHA.Substring(0, 7))"
+          $arch = $env:PACKAGE_ARCH
+
+          $sources = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis/*.exe"
+          if ($sources.Count -ne 1) {
+            $names = ($sources | Select-Object -ExpandProperty FullName) -join "`n"
+            throw "Expected exactly one NSIS installer, found $($sources.Count):`n$names"
+          }
+          $source = $sources[0]
+          $target = "release/Soia-$label-Windows-$arch-setup.exe"
+          Copy-Item $source.FullName $target
+          $hash = (Get-FileHash -Path $target -Algorithm SHA256).Hash.ToLower()
+          "$hash  $([System.IO.Path]::GetFileName($target))" | Set-Content -Path "$target.sha256" -NoNewline
+
+          $portableTarget = "release/Soia-$label-Windows-$arch-portable.zip"
+          $portableStaging = "release/portable"
+          if (Test-Path $portableStaging) {
+            Remove-Item -Path $portableStaging -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path $portableStaging -Force | Out-Null
+
+          $portableCandidates = @()
+          if (Test-Path "src-tauri/target/release/bundle") {
+            $portableCandidates = Get-ChildItem -Path "src-tauri/target/release/bundle" -Recurse -File -Filter "*.exe" |
+              Where-Object { $_.Name -notmatch "(?i)(setup|installer|uninstall)" }
+          }
+
+          if ($portableCandidates.Count -gt 0) {
+            $portableExe = $portableCandidates |
+              Sort-Object @{ Expression = { if ($_.Name -ieq "Soia.exe") { 0 } else { 1 } } }, FullName |
+              Select-Object -First 1
+            $portableSourceDir = $portableExe.DirectoryName
+            Get-ChildItem -Path $portableSourceDir | ForEach-Object {
+              if ($_.PSIsContainer) {
+                Copy-Item -Path $_.FullName -Destination $portableStaging -Recurse -Force
+                return
+              }
+              if ($_.Name -match "(?i)(setup|installer|uninstall)") {
+                return
+              }
+              if ($_.Extension -ieq ".msi") {
+                return
+              }
+              Copy-Item -Path $_.FullName -Destination $portableStaging -Force
+            }
+          } else {
+            $portableExePath = "src-tauri/target/release/Soia.exe"
+            if (-not (Test-Path $portableExePath)) {
+              throw "Portable executable not found at $portableExePath"
+            }
+            Copy-Item -Path $portableExePath -Destination $portableStaging -Force
+            Get-ChildItem -Path "src-tauri/target/release" -File -Filter "*.dll" |
+              ForEach-Object { Copy-Item -Path $_.FullName -Destination $portableStaging -Force }
+          }
+
+          "portable" | Set-Content -Path "$portableStaging/marker.dll" -NoNewline
+          Compress-Archive -Path "$portableStaging/*" -DestinationPath $portableTarget -Force
+          Remove-Item -Path $portableStaging -Recurse -Force
+          $portableHash = (Get-FileHash -Path $portableTarget -Algorithm SHA256).Hash.ToLower()
+          "$portableHash  $([System.IO.Path]::GetFileName($portableTarget))" | Set-Content -Path "$portableTarget.sha256" -NoNewline
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: soia-manual-windows-x64-${{ github.run_number }}
+          path: release/*
+          compression-level: 0
+
+  windows-arm64:
+    if: ${{ inputs.arch == 'all' || inputs.arch == 'arm64' }}
+    name: Build Windows Packages (arm64)
+    runs-on: windows-11-arm
+    timeout-minutes: 50
+    permissions:
+      contents: read
+    env:
+      SOIA_API: ${{ secrets.SOIA_API }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build Soia Windows bundle (shared steps)
+        uses: ./.github/actions/release-build-windows
+        with:
+          arch: arm64
+          github_token: ${{ github.token }}
+
+      - name: Prepare build artifacts
+        shell: pwsh
+        env:
+          PACKAGE_ARCH: arm64
+        run: |
+          New-Item -ItemType Directory -Path release -Force | Out-Null
+          $label = "manual-$env:GITHUB_RUN_NUMBER-$($env:GITHUB_SHA.Substring(0, 7))"
+          $arch = $env:PACKAGE_ARCH
+
+          $sources = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis/*.exe"
+          if ($sources.Count -ne 1) {
+            $names = ($sources | Select-Object -ExpandProperty FullName) -join "`n"
+            throw "Expected exactly one NSIS installer, found $($sources.Count):`n$names"
+          }
+          $source = $sources[0]
+          $target = "release/Soia-$label-Windows-$arch-setup.exe"
+          Copy-Item $source.FullName $target
+          $hash = (Get-FileHash -Path $target -Algorithm SHA256).Hash.ToLower()
+          "$hash  $([System.IO.Path]::GetFileName($target))" | Set-Content -Path "$target.sha256" -NoNewline
+
+          $portableTarget = "release/Soia-$label-Windows-$arch-portable.zip"
+          $portableStaging = "release/portable"
+          if (Test-Path $portableStaging) {
+            Remove-Item -Path $portableStaging -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path $portableStaging -Force | Out-Null
+
+          $portableCandidates = @()
+          if (Test-Path "src-tauri/target/release/bundle") {
+            $portableCandidates = Get-ChildItem -Path "src-tauri/target/release/bundle" -Recurse -File -Filter "*.exe" |
+              Where-Object { $_.Name -notmatch "(?i)(setup|installer|uninstall)" }
+          }
+
+          if ($portableCandidates.Count -gt 0) {
+            $portableExe = $portableCandidates |
+              Sort-Object @{ Expression = { if ($_.Name -ieq "Soia.exe") { 0 } else { 1 } } }, FullName |
+              Select-Object -First 1
+            $portableSourceDir = $portableExe.DirectoryName
+            Get-ChildItem -Path $portableSourceDir | ForEach-Object {
+              if ($_.PSIsContainer) {
+                Copy-Item -Path $_.FullName -Destination $portableStaging -Recurse -Force
+                return
+              }
+              if ($_.Name -match "(?i)(setup|installer|uninstall)") {
+                return
+              }
+              if ($_.Extension -ieq ".msi") {
+                return
+              }
+              Copy-Item -Path $_.FullName -Destination $portableStaging -Force
+            }
+          } else {
+            $portableExePath = "src-tauri/target/release/Soia.exe"
+            if (-not (Test-Path $portableExePath)) {
+              throw "Portable executable not found at $portableExePath"
+            }
+            Copy-Item -Path $portableExePath -Destination $portableStaging -Force
+            Get-ChildItem -Path "src-tauri/target/release" -File -Filter "*.dll" |
+              ForEach-Object { Copy-Item -Path $_.FullName -Destination $portableStaging -Force }
+          }
+
+          "portable" | Set-Content -Path "$portableStaging/marker.dll" -NoNewline
+          Compress-Archive -Path "$portableStaging/*" -DestinationPath $portableTarget -Force
+          Remove-Item -Path $portableStaging -Recurse -Force
+          $portableHash = (Get-FileHash -Path $portableTarget -Algorithm SHA256).Hash.ToLower()
+          "$portableHash  $([System.IO.Path]::GetFileName($portableTarget))" | Set-Content -Path "$portableTarget.sha256" -NoNewline
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: soia-manual-windows-arm64-${{ github.run_number }}
+          path: release/*
+          compression-level: 0
