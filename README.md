@@ -25,6 +25,7 @@
 - **mpv-powered playback** with hardware acceleration (4K, HDR, Dolby Vision*)
 - Picture in Picture (PiP) on macOS and Windows
 - Dual subtitles for bilingual viewing
+- Fuzzy subtitle matching for both local and network media
 - Advanced subtitle appearance controls for font, color, size, and position
 - Custom shaders for high-quality scaling and rendering
 - Anime mode with auto-detection and shader auto-apply
@@ -37,7 +38,6 @@
 - DLNA and SMB/Samba discovery, browsing, and playback
 - M3U (IPTV) parsing and playback
 - Smart buffering with real-time speed indicators
-- Multiple playlists with sort, loop, and shuffle
 - Resume playback with history tracking
 
 ### Native Experience
@@ -146,7 +146,6 @@ sudo apt install -y \
     curl \
     wget \
     file \
-    libssl-dev \
     libgtk-3-dev \
     libayatana-appindicator3-dev \
     librsvg2-dev \
@@ -163,7 +162,7 @@ pnpm setup:libs
 ```
 
 - If `pnpm setup:libs` fails, confirm release access to:
-  - `https://github.com/FengZeng/mpv/releases/tag/v0.41.0-r7`
+  - `https://github.com/FengZeng/mpv/releases/tag/v0.41.0-r10`
   - or set `MPV_RELEASE_ASSET_URL` to a direct asset URL and retry.
 
 - If Linux/Windows bundle scripts report missing runtime manifest, generate it on the target platform:
@@ -177,12 +176,6 @@ pnpm sync:runtime:win
 
 ```bash
 pnpm setup:libs /absolute/path/to/mpv-bundle
-```
-
-Equivalent environment-variable form:
-
-```bash
-MPV_LOCAL_BUNDLE_DIR=/absolute/path/to/mpv-bundle pnpm setup:libs
 ```
 
 ---

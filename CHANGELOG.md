@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.3] - 2026-05-22
+
+### Features
+
+- Added native Windows ARM64 build support with help from [@talynone](https://github.com/talynone).
+- Added playback volume controls with persisted volume state and keyboard shortcut support.
+
+### Improvements
+
+- Optimized external subtitle loading so subtitle files are queued in the background without blocking the track menu.
+- Optimized Windows and Linux dynamic library dependencies to reduce installer/package size.
+- Added manual platform build workflows for macOS, Windows, and Linux release builds.
+- Updated the bundled mpv runtime used by release builds.
+
 ## [0.2.2] - 2026-05-15
 
 ### Features

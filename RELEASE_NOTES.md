@@ -19,11 +19,14 @@ You can also go to System Settings > Privacy & Security and click "Open Anyway" 
 
 The app is open-source and its code is publicly available for anyone to inspect.
 
-## [0.2.2] - 2026-05-15
+## [0.2.3] - 2026-05-22
+
+### Features
+
+- Added native Windows ARM64 support. (Huge thanks to [@talynone](https://github.com/talynone) for the help! 🙌)
+- Added playback volume controls, including keyboard volume adjustment with the Up/Down arrow keys.
 
 ### Improvements
 
-- Added fuzzy matching for sibling subtitle files.
-- Added richer metadata to audio/subtitle track selection menus.
-- Improved HTTPS connection stability and playback behavior.
-- Fixed incorrect IPTV title display in playback history.
+- Optimized external subtitle loading so subtitles can be loaded in the background more smoothly.
+- Optimized Windows and Linux dynamic library dependencies to reduce installer/package size.
