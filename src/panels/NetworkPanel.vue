@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import type { HistoryEntry } from "../types/history";
 import type {
     NetworkConnection,
@@ -379,6 +379,7 @@ const onBackFolderClick = async () => {
 const onPathCrumbClick = async (path: string) => {
     if (isLoading.value) return;
     if (path === networkPath.value) return;
+    isPathOverflowMenuOpen.value = false;
     await onBrowsePath(path);
 };
 
@@ -398,6 +399,203 @@ const onConnectionsRefreshClick = async () => {
 
 const shouldShowPathBar = computed(
     () => Boolean(parentPath.value) || pathCrumbs.value.length > 0,
+);
+
+type PathCrumb = {
+    label: string;
+    path: string;
+};
+
+const isPathOverflowMenuOpen = ref(false);
+const shouldCollapsePathCrumbs = ref(false);
+const leadingPathCrumbs = ref<PathCrumb[]>([]);
+const pathBarEl = ref<HTMLElement | null>(null);
+const pathMeasureEl = ref<HTMLElement | null>(null);
+const pathMenuEl = ref<HTMLElement | null>(null);
+const pathOverflowEl = ref<HTMLElement | null>(null);
+const isPathMenuAlignedEnd = ref(false);
+const trailingPathCrumbs = ref<PathCrumb[]>([]);
+let pathResizeObserver: ResizeObserver | null = null;
+
+const rootPath = computed(() => {
+    const protocol =
+        selectedConnectionConfig.value?.protocol?.trim().toLowerCase() ?? "webdav";
+    return protocol === "http-dlna" || protocol === "dlna" ? "0" : "/";
+});
+
+const collapsedPathCrumbs = ref<PathCrumb[]>([]);
+
+const updatePathMenuAlignment = async () => {
+    await nextTick();
+    const pathBar = pathBarEl.value;
+    const pathMenu = pathMenuEl.value;
+    const pathOverflow = pathOverflowEl.value;
+    if (!pathBar || !pathMenu || !pathOverflow) {
+        isPathMenuAlignedEnd.value = false;
+        return;
+    }
+    const pathBarRect = pathBar.getBoundingClientRect();
+    const overflowRect = pathOverflow.getBoundingClientRect();
+    const viewportRight = document.documentElement.clientWidth;
+    const boundaryRight = Math.min(pathBarRect.right, viewportRight) - 8;
+    isPathMenuAlignedEnd.value =
+        overflowRect.left + pathMenu.offsetWidth > boundaryRight;
+};
+
+const togglePathOverflowMenu = async () => {
+    if (isLoading.value || !collapsedPathCrumbs.value.length) return;
+    isPathOverflowMenuOpen.value = !isPathOverflowMenuOpen.value;
+    if (isPathOverflowMenuOpen.value) {
+        await updatePathMenuAlignment();
+    } else {
+        isPathMenuAlignedEnd.value = false;
+    }
+};
+
+const updatePathCrumbCollapse = async () => {
+    await nextTick();
+    const pathBar = pathBarEl.value;
+    const pathMeasure = pathMeasureEl.value;
+    const crumbs = pathCrumbs.value;
+    if (!pathBar || !pathMeasure) {
+        shouldCollapsePathCrumbs.value = false;
+        leadingPathCrumbs.value = crumbs;
+        trailingPathCrumbs.value = [];
+        collapsedPathCrumbs.value = [];
+        return;
+    }
+    const availableWidth = pathBar.clientWidth;
+    if (pathMeasure.scrollWidth <= availableWidth + 1) {
+        shouldCollapsePathCrumbs.value = false;
+        leadingPathCrumbs.value = crumbs;
+        trailingPathCrumbs.value = [];
+        collapsedPathCrumbs.value = [];
+        return;
+    }
+
+    const gapWidth = 4;
+    const backWidth =
+        pathMeasure.querySelector<HTMLElement>("[data-path-measure-back]")
+            ?.offsetWidth ?? 0;
+    const rootWidth =
+        pathMeasure.querySelector<HTMLElement>("[data-path-measure-root]")
+            ?.offsetWidth ?? 0;
+    const sepWidth =
+        pathMeasure.querySelector<HTMLElement>("[data-path-measure-sep]")
+            ?.offsetWidth ?? 0;
+    const crumbWidths = Array.from(
+        pathMeasure.querySelectorAll<HTMLElement>("[data-path-measure-crumb]"),
+    ).map((element) => element.offsetWidth);
+    const ellipsisWidth = 24;
+    const fixedChildren = [backWidth, rootWidth].filter((width) => width > 0);
+
+    const getCandidateWidth = (indices: number[]) => {
+        const sorted = [...indices].sort((a, b) => a - b);
+        const trailingStart = Math.max(0, crumbs.length - 1);
+        const leadingIndices = sorted.filter((value) => value < trailingStart);
+        const trailingIndices = sorted.filter((value) => value >= trailingStart);
+        const widths = [...fixedChildren];
+        for (const index of leadingIndices) {
+            if (index > 0) widths.push(sepWidth);
+            widths.push(crumbWidths[index] ?? 0);
+        }
+        if (leadingIndices.length > 0) {
+            widths.push(sepWidth);
+        }
+        widths.push(ellipsisWidth);
+        for (const index of trailingIndices) {
+            widths.push(sepWidth);
+            const crumbWidth = crumbWidths[index] ?? 0;
+            widths.push(index === crumbs.length - 1 ? Math.min(crumbWidth, 96) : crumbWidth);
+        }
+        return widths.reduce((total, width) => total + width, 0) +
+            Math.max(0, widths.length - 1) * gapWidth;
+    };
+
+    const visible = new Set<number>();
+    const canAdd = (index: number) =>
+        getCandidateWidth([...visible, index]) <= availableWidth + 1;
+    const addIfFits = (index: number) => {
+        if (index < 0 || index >= crumbs.length || visible.has(index)) return false;
+        if (!canAdd(index)) return false;
+        visible.add(index);
+        return true;
+    };
+
+    if (crumbs.length > 0) {
+        visible.add(crumbs.length - 1);
+    }
+    for (let index = 0; index < crumbs.length - 1; index += 1) {
+        addIfFits(index);
+    }
+
+    const visibleIndices = [...visible].sort((a, b) => a - b);
+    const hiddenIndices = crumbs
+        .map((_, index) => index)
+        .filter((index) => !visible.has(index));
+    const firstHiddenIndex = hiddenIndices[0] ?? crumbs.length;
+    const lastHiddenIndex = hiddenIndices[hiddenIndices.length - 1] ?? -1;
+    shouldCollapsePathCrumbs.value = true;
+    leadingPathCrumbs.value = visibleIndices
+        .filter((index) => index < firstHiddenIndex)
+        .map((index) => crumbs[index]);
+    trailingPathCrumbs.value = visibleIndices
+        .filter((index) => index > lastHiddenIndex)
+        .map((index) => crumbs[index]);
+    collapsedPathCrumbs.value = hiddenIndices.map((index) => crumbs[index]);
+    if (!collapsedPathCrumbs.value.length) {
+        shouldCollapsePathCrumbs.value = false;
+        leadingPathCrumbs.value = crumbs;
+        trailingPathCrumbs.value = [];
+    }
+};
+
+const onDocumentPointerDown = (event: PointerEvent) => {
+    if (!isPathOverflowMenuOpen.value) return;
+    const target = event.target;
+    if (!(target instanceof Node)) return;
+    if (pathOverflowEl.value?.contains(target)) return;
+    isPathOverflowMenuOpen.value = false;
+    isPathMenuAlignedEnd.value = false;
+};
+
+watch(
+    [networkPath, viewMode, pathCrumbs],
+    () => {
+        isPathOverflowMenuOpen.value = false;
+        void updatePathCrumbCollapse();
+    },
+    { deep: true },
+);
+
+onMounted(() => {
+    document.addEventListener("pointerdown", onDocumentPointerDown, true);
+    if (typeof ResizeObserver !== "undefined") {
+        pathResizeObserver = new ResizeObserver(() => {
+            void updatePathCrumbCollapse();
+            if (isPathOverflowMenuOpen.value) {
+                void updatePathMenuAlignment();
+            }
+        });
+        if (pathBarEl.value) pathResizeObserver.observe(pathBarEl.value);
+    }
+    void updatePathCrumbCollapse();
+    void updatePathMenuAlignment();
+});
+
+onUnmounted(() => {
+    document.removeEventListener("pointerdown", onDocumentPointerDown, true);
+    pathResizeObserver?.disconnect();
+    pathResizeObserver = null;
+});
+
+watch(
+    pathBarEl,
+    (element, previousElement) => {
+        if (!pathResizeObserver) return;
+        if (previousElement) pathResizeObserver.unobserve(previousElement);
+        if (element) pathResizeObserver.observe(element);
+    },
 );
 
 const toErrorMessage = (error: unknown, fallback: string) => {
@@ -632,46 +830,176 @@ const formatProtocolLabel = (protocol: string) =>
                 </div>
                 <div
                     v-else-if="shouldShowPathBar"
+                    ref="pathBarEl"
                     class="network-title__path"
+                    :class="{
+                        'network-title__path--collapsed': shouldCollapsePathCrumbs,
+                    }"
                     :title="networkPath"
                 >
-                        <button
-                            v-if="parentPath"
-                            class="network-title__back-btn"
-                            type="button"
+                    <button
+                        v-if="parentPath"
+                        class="network-title__back-btn"
+                        type="button"
                         :disabled="isLoading"
                         aria-label="Go to parent folder"
                         @click="onBackFolderClick"
+                    >
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            viewBox="0 -960 960 960"
+                            fill="#e3e3e3"
                         >
-                            <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                viewBox="0 -960 960 960"
-                                fill="#e3e3e3"
-                            >
-                                <path
-                                    d="m313-440 224 224-57 56-320-320 320-320 57 56-224 224h487v80H313Z"
-                                />
-                            </svg>
-                        </button>
-                    <span class="network-title__path-root">/</span>
+                            <path
+                                d="m313-440 224 224-57 56-320-320 320-320 57 56-224 224h487v80H313Z"
+                            />
+                        </svg>
+                    </button>
+                    <button
+                        class="network-title__path-crumb network-title__path-root"
+                        type="button"
+                        :disabled="isLoading || networkPath === rootPath"
+                        title="/"
+                        @click="onPathCrumbClick(rootPath)"
+                    >
+                        /
+                    </button>
                     <template
-                        v-for="(crumb, index) in pathCrumbs"
+                        v-for="(crumb, index) in leadingPathCrumbs"
                         :key="crumb.path"
                     >
+                        <span
+                            v-if="index > 0"
+                            class="network-title__path-sep"
+                        >
+                            /
+                        </span>
                         <button
                             class="network-title__path-crumb"
+                            :class="{
+                                'network-title__path-crumb--current':
+                                    crumb.path === networkPath,
+                            }"
                             type="button"
+                            :title="crumb.label"
                             :disabled="isLoading || crumb.path === networkPath"
                             @click="onPathCrumbClick(crumb.path)"
                         >
                             {{ crumb.label }}
                         </button>
+                    </template>
+                    <template v-if="shouldCollapsePathCrumbs">
                         <span
-                            v-if="index < pathCrumbs.length - 1"
+                            v-if="leadingPathCrumbs.length > 0"
                             class="network-title__path-sep"
                         >
                             /
                         </span>
+                        <div
+                            ref="pathOverflowEl"
+                            class="network-title__path-overflow"
+                        >
+                            <button
+                                class="network-title__path-crumb network-title__path-ellipsis"
+                                type="button"
+                                :disabled="isLoading"
+                                aria-label="Show hidden path folders"
+                                :aria-expanded="isPathOverflowMenuOpen"
+                                @click="togglePathOverflowMenu"
+                            >
+                                ...
+                            </button>
+                            <div
+                                v-if="isPathOverflowMenuOpen"
+                                ref="pathMenuEl"
+                                class="network-title__path-menu"
+                                :class="{
+                                    'network-title__path-menu--align-end':
+                                        isPathMenuAlignedEnd,
+                                }"
+                            >
+                                <button
+                                    v-for="crumb in collapsedPathCrumbs"
+                                    :key="crumb.path"
+                                    class="network-title__path-menu-item"
+                                    type="button"
+                                    :title="crumb.label"
+                                    :disabled="isLoading || crumb.path === networkPath"
+                                    @click="onPathCrumbClick(crumb.path)"
+                                >
+                                    {{ crumb.label }}
+                                </button>
+                            </div>
+                        </div>
+                    </template>
+                    <template
+                        v-for="crumb in trailingPathCrumbs"
+                        :key="crumb.path"
+                    >
+                        <span class="network-title__path-sep">
+                            /
+                        </span>
+                        <button
+                            class="network-title__path-crumb"
+                            :class="{
+                                'network-title__path-crumb--current':
+                                    crumb.path === networkPath,
+                            }"
+                            type="button"
+                            :title="crumb.label"
+                            :disabled="isLoading || crumb.path === networkPath"
+                            @click="onPathCrumbClick(crumb.path)"
+                        >
+                            {{ crumb.label }}
+                        </button>
+                    </template>
+                </div>
+                <div
+                    v-if="shouldShowPathBar"
+                    ref="pathMeasureEl"
+                    class="network-title__path network-title__path-measure"
+                    aria-hidden="true"
+                >
+                    <button
+                        v-if="parentPath"
+                        class="network-title__back-btn"
+                        type="button"
+                        tabindex="-1"
+                        data-path-measure-back
+                    >
+                        <svg viewBox="0 -960 960 960">
+                            <path
+                                d="m313-440 224 224-57 56-320-320 320-320 57 56-224 224h487v80H313Z"
+                            />
+                        </svg>
+                    </button>
+                    <button
+                        class="network-title__path-crumb network-title__path-root"
+                        type="button"
+                        tabindex="-1"
+                        data-path-measure-root
+                    >
+                        /
+                    </button>
+                    <template
+                        v-for="(crumb, index) in pathCrumbs"
+                        :key="`measure-${crumb.path}`"
+                    >
+                        <span
+                            v-if="index > 0"
+                            class="network-title__path-sep"
+                            data-path-measure-sep
+                        >
+                            /
+                        </span>
+                        <button
+                            class="network-title__path-crumb"
+                            type="button"
+                            tabindex="-1"
+                            data-path-measure-crumb
+                        >
+                            {{ crumb.label }}
+                        </button>
                     </template>
                 </div>
             </div>
