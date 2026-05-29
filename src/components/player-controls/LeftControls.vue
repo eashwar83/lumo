@@ -5,6 +5,7 @@ const props = defineProps<{
     isPlaying: boolean;
     currentTime: number;
     duration: number;
+    isLivePlayback: boolean;
     volume: number;
     formatTime: (seconds: number) => string;
     badges: string[];
@@ -88,7 +89,11 @@ const onVolumeInput = (event: Event) => {
                 />
             </div>
         </div>
-        <div class="time-display">
+        <div v-if="isLivePlayback" class="time-display time-display--live">
+            <span class="live-dot" aria-hidden="true"></span>
+            <span>Live</span>
+        </div>
+        <div v-else class="time-display">
             <span>{{ formatTime(currentTime) }}</span>
             <span class="separator">/</span>
             <span>{{ formatTime(duration) }}</span>
@@ -206,6 +211,24 @@ const onVolumeInput = (event: Event) => {
     transition:
         opacity 0.14s ease,
         visibility 0.14s ease;
+}
+
+.time-display--live {
+    --live-dot-color: rgba(255, 82, 82, 0.95);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    line-height: 1;
+    font-weight: 600;
+}
+
+.live-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--live-dot-color);
+    box-shadow: 0 0 0 3px rgba(255, 82, 82, 0.14);
 }
 
 .status-badges {

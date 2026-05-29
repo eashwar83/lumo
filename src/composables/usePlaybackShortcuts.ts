@@ -9,6 +9,7 @@ type PlaybackShortcutApi = {
     state: {
         media: {
             isFileLoaded: boolean;
+            isLivePlayback: boolean;
         };
         playback: {
             duration: number;
@@ -141,6 +142,7 @@ export const usePlaybackShortcuts = (
         }
         if (
             !player.state.media.isFileLoaded ||
+            player.state.media.isLivePlayback ||
             player.state.playback.duration <= 0
         ) {
             return;

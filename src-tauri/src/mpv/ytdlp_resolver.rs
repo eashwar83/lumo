@@ -29,6 +29,7 @@ struct Candidate {
 pub(crate) struct ResolvedMedia {
     pub(crate) url: String,
     pub(crate) title: Option<String>,
+    pub(crate) is_live_playback: bool,
 }
 
 pub(crate) async fn resolve(app: &AppHandle, raw_url: &str) -> Result<Option<ResolvedMedia>, String> {
@@ -65,6 +66,7 @@ pub(crate) async fn resolve(app: &AppHandle, raw_url: &str) -> Result<Option<Res
         return Err("yt-dlp did not return a playable URL".to_string());
     };
     log_selected_candidate("selected", &candidate);
+    let is_live_playback = is_likely_live_candidate(&candidate);
     let playback_url = proxied_candidate_url(&candidate);
     let title = extract_media_title(&value);
 
@@ -72,6 +74,7 @@ pub(crate) async fn resolve(app: &AppHandle, raw_url: &str) -> Result<Option<Res
     Ok(Some(ResolvedMedia {
         url: playback_url,
         title,
+        is_live_playback,
     }))
 }
 
@@ -317,6 +320,12 @@ fn log_selected_candidate(label: &str, candidate: &Candidate) {
         candidate.resolution.as_deref().unwrap_or("<unknown>"),
         candidate.score
     );
+}
+
+fn is_likely_live_candidate(candidate: &Candidate) -> bool {
+    let protocol = candidate.protocol.as_deref().unwrap_or("").to_ascii_lowercase();
+    let url = candidate.url.to_ascii_lowercase();
+    protocol.contains("m3u8") || url.contains(".m3u8")
 }
 
 fn extract_media_title(value: &Value) -> Option<String> {

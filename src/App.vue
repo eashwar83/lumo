@@ -112,6 +112,7 @@ const {
     onPlayHistory,
     onPlayNetwork,
     onUpdateUrl,
+    updateLivePlaybackForDuration,
     resolveMediaTitle,
     onStopPlayback,
     requestOpenFilePicker,
@@ -333,6 +334,13 @@ const onFileLoaded = async () => {
     await subtitleAppearance.applySubtitleAppearanceOptions();
 };
 
+const onProgressWithLivePlaybackUpdate = (
+    payload: Parameters<typeof onProgress>[0],
+) => {
+    updateLivePlaybackForDuration(payload.duration);
+    onProgress(payload);
+};
+
 useAppRuntimeBindings({
     player,
     tracks,
@@ -345,7 +353,7 @@ useAppRuntimeBindings({
     setWindowControlsVisible,
     onFileLoaded,
     onPlaybackRestart,
-    onProgress,
+    onProgress: onProgressWithLivePlaybackUpdate,
     onEndFile,
     resolveMediaTitle,
     nowPlaying,
@@ -493,6 +501,7 @@ useAppStartupBindings({
             :is-playing="player.state.playback.isPlaying"
             :current-time="player.state.playback.currentTime"
             :duration="player.state.playback.duration"
+            :is-live-playback="player.state.media.isLivePlayback"
             :volume="player.state.playback.volume"
             :progress-percent="player.progressPercent.value"
             :buffered-percent="player.bufferedPercent.value"

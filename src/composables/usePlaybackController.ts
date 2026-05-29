@@ -12,6 +12,7 @@ type PlayerState = {
     url: string;
     lastLoadedUrl: string;
     isFileLoaded: boolean;
+    isLivePlayback: boolean;
     title: string;
   };
   playback: {
@@ -76,6 +77,7 @@ export const usePlaybackController = (): PlayerApi => {
       url: "",
       lastLoadedUrl: "",
       isFileLoaded: false,
+      isLivePlayback: false,
       title: "",
     },
     playback: {

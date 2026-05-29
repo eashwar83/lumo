@@ -7,6 +7,7 @@ import {
     resolvePlaybackSource,
     type ResolvedPlaybackSource,
 } from "../utils/resolvePlaybackSource";
+import { isLikelyLivePlaybackSource } from "../utils/livePlayback";
 import {
     ALLOW_URL_INPUT_DURING_PLAYBACK_SETTING_LABEL,
     DEFAULT_SPEED_SETTING_LABEL,
@@ -59,6 +60,10 @@ type ParsedPlaylistEntry = {
     title?: string | null;
 };
 
+type PlaybackRequestOptions = {
+    isLivePlayback?: boolean;
+};
+
 type NowPlayingApi = {
     clearArtwork: () => void;
     clearNowPlaying: () => void;
@@ -104,6 +109,7 @@ const DEFAULT_PLAYBACK_PREFERENCES: PlaybackPreferences = {
     wallpaperModeEnabled: false,
     subtitlesDisabled: false,
 };
+const SINGLE_ENTRY_PLAYLIST_VOD_DURATION_SECONDS = 5 * 60;
 
 const normalizePlaybackTitleMode = (
     value?: string | null,
@@ -192,6 +198,8 @@ export const usePlaybackFlow = ({
     });
     const preferredTitleByUrl = new Map<string, string>();
     const preferredTitleByResourceKey = new Map<string, string>();
+    const livePlaybackKeys = new Set<string>();
+    const livePlaybackPlaylistEntryCounts = new Map<string, number>();
     let loadPlaybackPreferencesPromise: Promise<void> | null = null;
 
     const updatePlaybackPreferences = (groups?: StoredSettingGroup[]) => {
@@ -231,6 +239,44 @@ export const usePlaybackFlow = ({
     const triggerPlaybackIntent = async () => {
         await onPlaybackIntent?.();
     };
+
+    const rememberLivePlaybackEntries = (entries: ParsedPlaylistEntry[]) => {
+        const paths = entries
+            .map((entry) => entry.path?.trim() ?? "")
+            .filter(Boolean);
+        paths.forEach((path) => {
+            livePlaybackKeys.add(path);
+            livePlaybackPlaylistEntryCounts.set(path, paths.length);
+        });
+    };
+
+    const forgetLivePlaybackEntry = (path: string) => {
+        if (!path) return;
+        livePlaybackKeys.delete(path);
+        livePlaybackPlaylistEntryCounts.delete(path);
+    };
+
+    const updateLivePlaybackForDuration = (duration: number) => {
+        if (!player.state.media.isLivePlayback) return;
+        if (
+            !Number.isFinite(duration) ||
+            duration <= SINGLE_ENTRY_PLAYLIST_VOD_DURATION_SECONDS
+        ) {
+            return;
+        }
+        const playbackKey = player.state.media.url;
+        if (livePlaybackPlaylistEntryCounts.get(playbackKey) !== 1) return;
+        player.state.media.isLivePlayback = false;
+        forgetLivePlaybackEntry(playbackKey);
+    };
+
+    const shouldTreatAsLivePlayback = (
+        playbackKey: string,
+        options?: PlaybackRequestOptions,
+    ) =>
+        options?.isLivePlayback === true ||
+        livePlaybackKeys.has(playbackKey) ||
+        isLikelyLivePlaybackSource(playbackKey);
 
     const resourceKeyFromUrl = (value: string) => {
         const raw = value.trim();
@@ -278,13 +324,18 @@ export const usePlaybackFlow = ({
         history.updateTitle(url, player.state.media.title);
     };
 
-    const playLocalPath = async (path: string, preferredTitle?: string) => {
+    const playLocalPath = async (
+        path: string,
+        preferredTitle?: string,
+        options?: PlaybackRequestOptions,
+    ) => {
         if (!path) return;
         await triggerPlaybackIntent();
         hideHistory.value = true;
         nowPlaying.clearArtwork();
         tracks.resetTracks();
         player.state.media.url = path;
+        player.state.media.isLivePlayback = shouldTreatAsLivePlayback(path, options);
         player.state.media.title = rememberPreferredTitle(path, preferredTitle);
         player.state.playback.isBuffering = false;
         player.state.playback.downloadSpeedBps = 0;
@@ -297,6 +348,9 @@ export const usePlaybackFlow = ({
         const resumePosition = getStartPosition(path, preferences.skipIntroSeconds);
         pendingResume.value = { url: path, position: resumePosition };
         const result = await player.loadFile(resumePosition, preferences.autoPlay);
+        if (result.isLivePlayback) {
+            player.state.media.isLivePlayback = true;
+        }
         applyResolvedMediaTitle(path, result.title);
     };
 
@@ -305,12 +359,17 @@ export const usePlaybackFlow = ({
         filePath: string,
         playbackKey: string,
         preferredTitle?: string,
+        options?: PlaybackRequestOptions,
     ) => {
         await triggerPlaybackIntent();
         hideHistory.value = true;
         nowPlaying.clearArtwork();
         tracks.resetTracks();
         player.state.media.url = playbackKey;
+        player.state.media.isLivePlayback = shouldTreatAsLivePlayback(
+            playbackKey,
+            options,
+        );
         player.state.media.title = rememberPreferredTitle(
             playbackKey,
             preferredTitle,
@@ -344,12 +403,17 @@ export const usePlaybackFlow = ({
         resourceUrl: string,
         playbackKey: string,
         preferredTitle?: string,
+        options?: PlaybackRequestOptions,
     ) => {
         await triggerPlaybackIntent();
         hideHistory.value = true;
         nowPlaying.clearArtwork();
         tracks.resetTracks();
         player.state.media.url = playbackKey;
+        player.state.media.isLivePlayback = shouldTreatAsLivePlayback(
+            playbackKey,
+            options,
+        );
         player.state.media.title = rememberPreferredTitle(
             playbackKey,
             preferredTitle,
@@ -375,15 +439,23 @@ export const usePlaybackFlow = ({
             resumePosition,
             preferences.autoPlay,
         );
+        if (result.isLivePlayback) {
+            player.state.media.isLivePlayback = true;
+        }
         applyResolvedMediaTitle(playbackKey, result.title);
     };
 
-    const playSmb = async (url: string, preferredTitle?: string) => {
+    const playSmb = async (
+        url: string,
+        preferredTitle?: string,
+        options?: PlaybackRequestOptions,
+    ) => {
         await triggerPlaybackIntent();
         hideHistory.value = true;
         nowPlaying.clearArtwork();
         tracks.resetTracks();
         player.state.media.url = url;
+        player.state.media.isLivePlayback = shouldTreatAsLivePlayback(url, options);
         player.state.media.title = rememberPreferredTitle(url, preferredTitle);
         player.state.playback.isBuffering = false;
         player.state.playback.downloadSpeedBps = 0;
@@ -406,6 +478,9 @@ export const usePlaybackFlow = ({
             resumePosition,
             preferences.autoPlay,
         );
+        if (result.isLivePlayback) {
+            player.state.media.isLivePlayback = true;
+        }
         applyResolvedMediaTitle(url, result.title);
     };
 
@@ -414,12 +489,17 @@ export const usePlaybackFlow = ({
         filePath: string,
         playbackKey: string,
         preferredTitle?: string,
+        options?: PlaybackRequestOptions,
     ) => {
         await triggerPlaybackIntent();
         hideHistory.value = true;
         nowPlaying.clearArtwork();
         tracks.resetTracks();
         player.state.media.url = playbackKey;
+        player.state.media.isLivePlayback = shouldTreatAsLivePlayback(
+            playbackKey,
+            options,
+        );
         player.state.media.title = rememberPreferredTitle(
             playbackKey,
             preferredTitle,
@@ -452,6 +532,7 @@ export const usePlaybackFlow = ({
     const playResolvedSource = async (
         source: ResolvedPlaybackSource,
         preferredTitle?: string,
+        options?: PlaybackRequestOptions,
     ) => {
         if (source.kind === "webdav") {
             await playWebdav(
@@ -459,6 +540,7 @@ export const usePlaybackFlow = ({
                 source.filePath,
                 source.playbackKey,
                 preferredTitle,
+                options,
             );
             return;
         }
@@ -467,6 +549,7 @@ export const usePlaybackFlow = ({
                 source.resourceUrl,
                 source.playbackKey,
                 preferredTitle,
+                options,
             );
             return;
         }
@@ -476,19 +559,28 @@ export const usePlaybackFlow = ({
                 source.filePath,
                 source.playbackKey,
                 preferredTitle,
+                options,
             );
             return;
         }
         if (source.kind === "directSmb") {
-            await playSmb(source.resourceUrl, preferredTitle);
+            await playSmb(source.resourceUrl, preferredTitle, options);
             return;
         }
-        await playLocalPath(source.filePath, preferredTitle);
+        await playLocalPath(source.filePath, preferredTitle, options);
     };
 
-    const playPath = async (path: string, preferredTitle?: string) => {
+    const playPath = async (
+        path: string,
+        preferredTitle?: string,
+        options?: PlaybackRequestOptions,
+    ) => {
         if (!path) return;
-        await playResolvedSource(await resolvePlaybackSource(path), preferredTitle);
+        await playResolvedSource(
+            await resolvePlaybackSource(path),
+            preferredTitle,
+            options,
+        );
     };
 
     const openWithSelected = async (selected: string[]) => {
@@ -525,10 +617,13 @@ export const usePlaybackFlow = ({
                             },
                         );
                     }
+                    rememberLivePlaybackEntries(entries);
                     const firstEntry = entries.find(
                         (entry) => entry.path?.trim() === paths[0],
                     );
-                    await playPath(paths[0], firstEntry?.title?.trim() || undefined);
+                    await playPath(paths[0], firstEntry?.title?.trim() || undefined, {
+                        isLivePlayback: true,
+                    });
                     return;
                 } catch {
                     // Fall back to default open behavior when parsing fails.
@@ -605,10 +700,13 @@ export const usePlaybackFlow = ({
                         },
                     );
                 }
+                rememberLivePlaybackEntries(entries);
                 const firstEntry = entries.find(
                     (entry) => entry.path?.trim() === paths[0],
                 );
-                await playPath(paths[0], firstEntry?.title?.trim() || undefined);
+                await playPath(paths[0], firstEntry?.title?.trim() || undefined, {
+                    isLivePlayback: true,
+                });
                 return;
             } catch {
                 // Fall through to default load when playlist parsing fails.
@@ -647,6 +745,7 @@ export const usePlaybackFlow = ({
     const onUpdateUrl = (value: string) => {
         player.state.media.url = value;
         player.state.media.title = "";
+        player.state.media.isLivePlayback = false;
         isLoading.value = false;
         loadingUrl.value = "";
         player.state.playback.isBuffering = false;
@@ -679,6 +778,7 @@ export const usePlaybackFlow = ({
         await player.stopPlayback();
         hideHistory.value = false;
         player.state.media.isFileLoaded = false;
+        player.state.media.isLivePlayback = false;
         player.state.media.title = "";
         player.state.playback.isPlaying = false;
         player.state.playback.isBuffering = false;
@@ -720,6 +820,7 @@ export const usePlaybackFlow = ({
         onPlayHistory,
         onPlayNetwork,
         onUpdateUrl,
+        updateLivePlaybackForDuration,
         resolveMediaTitle,
         onStopPlayback,
         requestOpenFilePicker,

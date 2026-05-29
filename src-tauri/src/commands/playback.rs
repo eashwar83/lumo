@@ -47,6 +47,7 @@ pub(crate) struct LoadFilePayload {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LoadFileResult {
     title: Option<String>,
+    is_live_playback: bool,
 }
 
 fn resume_playback(mpv_guard: &crate::mpv::MpvHandle) -> Result<(), String> {
@@ -99,7 +100,13 @@ pub(crate) async fn load_file(
         Ok(())
     })?;
     Ok(LoadFileResult {
-        title: resolved_media.and_then(|resolved| resolved.title),
+        title: resolved_media
+            .as_ref()
+            .and_then(|resolved| resolved.title.clone()),
+        is_live_playback: resolved_media
+            .as_ref()
+            .map(|resolved| resolved.is_live_playback)
+            .unwrap_or(false),
     })
 }
 

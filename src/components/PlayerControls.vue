@@ -10,6 +10,7 @@ const props = defineProps<{
     isPlaying: boolean;
     currentTime: number;
     duration: number;
+    isLivePlayback: boolean;
     progressPercent: number;
     bufferedPercent: number;
     volume: number;
@@ -210,6 +211,7 @@ onUnmounted(() => {
     >
         <div class="player-controls-content">
             <SeekBar
+                v-if="!isLivePlayback"
                 :duration="duration"
                 :progress-percent="progressPercent"
                 :buffered-percent="bufferedPercent"
@@ -229,6 +231,7 @@ onUnmounted(() => {
                         :is-playing="isPlaying"
                         :current-time="currentTime"
                         :duration="duration"
+                        :is-live-playback="isLivePlayback"
                         :volume="volume"
                         :format-time="formatTime"
                         :badges="props.statusBadges"
@@ -373,7 +376,7 @@ onUnmounted(() => {
 }
 
 .player-controls-content :deep(.time-display) {
-    color: white;
+    color: var(--time-display-color, white);
     font-size: 13px;
     margin-left: 0;
     user-select: none;

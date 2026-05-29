@@ -26,6 +26,7 @@ export type ParsedPlaylistEntry = {
 
 export type LoadFileResult = {
   title?: string | null;
+  isLivePlayback?: boolean;
 };
 
 export const usePlaybackCommands = (
