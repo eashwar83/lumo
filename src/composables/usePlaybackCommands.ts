@@ -22,6 +22,19 @@ type CurrentWindow = {
 export type ParsedPlaylistEntry = {
   path: string;
   title?: string | null;
+  icon?: string | null;
+};
+
+export type ParsedPlaylistMetadata = {
+  hasEndList: boolean;
+  playlistType?: string | null;
+  targetDuration?: number | null;
+  hasHlsTags: boolean;
+};
+
+export type ParsedPlaylistFile = {
+  entries: ParsedPlaylistEntry[];
+  metadata: ParsedPlaylistMetadata;
 };
 
 export type LoadFileResult = {
@@ -108,22 +121,37 @@ export const usePlaybackCommands = (
     });
   };
 
-  const parsePlaylistFile = async (path: string): Promise<ParsedPlaylistEntry[]> => {
-    const response = await invoke<{ entries?: ParsedPlaylistEntry[] }>(
+  const normalizeParsedPlaylistFile = (
+    response: Partial<ParsedPlaylistFile> | null | undefined,
+  ): ParsedPlaylistFile => ({
+    entries: Array.isArray(response?.entries) ? response.entries : [],
+    metadata: {
+      hasEndList: response?.metadata?.hasEndList === true,
+      playlistType: response?.metadata?.playlistType ?? null,
+      targetDuration:
+        typeof response?.metadata?.targetDuration === "number"
+          ? response.metadata.targetDuration
+          : null,
+      hasHlsTags: response?.metadata?.hasHlsTags === true,
+    },
+  });
+
+  const parsePlaylistFile = async (path: string): Promise<ParsedPlaylistFile> => {
+    const response = await invoke<ParsedPlaylistFile>(
       "parse_playlist_file",
       { payload: { path } },
     );
-    return Array.isArray(response?.entries) ? response.entries : [];
+    return normalizeParsedPlaylistFile(response);
   };
 
   const parsePlaylistSource = async (
     source: string,
-  ): Promise<ParsedPlaylistEntry[]> => {
-    const response = await invoke<{ entries?: ParsedPlaylistEntry[] }>(
+  ): Promise<ParsedPlaylistFile> => {
+    const response = await invoke<ParsedPlaylistFile>(
       "parse_playlist_source",
       { payload: { source } },
     );
-    return Array.isArray(response?.entries) ? response.entries : [];
+    return normalizeParsedPlaylistFile(response);
   };
 
   const togglePlayPause = async (): Promise<void> => {

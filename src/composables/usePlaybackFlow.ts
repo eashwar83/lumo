@@ -8,6 +8,11 @@ import {
     type ResolvedPlaybackSource,
 } from "../utils/resolvePlaybackSource";
 import { isLikelyLivePlaybackSource } from "../utils/livePlayback";
+import type {
+    ParsedPlaylistEntry,
+    ParsedPlaylistFile,
+    ParsedPlaylistMetadata,
+} from "./usePlaybackCommands";
 import {
     ALLOW_URL_INPUT_DURING_PLAYBACK_SETTING_LABEL,
     DEFAULT_SPEED_SETTING_LABEL,
@@ -46,18 +51,13 @@ type PlaylistApi = {
         },
     ) => string | null;
     createPlaylistWithEntries: (
-        entries: Array<{ path: string; title?: string }>,
+        entries: Array<{ path: string; title?: string; iconUrl?: string }>,
         options?: {
             name?: string;
             openInDrawer?: boolean;
             setAsPlayback?: boolean;
         },
     ) => string | null;
-};
-
-type ParsedPlaylistEntry = {
-    path: string;
-    title?: string | null;
 };
 
 type PlaybackRequestOptions = {
@@ -199,6 +199,7 @@ export const usePlaybackFlow = ({
     const preferredTitleByUrl = new Map<string, string>();
     const preferredTitleByResourceKey = new Map<string, string>();
     const livePlaybackKeys = new Set<string>();
+    const nonLivePlaybackKeys = new Set<string>();
     const livePlaybackPlaylistEntryCounts = new Map<string, number>();
     let loadPlaybackPreferencesPromise: Promise<void> | null = null;
 
@@ -246,12 +247,14 @@ export const usePlaybackFlow = ({
             .filter(Boolean);
         paths.forEach((path) => {
             livePlaybackKeys.add(path);
+            nonLivePlaybackKeys.delete(path);
             livePlaybackPlaylistEntryCounts.set(path, paths.length);
         });
     };
 
-    const forgetLivePlaybackEntry = (path: string) => {
+    const rememberNonLivePlaybackSource = (path: string) => {
         if (!path) return;
+        nonLivePlaybackKeys.add(path);
         livePlaybackKeys.delete(path);
         livePlaybackPlaylistEntryCounts.delete(path);
     };
@@ -267,16 +270,35 @@ export const usePlaybackFlow = ({
         const playbackKey = player.state.media.url;
         if (livePlaybackPlaylistEntryCounts.get(playbackKey) !== 1) return;
         player.state.media.isLivePlayback = false;
-        forgetLivePlaybackEntry(playbackKey);
+        rememberNonLivePlaybackSource(playbackKey);
     };
+
+    const isHlsVodPlaylist = (metadata: ParsedPlaylistMetadata) => {
+        const playlistType = metadata.playlistType?.trim().toUpperCase() ?? "";
+        return metadata.hasEndList || playlistType === "VOD";
+    };
+
+    const isParsedPlaylistLiveCandidate = (parsed: ParsedPlaylistFile) => {
+        if (!parsed.metadata.hasHlsTags) return true;
+        return !isHlsVodPlaylist(parsed.metadata);
+    };
+
+    const getParsedPlaylistPaths = (parsed: ParsedPlaylistFile) =>
+        parsed.entries.map((entry) => entry.path?.trim() ?? "").filter(Boolean);
 
     const shouldTreatAsLivePlayback = (
         playbackKey: string,
         options?: PlaybackRequestOptions,
-    ) =>
-        options?.isLivePlayback === true ||
-        livePlaybackKeys.has(playbackKey) ||
-        isLikelyLivePlaybackSource(playbackKey);
+    ) => {
+        if (typeof options?.isLivePlayback === "boolean") {
+            return options.isLivePlayback;
+        }
+        if (nonLivePlaybackKeys.has(playbackKey)) return false;
+        return (
+            livePlaybackKeys.has(playbackKey) ||
+            isLikelyLivePlaybackSource(playbackKey)
+        );
+    };
 
     const resourceKeyFromUrl = (value: string) => {
         const raw = value.trim();
@@ -583,6 +605,73 @@ export const usePlaybackFlow = ({
         );
     };
 
+    const getPlaylistNameFromSource = (source: string, fallback?: string) => {
+        try {
+            const parsed = new URL(source);
+            const fileName = parsed.pathname.split("/").pop() ?? "";
+            const normalized = fileName.replace(/\.(m3u8?|M3U8?)$/, "");
+            return normalized.trim() || fallback;
+        } catch {
+            const fileName = source.split(/[/\\]+/).pop() ?? "";
+            const normalized = fileName.replace(/\.(m3u8?|M3U8?)$/, "");
+            return normalized.trim() || fallback;
+        }
+    };
+
+    const toPlaylistEntries = (entries: ParsedPlaylistEntry[]) =>
+        entries.map((entry) => ({
+            path: entry.path?.trim() ?? "",
+            title: entry.title?.trim() || undefined,
+            iconUrl: entry.icon?.trim() || undefined,
+        }));
+
+    const playParsedPlaylistSource = async (
+        source: string,
+        parsed: ParsedPlaylistFile,
+        playlistNameFallback?: string,
+        preferredTitle?: string,
+    ) => {
+        const isLiveCandidate = isParsedPlaylistLiveCandidate(parsed);
+        if (parsed.metadata.hasHlsTags) {
+            if (isLiveCandidate) {
+                livePlaybackKeys.add(source);
+                nonLivePlaybackKeys.delete(source);
+                livePlaybackPlaylistEntryCounts.set(source, 1);
+            } else {
+                rememberNonLivePlaybackSource(source);
+            }
+            await playPath(source, preferredTitle, {
+                isLivePlayback: isLiveCandidate,
+            });
+            return true;
+        }
+
+        const paths = getParsedPlaylistPaths(parsed);
+        if (!paths.length) {
+            hideHistory.value = false;
+            isLoading.value = false;
+            return false;
+        }
+        if (paths.length > 1) {
+            playlistState.createPlaylistWithEntries(toPlaylistEntries(parsed.entries), {
+                name: getPlaylistNameFromSource(source, playlistNameFallback),
+                setAsPlayback: true,
+            });
+        }
+        rememberLivePlaybackEntries(parsed.entries);
+        const firstEntry = parsed.entries.find(
+            (entry) => entry.path?.trim() === paths[0],
+        );
+        await playPath(
+            paths[0],
+            firstEntry?.title?.trim() || preferredTitle || undefined,
+            {
+                isLivePlayback: true,
+            },
+        );
+        return true;
+    };
+
     const openWithSelected = async (selected: string[]) => {
         if (!selected.length) {
             hideHistory.value = false;
@@ -593,38 +682,10 @@ export const usePlaybackFlow = ({
             const selectedPath = selected[0];
             if (isPlaylistSource(selectedPath)) {
                 try {
-                    const entries: ParsedPlaylistEntry[] =
-                        await player.parsePlaylistSource(selectedPath);
-                    const paths = entries
-                        .map((entry) => entry.path?.trim() ?? "")
-                        .filter(Boolean);
-                    if (!paths.length) {
-                        hideHistory.value = false;
-                        isLoading.value = false;
+                    const parsed = await player.parsePlaylistSource(selectedPath);
+                    if (await playParsedPlaylistSource(selectedPath, parsed)) {
                         return;
                     }
-                    if (paths.length > 1) {
-                        const fileName = selectedPath.split(/[/\\]+/).pop() ?? "";
-                        const playlistName = fileName.replace(/\.(m3u8?|M3U8?)$/, "");
-                        playlistState.createPlaylistWithEntries(
-                            entries.map((entry) => ({
-                                path: entry.path?.trim() ?? "",
-                                title: entry.title?.trim() || undefined,
-                            })),
-                            {
-                            name: playlistName || undefined,
-                            setAsPlayback: true,
-                            },
-                        );
-                    }
-                    rememberLivePlaybackEntries(entries);
-                    const firstEntry = entries.find(
-                        (entry) => entry.path?.trim() === paths[0],
-                    );
-                    await playPath(paths[0], firstEntry?.title?.trim() || undefined, {
-                        isLivePlayback: true,
-                    });
-                    return;
                 } catch {
                     // Fall back to default open behavior when parsing fails.
                 }
@@ -663,51 +724,12 @@ export const usePlaybackFlow = ({
         if (isPlaylistSource(player.state.media.url)) {
             try {
                 const source = player.state.media.url;
-                const entries: ParsedPlaylistEntry[] =
-                    await player.parsePlaylistSource(source);
-                const paths = entries
-                    .map((entry) => entry.path?.trim() ?? "")
-                    .filter(Boolean);
-                if (!paths.length) {
-                    hideHistory.value = false;
-                    isLoading.value = false;
+                const parsed = await player.parsePlaylistSource(source);
+                if (
+                    await playParsedPlaylistSource(source, parsed, "IPTV Playlist")
+                ) {
                     return;
                 }
-                if (paths.length > 1) {
-                    let playlistName = "IPTV Playlist";
-                    try {
-                        const parsed = new URL(source);
-                        const fileName = parsed.pathname.split("/").pop() ?? "";
-                        const normalized = fileName.replace(/\.(m3u8?|M3U8?)$/, "");
-                        if (normalized.trim()) {
-                            playlistName = normalized;
-                        }
-                    } catch {
-                        const fileName = source.split(/[/\\]+/).pop() ?? "";
-                        const normalized = fileName.replace(/\.(m3u8?|M3U8?)$/, "");
-                        if (normalized.trim()) {
-                            playlistName = normalized;
-                        }
-                    }
-                    playlistState.createPlaylistWithEntries(
-                        entries.map((entry) => ({
-                            path: entry.path?.trim() ?? "",
-                            title: entry.title?.trim() || undefined,
-                        })),
-                        {
-                            name: playlistName,
-                            setAsPlayback: true,
-                        },
-                    );
-                }
-                rememberLivePlaybackEntries(entries);
-                const firstEntry = entries.find(
-                    (entry) => entry.path?.trim() === paths[0],
-                );
-                await playPath(paths[0], firstEntry?.title?.trim() || undefined, {
-                    isLivePlayback: true,
-                });
-                return;
             } catch {
                 // Fall through to default load when playlist parsing fails.
             }
@@ -731,6 +753,23 @@ export const usePlaybackFlow = ({
 
     const onPlayHistory = async (entry: HistoryEntry) => {
         const preferredTitle = entry.title?.trim() || "";
+        if (isPlaylistSource(entry.path)) {
+            try {
+                const parsed = await player.parsePlaylistSource(entry.path);
+                if (
+                    await playParsedPlaylistSource(
+                        entry.path,
+                        parsed,
+                        "IPTV Playlist",
+                        preferredTitle,
+                    )
+                ) {
+                    return;
+                }
+            } catch {
+                // Fall through to normal history playback when parsing fails.
+            }
+        }
         await playPath(entry.path, preferredTitle);
     };
 

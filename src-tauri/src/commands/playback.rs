@@ -276,12 +276,23 @@ pub(crate) struct ParsePlaylistSourcePayload {
 pub(crate) struct ParsedPlaylistEntry {
     path: String,
     title: Option<String>,
+    icon: Option<String>,
+}
+
+#[derive(Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ParsedPlaylistMetadata {
+    has_end_list: bool,
+    playlist_type: Option<String>,
+    target_duration: Option<f64>,
+    has_hls_tags: bool,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ParsedPlaylistFile {
     entries: Vec<ParsedPlaylistEntry>,
+    metadata: ParsedPlaylistMetadata,
 }
 
 enum PlaylistBase<'a> {
@@ -324,6 +335,25 @@ fn resolve_playlist_entry_path(base: &PlaylistBase<'_>, raw: &str) -> Option<Str
     }
 }
 
+fn parse_extinf_attribute(line: &str, key: &str) -> Option<String> {
+    let key_prefix = format!("{}=", key);
+    let lower_line = line.to_ascii_lowercase();
+    let start = lower_line.find(&key_prefix)? + key_prefix.len();
+    let rest = &line[start..];
+    let value = if let Some(stripped) = rest.strip_prefix('"') {
+        let end = stripped.find('"')?;
+        &stripped[..end]
+    } else {
+        rest.split_whitespace().next().unwrap_or_default()
+    };
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
 fn parse_extinf_title(line: &str) -> Option<String> {
     let mut in_quotes = false;
     let mut comma_index = None;
@@ -346,9 +376,30 @@ fn parse_extinf_title(line: &str) -> Option<String> {
     }
 }
 
-fn parse_m3u_playlist(content: &str, base: &PlaylistBase<'_>) -> Vec<ParsedPlaylistEntry> {
+fn parse_extinf_icon(line: &str, base: &PlaylistBase<'_>) -> Option<String> {
+    parse_extinf_attribute(line, "tvg-logo")
+        .or_else(|| parse_extinf_attribute(line, "logo"))
+        .and_then(|raw| resolve_playlist_entry_path(base, &raw))
+}
+
+fn parse_playlist_type(line: &str) -> Option<String> {
+    let value = line.split_once(':')?.1.trim();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_ascii_uppercase())
+    }
+}
+
+fn parse_target_duration(line: &str) -> Option<f64> {
+    line.split_once(':')?.1.trim().parse::<f64>().ok()
+}
+
+fn parse_m3u_playlist(content: &str, base: &PlaylistBase<'_>) -> ParsedPlaylistFile {
     let mut entries = Vec::new();
     let mut pending_title: Option<String> = None;
+    let mut pending_icon: Option<String> = None;
+    let mut metadata = ParsedPlaylistMetadata::default();
 
     for (index, line) in content.lines().enumerate() {
         let trimmed = line.trim().trim_start_matches('\u{feff}');
@@ -358,12 +409,30 @@ fn parse_m3u_playlist(content: &str, base: &PlaylistBase<'_>) -> Vec<ParsedPlayl
         }
         if let Some(stripped) = trimmed.strip_prefix("#EXTINF:") {
             pending_title = parse_extinf_title(stripped);
+            pending_icon = parse_extinf_icon(stripped, base);
             log::debug!(
-                "playlist parse: line {} extinf title={:?}",
+                "playlist parse: line {} extinf title={:?} icon={:?}",
                 index + 1,
-                pending_title
+                pending_title,
+                pending_icon
             );
             continue;
+        }
+        if trimmed.starts_with("#EXT-X-") {
+            metadata.has_hls_tags = true;
+            if trimmed.eq_ignore_ascii_case("#EXT-X-ENDLIST") {
+                metadata.has_end_list = true;
+            } else if trimmed
+                .to_ascii_uppercase()
+                .starts_with("#EXT-X-PLAYLIST-TYPE:")
+            {
+                metadata.playlist_type = parse_playlist_type(trimmed);
+            } else if trimmed
+                .to_ascii_uppercase()
+                .starts_with("#EXT-X-TARGETDURATION:")
+            {
+                metadata.target_duration = parse_target_duration(trimmed);
+            }
         }
         if trimmed.starts_with('#') {
             log::debug!("playlist parse: line {} comment/metadata", index + 1);
@@ -375,16 +444,18 @@ fn parse_m3u_playlist(content: &str, base: &PlaylistBase<'_>) -> Vec<ParsedPlayl
             continue;
         };
         let title = pending_title.take();
+        let icon = pending_icon.take();
         log::debug!(
-            "playlist parse: line {} entry path={} title={:?}",
+            "playlist parse: line {} entry path={} title={:?} icon={:?}",
             index + 1,
             path,
-            title
+            title,
+            icon
         );
-        entries.push(ParsedPlaylistEntry { path, title });
+        entries.push(ParsedPlaylistEntry { path, title, icon });
     }
 
-    entries
+    ParsedPlaylistFile { entries, metadata }
 }
 
 fn parse_playlist_source_inner(
@@ -417,9 +488,14 @@ fn parse_playlist_source_inner(
                 content.len(),
                 url
             );
-            let entries = parse_m3u_playlist(&content, &PlaylistBase::Remote(url.clone()));
-            log::info!("playlist parse: done url={} entries={}", url, entries.len());
-            return Ok(ParsedPlaylistFile { entries });
+            let parsed = parse_m3u_playlist(&content, &PlaylistBase::Remote(url.clone()));
+            log::info!(
+                "playlist parse: done url={} entries={} has_hls_tags={}",
+                url,
+                parsed.entries.len(),
+                parsed.metadata.has_hls_tags
+            );
+            return Ok(parsed);
         }
     }
 
@@ -442,13 +518,14 @@ fn parse_playlist_source_inner(
         input_path.to_string_lossy()
     );
     let base_dir = input_path.parent().unwrap_or_else(|| Path::new(""));
-    let entries = parse_m3u_playlist(&content, &PlaylistBase::Local(base_dir));
+    let parsed = parse_m3u_playlist(&content, &PlaylistBase::Local(base_dir));
     log::info!(
-        "playlist parse: done path={} entries={}",
+        "playlist parse: done path={} entries={} has_hls_tags={}",
         input_path.to_string_lossy(),
-        entries.len()
+        parsed.entries.len(),
+        parsed.metadata.has_hls_tags
     );
-    Ok(ParsedPlaylistFile { entries })
+    Ok(parsed)
 }
 
 #[tauri::command]

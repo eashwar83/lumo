@@ -23,6 +23,7 @@ type CreatePlaylistOptions = {
 type CreatePlaylistEntryInput = {
     path: string;
     title?: string;
+    iconUrl?: string;
 };
 
 const isValidSortMode = (value: unknown): value is PlaylistSortMode =>
@@ -94,9 +95,11 @@ const normalizePlaylistEntries = (entries: PlaylistEntry[]): PlaylistEntry[] => 
         const path = entry?.path?.trim();
         if (!path) return;
         const title = entry?.title?.trim() || undefined;
+        const iconUrl = entry?.iconUrl?.trim() || undefined;
         unique.set(path, {
             path,
             title,
+            iconUrl,
             addedAt:
                 typeof entry.addedAt === "number" ? entry.addedAt : Date.now(),
         });
@@ -201,11 +204,13 @@ export const usePlaylistState = () => {
             .map((item) => ({
                 path: item.path?.trim() ?? "",
                 title: item.title?.trim() || undefined,
+                iconUrl: item.iconUrl?.trim() || undefined,
             }))
             .filter((item) => !!item.path);
         const entries = normalizedItems.map((item, index) => ({
             path: item.path,
             title: item.title,
+            iconUrl: item.iconUrl,
             addedAt: timestamp + index,
         }));
         const normalizedEntries = normalizePlaylistEntries(entries);

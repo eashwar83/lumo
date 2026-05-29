@@ -3,7 +3,7 @@ import { Window } from "@tauri-apps/api/window";
 import {
   usePlaybackCommands,
   type LoadFileResult,
-  type ParsedPlaylistEntry,
+  type ParsedPlaylistFile,
 } from "./usePlaybackCommands";
 import { formatTime } from "../utils/formatTime";
 
@@ -50,8 +50,8 @@ export type PlayerApi = {
     resumePosition?: number,
     autoPlay?: boolean,
   ) => Promise<void>;
-  parsePlaylistFile: (path: string) => Promise<ParsedPlaylistEntry[]>;
-  parsePlaylistSource: (source: string) => Promise<ParsedPlaylistEntry[]>;
+  parsePlaylistFile: (path: string) => Promise<ParsedPlaylistFile>;
+  parsePlaylistSource: (source: string) => Promise<ParsedPlaylistFile>;
   pickMediaPathsAuto: () => Promise<string[]>;
   pickFiles: () => Promise<string[]>;
   togglePlayPause: () => Promise<void>;

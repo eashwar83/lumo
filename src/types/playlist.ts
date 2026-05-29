@@ -1,6 +1,7 @@
 export type PlaylistEntry = {
     path: string;
     title?: string;
+    iconUrl?: string;
     addedAt: number;
 };
 
