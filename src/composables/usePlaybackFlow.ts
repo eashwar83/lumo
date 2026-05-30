@@ -58,10 +58,20 @@ type PlaylistApi = {
             setAsPlayback?: boolean;
         },
     ) => string | null;
+    getDefaultPlaylistNameForPaths: (paths: string[], fallback?: string) => string;
+    getDefaultPlaylistNameForEntries: (
+        entries: Array<{ path: string; title?: string; iconUrl?: string }>,
+        fallback?: string,
+    ) => string;
 };
 
 type PlaybackRequestOptions = {
     isLivePlayback?: boolean;
+};
+
+type PlaylistCreationConfirmation = {
+    shouldCreate: boolean;
+    name: string;
 };
 
 type NowPlayingApi = {
@@ -83,6 +93,12 @@ type UsePlaybackFlowOptions = {
         loadingUrl: Ref<string>;
     };
     onPlaybackIntent?: () => void | Promise<void>;
+    requestPlaylistCreation?: (request: {
+        defaultName: string;
+        itemCount: number;
+        sourceLabel?: string;
+    }) => Promise<PlaylistCreationConfirmation>;
+    onPlaylistCreated?: (playlistId: string) => void;
 };
 
 type StoredSettingGroup = {
@@ -186,6 +202,8 @@ export const usePlaybackFlow = ({
     isInfoOpen,
     loadingState,
     onPlaybackIntent,
+    requestPlaylistCreation,
+    onPlaylistCreated,
 }: UsePlaybackFlowOptions) => {
     const isLoading = loadingState?.isLoading ?? ref(false);
     const loadingUrl = loadingState?.loadingUrl ?? ref("");
@@ -625,6 +643,45 @@ export const usePlaybackFlow = ({
             iconUrl: entry.icon?.trim() || undefined,
         }));
 
+    const getUniquePathCount = (paths: string[]) =>
+        new Set(paths.map((path) => path.trim()).filter(Boolean)).size;
+
+    const collapseHomePath = (path: string) =>
+        path.replace(/^\/Users\/[^/]+(?=\/|$)/, "~");
+
+    const getParentPath = (path: string) => {
+        const normalizedPath = path.trim();
+        if (!normalizedPath) return "";
+        const separatorIndex = Math.max(
+            normalizedPath.lastIndexOf("/"),
+            normalizedPath.lastIndexOf("\\"),
+        );
+        if (separatorIndex <= 0) return normalizedPath;
+        return normalizedPath.slice(0, separatorIndex);
+    };
+
+    const getCommonSelectionSourceLabel = (paths: string[]) => {
+        const normalizedPaths = paths.map((path) => path.trim()).filter(Boolean);
+        if (!normalizedPaths.length) return "";
+        if (normalizedPaths.length === 1) return collapseHomePath(normalizedPaths[0]);
+
+        const parentPaths = normalizedPaths.map(getParentPath).filter(Boolean);
+        const firstParent = parentPaths[0] ?? "";
+        const hasCommonParent = parentPaths.every((path) => path === firstParent);
+        return collapseHomePath(hasCommonParent ? firstParent : normalizedPaths[0]);
+    };
+
+    const confirmPlaylistCreation = async (
+        defaultName: string,
+        itemCount: number,
+        sourceLabel?: string,
+    ): Promise<PlaylistCreationConfirmation> => {
+        if (!requestPlaylistCreation) {
+            return { shouldCreate: true, name: defaultName };
+        }
+        return requestPlaylistCreation({ defaultName, itemCount, sourceLabel });
+    };
+
     const playParsedPlaylistSource = async (
         source: string,
         parsed: ParsedPlaylistFile,
@@ -653,10 +710,26 @@ export const usePlaybackFlow = ({
             return false;
         }
         if (paths.length > 1) {
-            playlistState.createPlaylistWithEntries(toPlaylistEntries(parsed.entries), {
-                name: getPlaylistNameFromSource(source, playlistNameFallback),
-                setAsPlayback: true,
-            });
+            const playlistEntries = toPlaylistEntries(parsed.entries);
+            const fallbackName =
+                getPlaylistNameFromSource(source, playlistNameFallback) ??
+                "Playlist";
+            const confirmation = await confirmPlaylistCreation(
+                fallbackName,
+                getUniquePathCount(paths),
+                collapseHomePath(source),
+            );
+            if (confirmation.shouldCreate) {
+                const playlistId = playlistState.createPlaylistWithEntries(
+                    playlistEntries,
+                    {
+                        name: confirmation.name,
+                        openInDrawer: true,
+                        setAsPlayback: true,
+                    },
+                );
+                if (playlistId) onPlaylistCreated?.(playlistId);
+            }
         }
         rememberLivePlaybackEntries(parsed.entries);
         const firstEntry = parsed.entries.find(
@@ -692,9 +765,25 @@ export const usePlaybackFlow = ({
             }
         }
         if (selected.length > 1) {
-            playlistState.createPlaylistWithPaths(selected, {
-                setAsPlayback: true,
-            });
+            const defaultName = playlistState.getDefaultPlaylistNameForPaths(
+                selected,
+            );
+            const confirmation = await confirmPlaylistCreation(
+                defaultName,
+                getUniquePathCount(selected),
+                getCommonSelectionSourceLabel(selected),
+            );
+            if (confirmation.shouldCreate) {
+                const playlistId = playlistState.createPlaylistWithPaths(
+                    selected,
+                    {
+                        name: confirmation.name,
+                        openInDrawer: true,
+                        setAsPlayback: true,
+                    },
+                );
+                if (playlistId) onPlaylistCreated?.(playlistId);
+            }
         }
         await playPath(selected[0]);
     };

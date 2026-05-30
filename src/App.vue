@@ -7,6 +7,7 @@ import SideActionsNav from "./components/SideActionsNav.vue";
 import PlaybackOverlays from "./components/PlaybackOverlays.vue";
 import PlaylistPeekButton from "./components/PlaylistPeekButton.vue";
 import PlaylistDrawer from "./components/PlaylistDrawer.vue";
+import PlaylistCreationDialog from "./components/PlaylistCreationDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import WindowResizeRegions from "./components/WindowResizeRegions.vue";
 import { usePlaybackShortcuts } from "./composables/usePlaybackShortcuts";
@@ -28,6 +29,7 @@ import { usePlaybackSeekActions } from "./composables/usePlaybackSeekActions";
 import { usePlaybackLoadingState } from "./composables/usePlaybackLoadingState";
 import { usePlaybackNavigation } from "./composables/usePlaybackNavigation";
 import { usePlaybackVolumePersistence } from "./composables/usePlaybackVolumePersistence";
+import { usePlaylistCreationPrompt } from "./composables/usePlaylistCreationPrompt";
 
 const {
     isMacOS,
@@ -76,6 +78,7 @@ const {
 const clearNavSelectionDuringLoad = ref(false);
 const playbackLoadingState = usePlaybackLoadingState();
 const { isLoading, loadingUrl } = playbackLoadingState;
+const playlistCreationPrompt = usePlaylistCreationPrompt();
 const {
     persistCurrentManualWindow,
     restorePersistedManualWindow,
@@ -100,6 +103,10 @@ const playbackFlow = usePlaybackFlow({
     onPlaybackIntent: async () => {
         await persistCurrentManualWindow();
         clearNavSelectionDuringLoad.value = true;
+    },
+    requestPlaylistCreation: playlistCreationPrompt.requestPlaylistCreation,
+    onPlaylistCreated: () => {
+        isPlaylistOpen.value = true;
     },
 });
 
@@ -657,6 +664,14 @@ useAppStartupBindings({
                 </p>
             </div>
         </ConfirmDialog>
+
+        <PlaylistCreationDialog
+            :open="playlistCreationPrompt.isOpen.value"
+            :message="playlistCreationPrompt.message.value"
+            v-model:name-draft="playlistCreationPrompt.nameDraft.value"
+            @cancel="playlistCreationPrompt.cancelPlaylistCreation"
+            @confirm="playlistCreationPrompt.confirmPlaylistCreation"
+        />
 
         <WindowResizeRegions
             v-if="isLinuxPlatform && !player.state.window.isFullscreen"

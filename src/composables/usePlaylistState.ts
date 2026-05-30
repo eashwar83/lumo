@@ -239,6 +239,23 @@ export const usePlaylistState = () => {
         return playlistId;
     };
 
+    const getDefaultPlaylistNameForEntries = (
+        items: CreatePlaylistEntryInput[],
+        fallback?: string,
+    ) => {
+        const normalizedPaths = items
+            .map((item) => item.path?.trim() ?? "")
+            .filter(Boolean);
+        const fallbackName = fallback?.trim() || `Playlist ${playlists.value.length + 1}`;
+        return derivePlaylistNameFromPaths(normalizedPaths, fallbackName);
+    };
+
+    const getDefaultPlaylistNameForPaths = (paths: string[], fallback?: string) =>
+        getDefaultPlaylistNameForEntries(
+            paths.map((path) => ({ path })),
+            fallback,
+        );
+
     const createPlaylistWithPaths = (
         paths: string[],
         options: CreatePlaylistOptions = {},
@@ -477,6 +494,8 @@ export const usePlaylistState = () => {
         toPersistedState,
         createPlaylistWithPaths,
         createPlaylistWithEntries,
+        getDefaultPlaylistNameForPaths,
+        getDefaultPlaylistNameForEntries,
         addFromDrawerSelection,
         clearActivePlaylist,
         removeFromActivePlaylist,
