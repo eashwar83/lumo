@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.2.4] - 2026-05-30
+
+### Features
+
+- Added Live playback handling for IPTV/M3U sources, including a Live indicator in playback controls and hidden seek progress for live streams.
+- Added improved M3U/M3U8 parsing with support for `tvg-logo`/`logo` icons, HLS metadata detection, playlist type, target duration, and relative URL/path resolution.
+- Added a playlist creation prompt before automatically creating a playback playlist from imported playlist sources, including editable playlist names.
+- Added an experimental local remote-control server scaffold with HTTP and WebSocket mpv command endpoints.
+
+### Improvements
+
+- Improved Network browser breadcrumb navigation with available-width collapsing and an overflow menu for hidden folders.
+- Preserve parsed playlist entry titles when creating playback playlists from M3U/M3U8 files.
+- Refined the macOS compact top bar icon styling.
+- Updated the Settings navigation icon.
+
+### Fixes
+
+- Fixed deep Network browser paths overflowing the header on narrow widths.
+- Persist live playback state in play history and restore it when replaying history entries.
+- Hide the main app window until the frontend finishes its first render to avoid a transparent startup shell.
+
 ## [0.2.3] - 2026-05-22
 
 ### Features

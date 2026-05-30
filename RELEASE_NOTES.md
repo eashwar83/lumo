@@ -19,14 +19,19 @@ You can also go to System Settings > Privacy & Security and click "Open Anyway" 
 
 The app is open-source and its code is publicly available for anyone to inspect.
 
-## [0.2.3] - 2026-05-22
+## [0.2.4] - 2026-05-30
 
 ### Features
 
-- Added native Windows ARM64 support. (Huge thanks to [@talynone](https://github.com/talynone) for the help! 🙌)
-- Added playback volume controls, including keyboard volume adjustment with the Up/Down arrow keys.
+- Added a Live playback experience for IPTV/M3U streams, including a Live indicator and a cleaner control bar without seek progress for live channels.
+- Added a confirmation prompt before Soia automatically creates a playlist from an imported playlist file or URL, with the option to edit the playlist name first.
+
+### Fixes
+
+- Fixed Network browser breadcrumbs so deep folder paths collapse by available width instead of overflowing the header.
+- Fixed a startup issue where the app window could briefly appear as a transparent shell before the first render.
 
 ### Improvements
 
-- Optimized external subtitle loading so subtitles can be loaded in the background more smoothly.
-- Optimized Windows and Linux dynamic library dependencies to reduce installer/package size.
+- Refined the macOS compact top bar icon styling.
+- Updated the Settings navigation icon.
