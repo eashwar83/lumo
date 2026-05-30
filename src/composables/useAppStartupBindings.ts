@@ -1,10 +1,12 @@
-import { onBeforeUnmount, onMounted, type Ref } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, type Ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { applyThemeFromSettingGroups } from "../constants/theme";
 import type { UpdateNotePrompt } from "../utils/parseUpdateNoteContent";
 import { filterDroppedMediaPaths } from "./useMediaDropOpen";
+
+const FRONTEND_READY_EVENT = "soia-frontend-ready";
 
 type AppStartupBindingsOptions<PanelId extends string> = {
     activePanel: Ref<PanelId>;
@@ -48,6 +50,15 @@ export const useAppStartupBindings = <PanelId extends string>({
         }
     };
 
+    const notifyFrontendReadyAfterInitialRender = async () => {
+        try {
+            await nextTick();
+            await emit(FRONTEND_READY_EVENT);
+        } catch {
+            // Ignore in non-Tauri environments.
+        }
+    };
+
     function onWindowFocusDrainPendingFiles() {
         if (!drainPendingOpenFilesRef) return;
         void (async () => {
@@ -61,10 +72,12 @@ export const useAppStartupBindings = <PanelId extends string>({
 
     onMounted(() => {
         applyThemeFromSettingGroups();
-        void loadActivePanel();
+        const loadActivePanelPromise = loadActivePanel();
+        void notifyFrontendReadyAfterInitialRender();
         void (async () => {
             const currentWindow = getCurrentWindow();
             await restorePersistedManualWindow().catch(() => {});
+            await loadActivePanelPromise.catch(() => {});
 
             try {
                 unlistenWindowMoved = await currentWindow.onMoved(() => {

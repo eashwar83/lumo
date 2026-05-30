@@ -14,8 +14,12 @@ mod playback_source;
 mod remote_control;
 mod subtitles;
 use mpv::MpvHandle;
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Listener, Manager};
 mod store;
+
+const MAIN_WINDOW_LABEL: &str = "main";
+const FRONTEND_READY_EVENT: &str = "soia-frontend-ready";
+const STARTUP_WINDOW_SHOW_FALLBACK_MS: u64 = 3000;
 
 pub struct AppState {
     pub mpv_player: Arc<Mutex<MpvHandle>>,
@@ -275,6 +279,31 @@ fn handle_run_event(app_handle: &tauri::AppHandle, event: tauri::RunEvent) {
     let _ = (app_handle, event);
 }
 
+fn show_main_window(app_handle: &tauri::AppHandle) {
+    let app_handle_for_thread = app_handle.clone();
+    let app_handle_for_show = app_handle.clone();
+    let _ = app_handle_for_thread.run_on_main_thread(move || {
+        if let Some(window) = app_handle_for_show.get_webview_window(MAIN_WINDOW_LABEL) {
+            let _ = window.show();
+        }
+    });
+}
+
+fn install_frontend_ready_window_show(app: &mut tauri::App) {
+    let app_handle = app.handle().clone();
+    app.listen(FRONTEND_READY_EVENT, move |_| {
+        show_main_window(&app_handle);
+    });
+
+    let app_handle = app.handle().clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(
+            STARTUP_WINDOW_SHOW_FALLBACK_MS,
+        ));
+        show_main_window(&app_handle);
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     init_logging();
@@ -289,6 +318,7 @@ pub fn run() {
             let startup_paths = collect_open_media_paths_from_args();
             queue_open_media_paths(&app.handle(), startup_paths, false);
             app_bootstrap::setup(app)?;
+            install_frontend_ready_window_show(app);
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
