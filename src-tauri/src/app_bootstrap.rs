@@ -57,6 +57,9 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
 
     configure_mpv_startup(app)?;
     start_event_listener(app)?;
+    if let Err(error) = crate::remote_control::start(app.handle().clone()) {
+        warn!("remote control: failed to start: {error}");
+    }
     install_window_event_handlers(window, initial_scale_factor);
 
     crate::platform::setup(app)?;

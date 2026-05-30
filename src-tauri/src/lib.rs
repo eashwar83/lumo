@@ -11,6 +11,7 @@ mod mpv;
 mod network;
 mod platform;
 mod playback_source;
+mod remote_control;
 mod subtitles;
 use mpv::MpvHandle;
 use tauri::{Emitter, Manager};
