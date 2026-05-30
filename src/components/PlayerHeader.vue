@@ -1016,13 +1016,20 @@ watch(
     --top-bar-playlist-size: 31px;
     --top-bar-playlist-margin-top: -1px;
     --top-bar-playlist-svg-size: 96%;
+    --top-bar-playlist-svg-offset-y: 0px;
     --top-bar-info-panel-top: 42px;
     --top-bar-info-panel-left: 8px;
 }
 
 .top-bar--compact-macos {
-    --top-bar-row-padding-left: 66px;
-    --top-bar-info-panel-left: 68px;
+    --top-bar-row-padding-left: 70px;
+    --top-bar-info-size: 32px;
+    --top-bar-info-margin-top: 0px;
+    --top-bar-playlist-size: 32px;
+    --top-bar-playlist-margin-top: 0px;
+    --top-bar-playlist-svg-size: 100%;
+    --top-bar-playlist-svg-offset-y: 0px;
+    --top-bar-info-panel-left: 72px;
 }
 
 .top-bar--compact.top-bar--compact-non-playback {
@@ -1042,6 +1049,8 @@ watch(
 .top-bar--compact-macos.top-bar--fullscreen {
     --top-bar-row-padding-left: 8px;
     --top-bar-info-margin-left: 0px;
+    --top-bar-info-margin-top: -1px;
+    --top-bar-playlist-margin-top: -1px;
     --top-bar-info-panel-left: 8px;
 }
 
@@ -1080,7 +1089,7 @@ watch(
 }
 
 .top-bar__info + .top-bar__playlist {
-    margin-left: -12px;
+    margin-left: -14px;
 }
 
 .top-bar__input:focus {
@@ -1213,6 +1222,7 @@ watch(
 .top-bar__playlist svg {
     width: var(--top-bar-playlist-svg-size);
     height: var(--top-bar-playlist-svg-size);
+    transform: translateY(var(--top-bar-playlist-svg-offset-y));
 }
 
 .top-bar__playlist:hover {
