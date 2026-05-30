@@ -17,6 +17,7 @@ type PlayerApi = {
         media: {
             url: string;
             title: string;
+            isLivePlayback: boolean;
         };
         playback: {
             duration: number;
@@ -35,6 +36,7 @@ type HistoryApi = {
         position: number,
         duration: number,
         title?: string,
+        isLivePlayback?: boolean,
     ) => void;
     recordProgress: (
         path: string,
@@ -42,6 +44,7 @@ type HistoryApi = {
         duration: number,
         isPlaying: boolean,
         title?: string,
+        isLivePlayback?: boolean,
     ) => void;
 };
 
@@ -118,6 +121,7 @@ export const useAppPlaybackEvents = ({
             resumePosition,
             player.state.playback.duration,
             player.state.media.title,
+            player.state.media.isLivePlayback,
         );
         void player.setLoopFile(isLoopOne.value);
         isLoading.value = false;
@@ -141,6 +145,7 @@ export const useAppPlaybackEvents = ({
             player.state.playback.duration,
             payload.is_playing,
             player.state.media.title,
+            player.state.media.isLivePlayback,
         );
         nowPlaying.maybeUpdateNowPlayingStatus(payload.time_pos);
     };

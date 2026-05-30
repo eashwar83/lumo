@@ -10,9 +10,11 @@ import {
 type ProtocolBadge = {
     id: string;
     label: string;
+    showsProgress?: boolean;
 };
 
 const PROTOCOL_BADGE_LIST: ProtocolBadge[] = [
+    { id: "live", label: "LIVE" },
     { id: "local", label: "Local" },
     { id: "webdav", label: "WebDAV" },
     { id: "dlna", label: "DLNA" },
@@ -25,7 +27,14 @@ const PROTOCOL_BADGE_LIST: ProtocolBadge[] = [
 
 const getProtocolBadge = (id: string): ProtocolBadge => {
     const badge = PROTOCOL_BADGE_LIST.find((item) => item.id === id);
-    return badge ?? PROTOCOL_BADGE_LIST[0];
+    const resolved =
+        badge ??
+        PROTOCOL_BADGE_LIST.find((item) => item.id === "local") ??
+        PROTOCOL_BADGE_LIST[0];
+    return {
+        ...resolved,
+        showsProgress: resolved.id !== "live",
+    };
 };
 
 export const useHistoryPanel = () => {
@@ -42,8 +51,9 @@ export const useHistoryPanel = () => {
         return getPlaybackDisplayPath(path);
     };
 
-    const getProtocolBadges = (path: string): ProtocolBadge[] => {
-        return [getProtocolBadge(getPlaybackProtocolId(path))];
+    const getProtocolBadges = (entry: HistoryEntry): ProtocolBadge[] => {
+        if (entry.isLivePlayback) return [getProtocolBadge("live")];
+        return [getProtocolBadge(getPlaybackProtocolId(entry.path))];
     };
 
     const middleEllipsis = (value: string, maxLength = 68) => {

@@ -4,7 +4,7 @@ use rusqlite::{params, Connection};
 use uuid::Uuid;
 
 pub const MAX_PLAY_HISTORY: i64 = 100;
-const SCHEMA_VERSION: i32 = 2;
+const SCHEMA_VERSION: i32 = 3;
 
 pub fn now_millis() -> i64 {
     Utc::now().timestamp_millis()
@@ -55,7 +55,11 @@ fn ensure_schema(conn: &Connection) -> Result<(), String> {
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .map_err(|e| e.to_string())?;
 
-    if version != SCHEMA_VERSION {
+    if version == 2 {
+        migrate_schema_v2_to_v3(conn)?;
+        conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))
+            .map_err(|e| e.to_string())?;
+    } else if version != SCHEMA_VERSION {
         reset_schema(conn)?;
         conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))
             .map_err(|e| e.to_string())?;
@@ -139,6 +143,7 @@ fn reset_schema(conn: &Connection) -> Result<(), String> {
              duration REAL NOT NULL DEFAULT 0,
              last_played_at INTEGER NOT NULL,
              is_pinned INTEGER NOT NULL DEFAULT 0 CHECK (is_pinned IN (0, 1)),
+             is_live_playback INTEGER NOT NULL DEFAULT 0 CHECK (is_live_playback IN (0, 1)),
              external_audio TEXT NOT NULL DEFAULT '[]',
              external_sub TEXT NOT NULL DEFAULT '[]',
              created_at INTEGER NOT NULL,
@@ -194,6 +199,17 @@ fn reset_schema(conn: &Connection) -> Result<(), String> {
              updated_at INTEGER NOT NULL,
              FOREIGN KEY(active_account_id) REFERENCES sync_accounts(id) ON DELETE SET NULL
          ) STRICT;
+         COMMIT;",
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn migrate_schema_v2_to_v3(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        "BEGIN;
+         ALTER TABLE play_history
+         ADD COLUMN is_live_playback INTEGER NOT NULL DEFAULT 0 CHECK (is_live_playback IN (0, 1));
          COMMIT;",
     )
     .map_err(|e| e.to_string())?;

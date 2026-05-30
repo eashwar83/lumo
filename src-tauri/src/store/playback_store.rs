@@ -11,6 +11,7 @@ const PLAY_HISTORY_UPSERT_SQL: &str = "INSERT INTO play_history (
          duration,
          last_played_at,
          is_pinned,
+         is_live_playback,
          external_audio,
          external_sub,
          created_at,
@@ -19,13 +20,14 @@ const PLAY_HISTORY_UPSERT_SQL: &str = "INSERT INTO play_history (
          last_modified_by_device_id,
          sync_status
      )
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 1, ?12, 1)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 1, ?13, 1)
      ON CONFLICT(path) DO UPDATE SET
          title = excluded.title,
          last_position = excluded.last_position,
          duration = excluded.duration,
          last_played_at = excluded.last_played_at,
          is_pinned = excluded.is_pinned,
+         is_live_playback = excluded.is_live_playback,
          external_audio = excluded.external_audio,
          external_sub = excluded.external_sub,
          updated_at = excluded.updated_at,
@@ -364,6 +366,7 @@ fn upsert_play_history_entries(
             entry.duration,
             entry.last_played_at,
             entry.is_pinned,
+            entry.is_live_playback,
             serialize_external_tracks(&entry.external_audio_tracks),
             serialize_external_tracks(&entry.external_sub_tracks),
             now,
@@ -484,7 +487,7 @@ pub fn load_play_history(app: &tauri::AppHandle) -> Result<Vec<PlayHistoryEntry>
     let conn = media_db::open_db(app)?;
     let mut stmt = conn
         .prepare(
-            "SELECT id, path, title, last_position, duration, last_played_at, is_pinned, external_audio, external_sub
+            "SELECT id, path, title, last_position, duration, last_played_at, is_pinned, is_live_playback, external_audio, external_sub
              FROM play_history
              ORDER BY is_pinned DESC, last_played_at DESC
              LIMIT ?1",
@@ -500,8 +503,9 @@ pub fn load_play_history(app: &tauri::AppHandle) -> Result<Vec<PlayHistoryEntry>
                 duration: row.get(4)?,
                 last_played_at: row.get(5)?,
                 is_pinned: row.get(6)?,
-                external_audio_tracks: parse_external_tracks(row.get(7)?),
-                external_sub_tracks: parse_external_tracks(row.get(8)?),
+                is_live_playback: row.get(7)?,
+                external_audio_tracks: parse_external_tracks(row.get(8)?),
+                external_sub_tracks: parse_external_tracks(row.get(9)?),
             })
         })
         .map_err(|e| e.to_string())?;

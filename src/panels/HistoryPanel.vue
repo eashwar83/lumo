@@ -122,13 +122,15 @@ const onRemoveEntry = (entry: HistoryEntry) => {
                                     </div>
                                     <span class="history__protocols">
                                         <span
-                                            v-for="badge in getProtocolBadges(entry.path)"
+                                            v-for="badge in getProtocolBadges(entry)"
                                             :key="badge.id"
                                             class="history__protocol"
                                             :class="`history__protocol--${badge.id}`"
                                             :title="`Resume ${getPlaybackProgressLabel(entry)}`"
                                             :style="{
-                                                '--history-protocol-progress': `${getPlaybackProgressPercent(entry)}%`,
+                                                '--history-protocol-progress': badge.showsProgress
+                                                    ? `${getPlaybackProgressPercent(entry)}%`
+                                                    : undefined,
                                             }"
                                         >
                                             {{ badge.label }}
@@ -359,6 +361,10 @@ const onRemoveEntry = (entry: HistoryEntry) => {
 }
 
 .history__protocol {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
     font-size: 8px;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -385,6 +391,19 @@ const onRemoveEntry = (entry: HistoryEntry) => {
     gap: 4px;
     flex: 0 0 auto;
     height: var(--history-title-line-height);
+}
+
+.history__protocol--live {
+    min-width: 38px;
+}
+
+.history__protocol--live::before {
+    content: "";
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: #ff5252;
+    flex: 0 0 auto;
 }
 
 :root[data-theme="light"] .history__protocol {

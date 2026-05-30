@@ -16,6 +16,8 @@ pub struct PlayHistoryEntry {
     #[serde(default)]
     pub is_pinned: bool,
     #[serde(default)]
+    pub is_live_playback: bool,
+    #[serde(default)]
     pub external_audio_tracks: Vec<String>,
     #[serde(default)]
     pub external_sub_tracks: Vec<String>,

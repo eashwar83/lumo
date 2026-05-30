@@ -6,6 +6,7 @@ export type HistoryEntry = {
     duration: number;
     lastPlayedAt: number;
     isPinned: boolean;
+    isLivePlayback: boolean;
     externalAudioTracks?: string[];
     externalSubTracks?: string[];
 };

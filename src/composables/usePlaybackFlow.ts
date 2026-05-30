@@ -37,6 +37,7 @@ type HistoryApi = {
         position: number,
         duration: number,
         title?: string,
+        isLivePlayback?: boolean,
     ) => void;
     updateTitle: (path: string, title: string) => void;
 };
@@ -259,6 +260,13 @@ export const usePlaybackFlow = ({
         await onPlaybackIntent?.();
     };
 
+    const resetPlaybackTimeline = () => {
+        player.state.media.isFileLoaded = false;
+        player.state.playback.currentTime = 0;
+        player.state.playback.duration = 0;
+        player.state.playback.bufferedTime = 0;
+    };
+
     const rememberLivePlaybackEntries = (entries: ParsedPlaylistEntry[]) => {
         const paths = entries
             .map((entry) => entry.path?.trim() ?? "")
@@ -377,6 +385,7 @@ export const usePlaybackFlow = ({
         player.state.media.url = path;
         player.state.media.isLivePlayback = shouldTreatAsLivePlayback(path, options);
         player.state.media.title = rememberPreferredTitle(path, preferredTitle);
+        resetPlaybackTimeline();
         player.state.playback.isBuffering = false;
         player.state.playback.downloadSpeedBps = 0;
         player.state.playback.hwdecCurrent = "";
@@ -414,6 +423,7 @@ export const usePlaybackFlow = ({
             playbackKey,
             preferredTitle,
         );
+        resetPlaybackTimeline();
         player.state.playback.isBuffering = false;
         player.state.playback.downloadSpeedBps = 0;
         player.state.playback.hwdecCurrent = "";
@@ -458,6 +468,7 @@ export const usePlaybackFlow = ({
             playbackKey,
             preferredTitle,
         );
+        resetPlaybackTimeline();
         player.state.playback.isBuffering = false;
         player.state.playback.downloadSpeedBps = 0;
         player.state.playback.hwdecCurrent = "";
@@ -497,6 +508,7 @@ export const usePlaybackFlow = ({
         player.state.media.url = url;
         player.state.media.isLivePlayback = shouldTreatAsLivePlayback(url, options);
         player.state.media.title = rememberPreferredTitle(url, preferredTitle);
+        resetPlaybackTimeline();
         player.state.playback.isBuffering = false;
         player.state.playback.downloadSpeedBps = 0;
         player.state.playback.hwdecCurrent = "";
@@ -544,6 +556,7 @@ export const usePlaybackFlow = ({
             playbackKey,
             preferredTitle,
         );
+        resetPlaybackTimeline();
         player.state.playback.isBuffering = false;
         player.state.playback.downloadSpeedBps = 0;
         player.state.playback.hwdecCurrent = "";
@@ -693,7 +706,7 @@ export const usePlaybackFlow = ({
             if (isLiveCandidate) {
                 livePlaybackKeys.add(source);
                 nonLivePlaybackKeys.delete(source);
-                livePlaybackPlaylistEntryCounts.set(source, 1);
+                livePlaybackPlaylistEntryCounts.delete(source);
             } else {
                 rememberNonLivePlaybackSource(source);
             }
@@ -902,6 +915,7 @@ export const usePlaybackFlow = ({
             player.state.playback.currentTime,
             player.state.playback.duration,
             player.state.media.title,
+            player.state.media.isLivePlayback,
         );
         await player.stopPlayback();
         hideHistory.value = false;

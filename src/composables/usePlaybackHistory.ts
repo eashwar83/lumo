@@ -45,6 +45,7 @@ const normalizeHistory = (entries: HistoryEntry[]): HistoryEntry[] => {
                 ? entry.lastPlayedAt
                 : 0,
             isPinned: Boolean(entry.isPinned),
+            isLivePlayback: Boolean(entry.isLivePlayback),
             externalAudioTracks: normalizeTrackList(entry.externalAudioTracks),
             externalSubTracks: normalizeTrackList(entry.externalSubTracks),
         };
@@ -123,6 +124,7 @@ export const usePlaybackHistory = () => {
         position: number,
         duration = 0,
         isPinned = false,
+        isLivePlayback = false,
         externalAudioTracks: string[] = [],
         externalSubTracks: string[] = [],
         title = "",
@@ -135,6 +137,7 @@ export const usePlaybackHistory = () => {
         duration: Number.isFinite(duration) && duration > 0 ? duration : 0,
         lastPlayedAt: Date.now(),
         isPinned,
+        isLivePlayback,
         externalAudioTracks,
         externalSubTracks,
     });
@@ -143,6 +146,11 @@ export const usePlaybackHistory = () => {
         upsertEntry(entry);
         await saveHistoryEntry(entry);
     };
+
+    const resolveIsLivePlayback = (
+        existing: HistoryEntry | undefined,
+        isLivePlayback: boolean,
+    ) => isLivePlayback || existing?.isLivePlayback === true;
 
     const getResumePosition = (path: string): number => {
         const normalizedPath = normalizePlaybackKey(path);
@@ -167,6 +175,7 @@ export const usePlaybackHistory = () => {
         position: number,
         duration = 0,
         title = "",
+        isLivePlayback = false,
     ) => {
         if (!path) return;
         const normalizedPath = normalizePlaybackKey(path);
@@ -181,6 +190,7 @@ export const usePlaybackHistory = () => {
                 position,
                 duration,
                 isPinned,
+                resolveIsLivePlayback(existing, isLivePlayback),
                 normalizeTrackList(existing?.externalAudioTracks),
                 normalizeTrackList(existing?.externalSubTracks),
                 resolvedTitle,
@@ -195,6 +205,7 @@ export const usePlaybackHistory = () => {
         duration: number,
         isPlaying: boolean,
         title = "",
+        isLivePlayback = false,
     ) => {
         if (!path || !isPlaying) return;
         if (!Number.isFinite(position)) return;
@@ -214,6 +225,7 @@ export const usePlaybackHistory = () => {
             position,
             duration,
             isPinned,
+            resolveIsLivePlayback(existing, isLivePlayback),
             normalizeTrackList(existing?.externalAudioTracks),
             normalizeTrackList(existing?.externalSubTracks),
             resolvedTitle,
@@ -229,6 +241,7 @@ export const usePlaybackHistory = () => {
         position: number,
         duration = 0,
         title = "",
+        isLivePlayback = false,
     ) => {
         if (!path || position === 0) return;
         const normalizedPath = normalizePlaybackKey(path);
@@ -243,6 +256,7 @@ export const usePlaybackHistory = () => {
                 position,
                 duration,
                 isPinned,
+                resolveIsLivePlayback(existing, isLivePlayback),
                 normalizeTrackList(existing?.externalAudioTracks),
                 normalizeTrackList(existing?.externalSubTracks),
                 resolvedTitle,
@@ -317,6 +331,7 @@ export const usePlaybackHistory = () => {
                   duration: 0,
                   lastPlayedAt: 0,
                   isPinned: false,
+                  isLivePlayback: false,
                   externalAudioTracks: audio,
                   externalSubTracks: sub,
               };
