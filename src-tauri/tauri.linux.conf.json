@@ -1,0 +1,14 @@
+{
+  "app": {
+    "windows": [
+      {
+        "title": "Soia",
+        "width": 1280,
+        "height": 720,
+        "decorations": true,
+        "transparent": true,
+        "visible": true
+      }
+    ]
+  }
+}
