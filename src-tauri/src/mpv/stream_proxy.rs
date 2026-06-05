@@ -4,9 +4,11 @@ use reqwest::header::{
     HeaderName, HeaderValue, ACCEPT_ENCODING, ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE,
     CONTENT_TYPE, RANGE, USER_AGENT,
 };
-use reqwest::{Client, RequestBuilder, Response};
+use futures_util::stream::{FuturesUnordered, StreamExt};
+use reqwest::{Client, RequestBuilder, Response, StatusCode};
 use std::collections::HashMap;
 use std::net::TcpListener as StdTcpListener;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use tauri::AppHandle;
@@ -16,6 +18,10 @@ use url::Url;
 
 const HTTP_USER_AGENT: &str = "Lavf/61.7.100";
 const MAX_REQUEST_HEADER_BYTES: usize = 128 * 1024;
+const PARALLEL_RANGE_MIN_BYTES: u64 = 16 * 1024 * 1024;
+const PARALLEL_RANGE_CHUNK_BYTES: u64 = 2 * 1024 * 1024;
+const PARALLEL_RANGE_CONNECTIONS: usize = 3;
+const PARALLEL_RANGE_SETTING_LABEL: &str = "NETWORK_PARALLEL_DOWNLOAD";
 
 type BasicAuth = (String, String);
 pub(crate) type ProxyHeaders = Vec<(String, String)>;
@@ -24,10 +30,25 @@ static STREAM_PROXY_BASE_URL: OnceLock<String> = OnceLock::new();
 static STREAM_PROXY_BASIC_AUTH: OnceLock<Mutex<HashMap<String, BasicAuth>>> = OnceLock::new();
 static STREAM_PROXY_HEADERS: OnceLock<Mutex<HashMap<String, ProxyHeaders>>> = OnceLock::new();
 static STREAM_PROXY_CLIENT: OnceLock<Mutex<Option<CachedClient>>> = OnceLock::new();
+static STREAM_PROXY_PARALLEL_RANGE_ENABLED: AtomicBool = AtomicBool::new(false);
 
 struct CachedClient {
     proxy_key: Option<String>,
     client: Client,
+}
+
+#[derive(Clone)]
+struct ByteRange {
+    start: u64,
+    end: u64,
+}
+
+#[derive(Clone)]
+struct ParallelRangePlan {
+    response_start: u64,
+    response_end: u64,
+    total_size: u64,
+    content_length: u64,
 }
 
 enum RequestHeaderRead {
@@ -35,6 +56,30 @@ enum RequestHeaderRead {
     Complete(Vec<u8>),
     TooLarge,
     Incomplete,
+}
+
+pub(crate) fn set_parallel_range_enabled(enabled: bool) {
+    STREAM_PROXY_PARALLEL_RANGE_ENABLED.store(enabled, Ordering::Release);
+    info!(
+        "stream proxy: parallel range download {}",
+        if enabled { "enabled" } else { "disabled" }
+    );
+}
+
+fn parallel_range_enabled() -> bool {
+    STREAM_PROXY_PARALLEL_RANGE_ENABLED.load(Ordering::Acquire)
+}
+
+fn initialize_parallel_range_setting(app_handle: &AppHandle) {
+    let enabled = crate::store::ui_state_store::load_setting_value(
+        app_handle,
+        PARALLEL_RANGE_SETTING_LABEL,
+    )
+    .ok()
+    .flatten()
+    .map(|value| !value.eq_ignore_ascii_case("off"))
+    .unwrap_or(false);
+    set_parallel_range_enabled(enabled);
 }
 
 pub(crate) fn register_basic_auth(playback_url: &str, username: &str, password: &str) {
@@ -80,6 +125,8 @@ pub(crate) fn register_headers(playback_url: &str, headers: &[(String, String)])
 }
 
 pub(crate) fn start(app_handle: AppHandle) -> Result<(), String> {
+    initialize_parallel_range_setting(&app_handle);
+
     if STREAM_PROXY_BASE_URL.get().is_some() {
         return Ok(());
     }
@@ -281,7 +328,15 @@ async fn handle_connection(mut stream: TcpStream, app_handle: &AppHandle) -> Res
         return Ok(());
     }
 
-    stream_response(&mut stream, &method, response).await
+    stream_response(
+        app_handle,
+        &mut stream,
+        &method,
+        &remote_url,
+        range.as_deref(),
+        response,
+    )
+    .await
 }
 
 async fn read_request_header(stream: &mut TcpStream) -> Result<RequestHeaderRead, String> {
@@ -553,9 +608,213 @@ fn rewrite_playlist_url(
     }
 }
 
+fn parse_open_ended_range(value: Option<&str>) -> Option<u64> {
+    let value = value?;
+    let range = value.trim();
+    let bytes = range.strip_prefix("bytes=")?;
+    let (start, end) = bytes.split_once('-')?;
+    if !end.trim().is_empty() {
+        return None;
+    }
+    start.trim().parse::<u64>().ok()
+}
+
+fn parse_content_range(value: &str) -> Option<(u64, u64, u64)> {
+    let value = value.trim();
+    let range = value.strip_prefix("bytes ")?;
+    let (range, total) = range.split_once('/')?;
+    if total == "*" {
+        return None;
+    }
+    let (start, end) = range.split_once('-')?;
+    Some((
+        start.trim().parse::<u64>().ok()?,
+        end.trim().parse::<u64>().ok()?,
+        total.trim().parse::<u64>().ok()?,
+    ))
+}
+
+fn is_parallel_range_excluded_url(remote_url: &str) -> bool {
+    let Ok(url) = Url::parse(remote_url) else {
+        return true;
+    };
+    let host = url.host_str().unwrap_or_default().to_ascii_lowercase();
+    let path = url.path().to_ascii_lowercase();
+    path.ends_with(".m3u8")
+        || host.contains("googlevideo.com")
+        || host.contains("youtube.com")
+        || host.contains("youtu.be")
+}
+
+fn parallel_range_plan(
+    remote_url: &str,
+    request_range: Option<&str>,
+    status: StatusCode,
+    content_length: Option<u64>,
+    content_range: Option<&str>,
+    accept_ranges: &str,
+) -> Option<ParallelRangePlan> {
+    if !accept_ranges
+        .split(',')
+        .any(|value| value.trim().eq_ignore_ascii_case("bytes"))
+    {
+        return None;
+    }
+    if is_parallel_range_excluded_url(remote_url) {
+        return None;
+    }
+
+    let plan = if status == StatusCode::OK && request_range.is_none() {
+        let content_length = content_length?;
+        ParallelRangePlan {
+            response_start: 0,
+            response_end: content_length.checked_sub(1)?,
+            total_size: content_length,
+            content_length,
+        }
+    } else if status == StatusCode::PARTIAL_CONTENT {
+        let requested_start = parse_open_ended_range(request_range)?;
+        let (response_start, response_end, total_size) = parse_content_range(content_range?)?;
+        if response_start != requested_start {
+            return None;
+        }
+        ParallelRangePlan {
+            response_start,
+            response_end,
+            total_size,
+            content_length: response_end.checked_sub(response_start)?.saturating_add(1),
+        }
+    } else {
+        return None;
+    };
+
+    if plan.content_length < PARALLEL_RANGE_MIN_BYTES {
+        return None;
+    }
+    Some(plan)
+}
+
+fn split_byte_ranges(start: u64, end: u64) -> Vec<ByteRange> {
+    let mut ranges = Vec::new();
+    let mut next = start;
+    while next <= end {
+        let chunk_end = next.saturating_add(PARALLEL_RANGE_CHUNK_BYTES - 1).min(end);
+        ranges.push(ByteRange {
+            start: next,
+            end: chunk_end,
+        });
+        if chunk_end == u64::MAX {
+            break;
+        }
+        next = chunk_end + 1;
+    }
+    ranges
+}
+
+async fn fetch_range_bytes(
+    app_handle: &AppHandle,
+    remote_url: &str,
+    range: ByteRange,
+) -> Result<(u64, Vec<u8>), String> {
+    let client = build_client(app_handle)?;
+    let mut request = client
+        .get(remote_url)
+        .header(ACCEPT_ENCODING, "identity")
+        .header(USER_AGENT, HTTP_USER_AGENT)
+        .header(RANGE, format!("bytes={}-{}", range.start, range.end));
+    request = apply_basic_auth(request, remote_url);
+    request = apply_headers(request, remote_url);
+    let response = request.send().await.map_err(|error| error.to_string())?;
+    if response.status() != StatusCode::PARTIAL_CONTENT {
+        return Err(format!(
+            "parallel range request failed: status={} range={}-{}",
+            response.status(),
+            range.start,
+            range.end
+        ));
+    }
+    let expected_len = range.end.saturating_sub(range.start).saturating_add(1) as usize;
+    let bytes = response.bytes().await.map_err(|error| error.to_string())?;
+    if bytes.len() != expected_len {
+        return Err(format!(
+            "parallel range length mismatch: expected={} actual={} range={}-{}",
+            expected_len,
+            bytes.len(),
+            range.start,
+            range.end
+        ));
+    }
+    Ok((range.start, bytes.to_vec()))
+}
+
+async fn stream_parallel_range_response(
+    app_handle: &AppHandle,
+    stream: &mut TcpStream,
+    remote_url: &str,
+    plan: ParallelRangePlan,
+    first_chunk: Vec<u8>,
+) -> Result<(), String> {
+    info!(
+        "stream proxy: parallel range enabled url={} start={} end={} total={} chunk={} connections={}",
+        redact_url(remote_url),
+        plan.response_start,
+        plan.response_end,
+        plan.total_size,
+        PARALLEL_RANGE_CHUNK_BYTES,
+        PARALLEL_RANGE_CONNECTIONS
+    );
+
+    let ranges = split_byte_ranges(plan.response_start, plan.response_end);
+    let mut next_range_index = 1;
+    let mut next_write_start = plan.response_start;
+    let mut pending = FuturesUnordered::new();
+    let mut completed: HashMap<u64, Vec<u8>> = HashMap::new();
+    completed.insert(plan.response_start, first_chunk);
+
+    loop {
+        while pending.len() < PARALLEL_RANGE_CONNECTIONS && next_range_index < ranges.len() {
+            let range = ranges[next_range_index].clone();
+            next_range_index += 1;
+            pending.push(fetch_range_bytes(app_handle, remote_url, range));
+        }
+
+        if let Some(bytes) = completed.remove(&next_write_start) {
+            stream
+                .write_all(&bytes)
+                .await
+                .map_err(|error| error.to_string())?;
+            next_write_start = next_write_start.saturating_add(bytes.len() as u64);
+            if next_write_start > plan.response_end {
+                return Ok(());
+            }
+            continue;
+        }
+
+        let Some(result) = pending.next().await else {
+            return Ok(());
+        };
+        let (start, bytes) = result?;
+        if start == next_write_start {
+            stream
+                .write_all(&bytes)
+                .await
+                .map_err(|error| error.to_string())?;
+            next_write_start = next_write_start.saturating_add(bytes.len() as u64);
+            if next_write_start > plan.response_end {
+                return Ok(());
+            }
+        } else {
+            completed.insert(start, bytes);
+        }
+    }
+}
+
 async fn stream_response(
+    app_handle: &AppHandle,
     stream: &mut TcpStream,
     method: &str,
+    remote_url: &str,
+    request_range: Option<&str>,
     mut response: Response,
 ) -> Result<(), String> {
     let status = response.status();
@@ -576,6 +835,49 @@ async fn stream_response(
         .and_then(|value| value.to_str().ok())
         .map(|value| value.to_string())
         .unwrap_or_else(|| "bytes".to_string());
+    let parallel_plan = if method == "GET" && parallel_range_enabled() {
+        parallel_range_plan(
+            remote_url,
+            request_range,
+            status,
+            content_length,
+            content_range.as_deref(),
+            &accept_ranges,
+        )
+    } else {
+        None
+    };
+    let parallel_first_chunk = if let Some(plan) = parallel_plan.as_ref() {
+        let first_range = ByteRange {
+            start: plan.response_start,
+            end: plan
+                .response_start
+                .saturating_add(PARALLEL_RANGE_CHUNK_BYTES - 1)
+                .min(plan.response_end),
+        };
+        match fetch_range_bytes(app_handle, remote_url, first_range).await {
+            Ok((start, bytes)) if start == plan.response_start => Some(bytes),
+            Ok((start, _)) => {
+                warn!(
+                    "stream proxy: parallel range preflight returned unexpected start={} expected={} url={}",
+                    start,
+                    plan.response_start,
+                    redact_url(remote_url)
+                );
+                None
+            }
+            Err(error) => {
+                debug!(
+                    "stream proxy: parallel range disabled after preflight url={} error={}",
+                    redact_url(remote_url),
+                    error
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     write_response(
         stream,
@@ -590,6 +892,12 @@ async fn stream_response(
 
     if method == "HEAD" {
         return Ok(());
+    }
+
+    if let (Some(plan), Some(first_chunk)) = (parallel_plan, parallel_first_chunk) {
+        drop(response);
+        return stream_parallel_range_response(app_handle, stream, remote_url, plan, first_chunk)
+            .await;
     }
 
     while let Some(chunk) = response.chunk().await.map_err(|error| error.to_string())? {

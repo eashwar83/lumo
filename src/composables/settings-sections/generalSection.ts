@@ -7,6 +7,7 @@ import {
     IMAGE_DISPLAY_DURATION_SETTING_LABEL,
     LOG_LEVEL_SETTING_LABEL,
     LOG_PATH_SETTING_LABEL,
+    NETWORK_PARALLEL_DOWNLOAD_SETTING_LABEL,
     PROXY_ADDRESS_SETTING_LABEL,
     PROXY_MODE_SETTING_LABEL,
     WALLPAPER_MODE_SETTING_LABEL,
@@ -20,6 +21,7 @@ import {
     applyImageDisplayDuration,
     applyLoggingSettings,
     applyProxySettings,
+    applyStreamProxySettings,
     applyYtdlSettings,
     openLogDirectory,
 } from "../useUiStateStore";
@@ -205,6 +207,17 @@ const findImageDisplayDurationItem = (groups: SettingGroup[]) => {
     return item?.type === "slider" ? item : undefined;
 };
 
+const findParallelDownloadItem = (groups: SettingGroup[]) => {
+    const item = groups
+        .flatMap((group) => group.items)
+        .find(
+            (candidate) =>
+                candidate.type === "toggle" &&
+                candidate.label === NETWORK_PARALLEL_DOWNLOAD_SETTING_LABEL,
+        );
+    return item?.type === "toggle" ? item : undefined;
+};
+
 const toPersistedGroups = (groups: SettingGroup[]): StoredSettingGroup[] =>
     groups.map((group) => ({
         title: group.title,
@@ -226,14 +239,17 @@ export const useGeneralSettingsSection = (isWindowsPlatform: boolean) => {
     const YTDL_APPLY_DELAY_MS = 250;
     const PROXY_APPLY_DELAY_MS = 250;
     const IMAGE_DURATION_APPLY_DELAY_MS = 250;
+    const STREAM_PROXY_APPLY_DELAY_MS = 250;
     let loggingApplyTimer: number | null = null;
     let ytdlApplyTimer: number | null = null;
     let proxyApplyTimer: number | null = null;
     let imageDurationApplyTimer: number | null = null;
+    let streamProxyApplyTimer: number | null = null;
     let lastAppliedLoggingRequestKey: string | null = null;
     let lastAppliedYtdlRequestKey: string | null = null;
     let lastAppliedProxyRequestKey: string | null = null;
     let lastAppliedImageDurationRequestKey: string | null = null;
+    let lastAppliedStreamProxyRequestKey: string | null = null;
     let lastWallpaperModeValue: string | null = null;
     let isWallpaperRestartPromptOpen = false;
 
@@ -439,12 +455,53 @@ export const useGeneralSettingsSection = (isWindowsPlatform: boolean) => {
         }, IMAGE_DURATION_APPLY_DELAY_MS);
     };
 
+    const buildStreamProxyRequestKey = (
+        parallelDownloadItem: ReturnType<typeof findParallelDownloadItem>,
+    ): string =>
+        JSON.stringify({
+            parallelDownload: parallelDownloadItem?.value.trim() ?? "",
+        });
+
+    const applyStreamProxyOptions = async (groups: SettingGroup[]) => {
+        const parallelDownloadItem = findParallelDownloadItem(groups);
+        const requestKey = buildStreamProxyRequestKey(parallelDownloadItem);
+        if (requestKey === lastAppliedStreamProxyRequestKey) {
+            return;
+        }
+
+        const enabled = parallelDownloadItem?.value !== "Off";
+        const applied = await applyStreamProxySettings(enabled);
+        if (!applied) return;
+
+        if (parallelDownloadItem) {
+            const normalized = applied.parallelDownloadEnabled ? "On" : "Off";
+            if (parallelDownloadItem.value !== normalized) {
+                parallelDownloadItem.value = normalized;
+            }
+        }
+
+        lastAppliedStreamProxyRequestKey = buildStreamProxyRequestKey(
+            findParallelDownloadItem(groups),
+        );
+    };
+
+    const scheduleApplyStreamProxyOptions = () => {
+        if (streamProxyApplyTimer) {
+            window.clearTimeout(streamProxyApplyTimer);
+        }
+        streamProxyApplyTimer = window.setTimeout(() => {
+            void applyStreamProxyOptions(settingGroups.value);
+            streamProxyApplyTimer = null;
+        }, STREAM_PROXY_APPLY_DELAY_MS);
+    };
+
     const initializeStorageBackedOptions = async (groups: SettingGroup[]) => {
         await Promise.all([
             applyLoggingOptions(groups),
             applyYtdlOptions(groups),
             applyProxyOptions(groups),
             applyImageDurationOptions(groups),
+            applyStreamProxyOptions(groups),
         ]);
     };
 
@@ -514,6 +571,7 @@ export const useGeneralSettingsSection = (isWindowsPlatform: boolean) => {
         scheduleApplyYtdlOptions();
         scheduleApplyProxyOptions();
         scheduleApplyImageDurationOptions();
+        scheduleApplyStreamProxyOptions();
         void maybePromptWallpaperModeRestart();
     };
 
@@ -547,6 +605,10 @@ export const useGeneralSettingsSection = (isWindowsPlatform: boolean) => {
         if (imageDurationApplyTimer) {
             window.clearTimeout(imageDurationApplyTimer);
             imageDurationApplyTimer = null;
+        }
+        if (streamProxyApplyTimer) {
+            window.clearTimeout(streamProxyApplyTimer);
+            streamProxyApplyTimer = null;
         }
     };
 

@@ -78,6 +78,8 @@ export const DEFAULT_SPEED_SETTING_LABEL = "Default Speed";
 export const IMAGE_DISPLAY_DURATION_SETTING_LABEL = "IMAGE_DISPLAY_DURATION";
 export const DISABLE_SUBTITLES_SETTING_LABEL = "DISABLE_SUBTITLES";
 export const NETWORK_START_AT_ROOT_SETTING_LABEL = "NETWORK_START_AT_ROOT";
+export const NETWORK_PARALLEL_DOWNLOAD_SETTING_LABEL =
+    "NETWORK_PARALLEL_DOWNLOAD";
 export const SETTINGS_UPDATED_EVENT = "soia:settings-updated";
 
 export type PlaybackTitleMode = "Show" | "Editable" | "Hidden";
@@ -185,6 +187,14 @@ export const defaultSettingGroups: SettingGroup[] = [
             {
                 label: NETWORK_START_AT_ROOT_SETTING_LABEL,
                 displayLabel: "Always Start at Root",
+                value: "Off",
+                type: "toggle",
+                onValue: "On",
+                offValue: "Off",
+            },
+            {
+                label: NETWORK_PARALLEL_DOWNLOAD_SETTING_LABEL,
+                displayLabel: "Multi-thread Download",
                 value: "Off",
                 type: "toggle",
                 onValue: "On",

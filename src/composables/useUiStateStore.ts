@@ -13,6 +13,9 @@ type ProxySettingsState = {
     proxyAddress: string | null;
     proxyUrl: string | null;
 };
+type StreamProxySettingsState = {
+    parallelDownloadEnabled: boolean;
+};
 type RenderingSettingsState = {
     selectedShaderFiles: string[];
     activeShaderFiles: string[];
@@ -106,6 +109,18 @@ export const applyProxySettings = async (
         return await invoke<ProxySettingsState>("apply_proxy_settings", {
             proxyMode,
             proxyAddress,
+        });
+    } catch {
+        return null;
+    }
+};
+
+export const applyStreamProxySettings = async (
+    parallelDownloadEnabled?: boolean,
+): Promise<StreamProxySettingsState | null> => {
+    try {
+        return await invoke<StreamProxySettingsState>("apply_stream_proxy_settings", {
+            parallelDownloadEnabled,
         });
     } catch {
         return null;

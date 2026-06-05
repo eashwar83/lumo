@@ -17,6 +17,7 @@ use tokio::time::{interval, Duration};
 
 const LOG_LEVEL_SETTING_LABEL: &str = "SOIA_LOG_LEVEL";
 const YTDL_PATH_SETTING_LABEL: &str = "SOIA_YTDL_PATH";
+const NETWORK_PARALLEL_DOWNLOAD_SETTING_LABEL: &str = "NETWORK_PARALLEL_DOWNLOAD";
 const DEFAULT_LOG_LEVEL: &str = "Info";
 const UPDATE_CHECK_INTERVAL_SECS: u64 = 24 * 60 * 60;
 
@@ -251,6 +252,14 @@ fn configure_mpv_startup(app: &tauri::App) -> Result<(), Box<dyn Error>> {
             Err(error) => warn!("Ignoring invalid startup proxy settings: {error}"),
         }
     }
+
+    let parallel_download_enabled = load_setting_value(
+        &app.handle(),
+        NETWORK_PARALLEL_DOWNLOAD_SETTING_LABEL,
+    )
+    .map(|value| !value.eq_ignore_ascii_case("off"))
+    .unwrap_or(false);
+    crate::mpv::set_parallel_range_enabled(parallel_download_enabled);
 
     let ytdl_path = resolve_ytdl_path(&app.handle());
     if let Some(ytdl_path) = ytdl_path {

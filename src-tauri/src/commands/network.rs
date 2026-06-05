@@ -78,7 +78,8 @@ pub(crate) fn load_network_file(
         &app,
         &payload.connection_id,
     )?;
-    let mut playback_url = crate::network::service::resolve_network_playback_url(
+    // let mut playback_url = crate::network::service::resolve_network_playback_url(
+    let playback_url = crate::network::service::resolve_network_playback_url(
         &connection,
         payload.protocol.as_deref(),
         &payload.file_path,
@@ -90,11 +91,11 @@ pub(crate) fn load_network_file(
         .unwrap_or(&connection.protocol)
         .trim()
         .to_ascii_lowercase();
-    if protocol == "webdav" {
-        if let Some(rewritten) = crate::mpv::rewrite_https_callback_url(&playback_url) {
-            playback_url = rewritten;
-        }
-    }
+    // if protocol == "webdav" {
+    //     if let Some(rewritten) = crate::mpv::rewrite_https_callback_url(&playback_url) {
+    //         playback_url = rewritten;
+    //     }
+    // }
     let username = connection.username.trim();
     if protocol == "webdav" && !username.is_empty() {
         let auth_value = STANDARD.encode(format!("{}:{}", username, connection.password));

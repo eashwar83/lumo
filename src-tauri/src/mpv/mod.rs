@@ -11,6 +11,7 @@ pub(crate) use handle::MpvHandle;
 pub(crate) use ytdlp_resolver::try_resolve as try_resolve_with_ytdlp;
 pub(crate) use stream_proxy::rewrite_http_stream_url;
 pub(crate) use stream_proxy::rewrite_https_stream_url;
+pub(crate) use stream_proxy::set_parallel_range_enabled;
 
 pub(crate) fn register_https_basic_auth(playback_url: &str, username: &str, password: &str) {
     stream_proxy::register_basic_auth(playback_url, username, password);

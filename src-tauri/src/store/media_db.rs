@@ -1,10 +1,17 @@
 use crate::store::storage_paths;
 use chrono::Utc;
-use rusqlite::{params, Connection};
+use log::{info, warn};
+use rusqlite::{params, Connection, OptionalExtension};
 use uuid::Uuid;
 
 pub const MAX_PLAY_HISTORY: i64 = 100;
 const SCHEMA_VERSION: i32 = 3;
+
+struct PreservedInstallationState {
+    install_id: String,
+    device_id: String,
+    install_id_updated_at: i64,
+}
 
 pub fn now_millis() -> i64 {
     Utc::now().timestamp_millis()
@@ -30,14 +37,14 @@ pub fn normalize_uuid_or_new(value: &str) -> String {
 
 pub fn open_db(app: &tauri::AppHandle) -> Result<Connection, String> {
     let path = storage_paths::media_db_path(app)?;
-    let conn = Connection::open(path).map_err(|e| e.to_string())?;
+    let mut conn = Connection::open(path).map_err(|e| e.to_string())?;
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
          PRAGMA foreign_keys = ON;
          PRAGMA synchronous = NORMAL;",
     )
     .map_err(|e| e.to_string())?;
-    ensure_schema(&conn)?;
+    ensure_schema(&mut conn)?;
     Ok(conn)
 }
 
@@ -50,31 +57,138 @@ pub fn local_device_id(conn: &Connection) -> Result<String, String> {
     .map_err(|e| e.to_string())
 }
 
-fn ensure_schema(conn: &Connection) -> Result<(), String> {
+fn ensure_schema(conn: &mut Connection) -> Result<(), String> {
     let version: i32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .map_err(|e| e.to_string())?;
+    let is_brand_new_db = version == 0 && !has_known_media_tables(conn)?;
 
     if version == 2 {
         migrate_schema_v2_to_v3(conn)?;
         conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))
             .map_err(|e| e.to_string())?;
     } else if version != SCHEMA_VERSION {
-        reset_schema(conn)?;
-        conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))
+        warn!("media db schema version mismatch: found={version}, expected={SCHEMA_VERSION}");
+        let preserved_installation = if is_brand_new_db {
+            info!("media db: initializing new database");
+            None
+        } else {
+            Some(read_existing_installation_state(conn)?.ok_or_else(|| {
+                "Refusing to rebuild existing media.db without an installation UUID".to_string()
+            })?)
+        };
+
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        reset_schema(&tx)?;
+        if let Some(state) = preserved_installation {
+            restore_installation_state(&tx, &state)?;
+            info!("media db: preserved installation UUID during schema rebuild");
+        }
+        tx.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))
             .map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())?;
     }
 
-    ensure_installation_state(conn)?;
+    ensure_installation_state(conn, is_brand_new_db)?;
     ensure_local_device_record(conn)?;
     ensure_sync_state_rows(conn)?;
     Ok(())
 }
 
+fn has_known_media_tables(conn: &Connection) -> Result<bool, String> {
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM sqlite_master
+             WHERE type = 'table'
+               AND name IN (
+                   'app_installation_state',
+                   'sync_devices',
+                   'sync_accounts',
+                   'playlist_entries',
+                   'play_history',
+                   'sync_state',
+                   'sync_tombstones'
+               )",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(count > 0)
+}
+
+fn read_existing_installation_state(
+    conn: &Connection,
+) -> Result<Option<PreservedInstallationState>, String> {
+    let has_table = conn
+        .query_row(
+            "SELECT 1
+             FROM sqlite_master
+             WHERE type = 'table' AND name = 'app_installation_state'",
+            [],
+            |_| Ok(()),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .is_some();
+    if !has_table {
+        return Ok(None);
+    }
+
+    conn.query_row(
+        "SELECT install_id, device_id, install_id_updated_at
+         FROM app_installation_state
+         WHERE singleton = 1",
+        [],
+        |row| {
+            Ok(PreservedInstallationState {
+                install_id: row.get(0)?,
+                device_id: row.get(1)?,
+                install_id_updated_at: row.get(2)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+fn restore_installation_state(
+    conn: &Connection,
+    state: &PreservedInstallationState,
+) -> Result<(), String> {
+    let now = now_millis();
+    conn.execute(
+        "INSERT INTO app_installation_state (
+             singleton,
+             install_id,
+             device_id,
+             install_id_updated_at,
+             uuid_update_data,
+             updated_at
+         )
+         VALUES (1, ?1, ?2, ?3, '{}', ?4)
+         ON CONFLICT(singleton) DO NOTHING",
+        params![
+            validate_uuid(&state.install_id)?,
+            validate_uuid(&state.device_id)?,
+            state.install_id_updated_at,
+            now
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn validate_uuid(value: &str) -> Result<String, String> {
+    let trimmed = value.trim();
+    Uuid::parse_str(trimmed)
+        .map(|_| trimmed.to_string())
+        .map_err(|_| "Refusing to restore an invalid installation UUID".to_string())
+}
+
 fn reset_schema(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
-        "BEGIN;
-         DROP TABLE IF EXISTS sync_tombstones;
+        "DROP TABLE IF EXISTS sync_tombstones;
          DROP TABLE IF EXISTS sync_state;
          DROP TABLE IF EXISTS playlist_entries;
          DROP TABLE IF EXISTS play_history;
@@ -198,8 +312,7 @@ fn reset_schema(conn: &Connection) -> Result<(), String> {
              last_sync_finished_at INTEGER,
              updated_at INTEGER NOT NULL,
              FOREIGN KEY(active_account_id) REFERENCES sync_accounts(id) ON DELETE SET NULL
-         ) STRICT;
-         COMMIT;",
+         ) STRICT;",
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -216,7 +329,25 @@ fn migrate_schema_v2_to_v3(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
-fn ensure_installation_state(conn: &Connection) -> Result<(), String> {
+fn ensure_installation_state(conn: &Connection, allow_create: bool) -> Result<(), String> {
+    let exists = conn
+        .query_row(
+            "SELECT 1 FROM app_installation_state WHERE singleton = 1",
+            [],
+            |_| Ok(()),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .is_some();
+    if exists {
+        return Ok(());
+    }
+    if !allow_create {
+        return Err(
+            "Refusing to create new installation UUIDs for an existing media.db".to_string(),
+        );
+    }
+
     let now = now_millis();
     conn.execute(
         "INSERT INTO app_installation_state (
@@ -232,6 +363,7 @@ fn ensure_installation_state(conn: &Connection) -> Result<(), String> {
         params![new_uuid(), new_uuid(), now],
     )
     .map_err(|e| e.to_string())?;
+    info!("media db: created initial installation UUIDs");
     Ok(())
 }
 
@@ -305,4 +437,98 @@ fn local_device_name() -> String {
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "local-device".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const INSTALL_ID: &str = "019d27fa-c0fa-7ef2-8bbb-a374c0dbb00c";
+    const DEVICE_ID: &str = "019e91b4-f62f-7cb1-8328-f109e5434d27";
+
+    fn memory_conn() -> Connection {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute_batch(
+            "PRAGMA foreign_keys = ON;
+             PRAGMA synchronous = NORMAL;",
+        )
+        .expect("set pragmas");
+        conn
+    }
+
+    #[test]
+    fn brand_new_db_creates_installation_state() {
+        let mut conn = memory_conn();
+
+        ensure_schema(&mut conn).expect("ensure schema");
+
+        let (install_id, device_id): (String, String) = conn
+            .query_row(
+                "SELECT install_id, device_id
+                 FROM app_installation_state
+                 WHERE singleton = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("read installation state");
+        Uuid::parse_str(&install_id).expect("valid install id");
+        Uuid::parse_str(&device_id).expect("valid device id");
+    }
+
+    #[test]
+    fn schema_rebuild_preserves_existing_installation_state() {
+        let mut conn = memory_conn();
+        reset_schema(&conn).expect("create old schema");
+        conn.execute(
+            "INSERT INTO app_installation_state (
+                 singleton,
+                 install_id,
+                 device_id,
+                 install_id_updated_at,
+                 uuid_update_data,
+                 updated_at
+             )
+             VALUES (1, ?1, ?2, 123, '{}', 456)",
+            params![INSTALL_ID, DEVICE_ID],
+        )
+        .expect("insert installation state");
+        conn.execute_batch("PRAGMA user_version = 1;")
+            .expect("set old user version");
+
+        ensure_schema(&mut conn).expect("ensure schema");
+
+        let (install_id, device_id, install_id_updated_at): (String, String, i64) = conn
+            .query_row(
+                "SELECT install_id, device_id, install_id_updated_at
+                 FROM app_installation_state
+                 WHERE singleton = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("read installation state");
+        assert_eq!(install_id, INSTALL_ID);
+        assert_eq!(device_id, DEVICE_ID);
+        assert_eq!(install_id_updated_at, 123);
+    }
+
+    #[test]
+    fn existing_db_without_installation_state_does_not_create_new_uuid() {
+        let mut conn = memory_conn();
+        reset_schema(&conn).expect("create old schema");
+        conn.execute_batch("PRAGMA user_version = 1;")
+            .expect("set old user version");
+
+        let error = ensure_schema(&mut conn).expect_err("ensure schema should fail");
+        assert!(
+            error.contains("without an installation UUID"),
+            "unexpected error: {error}"
+        );
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM app_installation_state", [], |row| {
+                row.get(0)
+            })
+            .expect("count installation rows");
+        assert_eq!(count, 0);
+    }
 }

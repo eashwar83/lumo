@@ -15,6 +15,12 @@ const YTDL_PATH_SETTING_LABEL: &str = "SOIA_YTDL_PATH";
 const DEFAULT_LOG_LEVEL: &str = "Info";
 const DEFAULT_SOIA_BUNDLE_IDENTIFIER: &str = "com.soia.player";
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct StreamProxySettingsState {
+    parallel_download_enabled: bool,
+}
+
 #[tauri::command]
 pub(crate) fn load_play_history(app: tauri::AppHandle) -> Result<Vec<PlayHistoryEntry>, String> {
     crate::store::play_history::load_play_history(&app)
@@ -610,6 +616,17 @@ pub(crate) fn apply_proxy_settings(
         Ok(())
     })?;
     Ok(resolved)
+}
+
+#[tauri::command]
+pub(crate) fn apply_stream_proxy_settings(
+    parallel_download_enabled: Option<bool>,
+) -> Result<StreamProxySettingsState, String> {
+    let enabled = parallel_download_enabled.unwrap_or(false);
+    crate::mpv::set_parallel_range_enabled(enabled);
+    Ok(StreamProxySettingsState {
+        parallel_download_enabled: enabled,
+    })
 }
 
 #[tauri::command]
