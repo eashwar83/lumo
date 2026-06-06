@@ -233,19 +233,30 @@ fn mark_update_note_prompted(app_handle: &tauri::AppHandle, version: &str) {
     persist_uuid_update_data_object(app_handle, data, "update note prompt state");
 }
 
+fn parse_soia_api_base_urls(raw: &str) -> Vec<String> {
+    raw.split(';')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            if value.contains("://") {
+                value.to_string()
+            } else {
+                format!("https://{value}")
+            }
+        })
+        .collect()
+}
+
 fn request_soia_auth_from_server(app_handle: &tauri::AppHandle) -> Option<SoiaAuthToken> {
     let state: crate::store::installation_store::InstallationState =
         crate::store::installation_store::get_installation_state(app_handle).ok()?;
-    let base_url = option_env!("SOIA_API").unwrap_or("").trim();
-    if base_url.is_empty() {
+    let base_urls = parse_soia_api_base_urls(option_env!("SOIA_API").unwrap_or(""));
+    if base_urls.is_empty() {
         return None;
     }
 
     let version_query = format!("id={}&v={}", state.install_id, env!("CARGO_PKG_VERSION"));
     let os = soia_os_code();
-    let separator = if base_url.contains('?') { '&' } else { '?' };
-    let url = format!("{base_url}{separator}{version_query}&os={os}");
-
     let client = crate::network::proxy::configure_blocking_client_builder(
         app_handle,
         reqwest::blocking::Client::builder()
@@ -256,25 +267,48 @@ fn request_soia_auth_from_server(app_handle: &tauri::AppHandle) -> Option<SoiaAu
     .build()
         .ok()?;
 
-    let response = client.get(&url).send().ok()?;
-    if !response.status().is_success() {
-        return None;
+    for base_url in base_urls {
+        let separator = if base_url.contains('?') { '&' } else { '?' };
+        let url = format!("{base_url}{separator}{version_query}&os={os}");
+        let response = match client.get(&url).send() {
+            Ok(response) => response,
+            Err(_) => {
+                continue;
+            }
+        };
+        if !response.status().is_success() {
+            continue;
+        }
+
+        let body = match response.text() {
+            Ok(body) => body,
+            Err(_) => {
+                continue;
+            }
+        };
+        let payload: serde_json::Value = match serde_json::from_str(&body) {
+            Ok(payload) => payload,
+            Err(_) => {
+                continue;
+            }
+        };
+        let Some(token) = parse_soia_auth_from_json(&payload).or_else(|| {
+            payload
+                .get("data")
+                .and_then(parse_soia_auth_from_json)
+                .or_else(|| payload.get("result").and_then(parse_soia_auth_from_json))
+        }) else {
+            continue;
+        };
+
+        persist_host_auth(app_handle, &token);
+        if let Err(err) = crate::store::installation_store::mark_daily_signal_reported(app_handle) {
+            warn!("mark_daily_signal_reported failed after successful host auth fetch: {err}");
+        }
+        return Some(token);
     }
 
-    let body = response.text().ok()?;
-    let payload: serde_json::Value = serde_json::from_str(&body).ok()?;
-    let token = parse_soia_auth_from_json(&payload).or_else(|| {
-        payload
-            .get("data")
-            .and_then(parse_soia_auth_from_json)
-            .or_else(|| payload.get("result").and_then(parse_soia_auth_from_json))
-    })?;
-
-    persist_host_auth(app_handle, &token);
-    if let Err(err) = crate::store::installation_store::mark_daily_signal_reported(app_handle) {
-        warn!("mark_daily_signal_reported failed after successful host auth fetch: {err}");
-    }
-    Some(token)
+    None
 }
 
 pub(crate) fn run_daily_signal_ping(app_handle: &tauri::AppHandle) -> Option<SoiaAuthToken> {
