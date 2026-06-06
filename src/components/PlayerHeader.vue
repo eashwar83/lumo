@@ -42,6 +42,7 @@ const emit = defineEmits<{
     (e: "toggle-info"): void;
     (e: "toggle-playlist"): void;
     (e: "url-input-mousedown", event: MouseEvent): void;
+    (e: "url-input-touchstart", event: TouchEvent): void;
 }>();
 
 const isWindowsPlatform =
@@ -206,6 +207,12 @@ const onUrlInputMouseDown = (event: MouseEvent) => {
     if (!isUrlInputLocked.value) return;
     event.preventDefault();
     emit("url-input-mousedown", event);
+};
+
+const onUrlInputTouchStart = (event: TouchEvent) => {
+    if (!isUrlInputLocked.value) return;
+    event.preventDefault();
+    emit("url-input-touchstart", event);
 };
 
 const selectedVideoTrack = computed(() =>
@@ -715,6 +722,7 @@ watch(
                     :readonly="isUrlInputLocked"
                     placeholder="Enter a video URL or select files..."
                     @mousedown="onUrlInputMouseDown"
+                    @touchstart="onUrlInputTouchStart"
                     @focus="onUrlInputFocus"
                     @blur="onUrlInputBlur"
                     @input="

@@ -290,7 +290,12 @@ const {
     clearNavSelectionDuringLoad,
     settingsPanelId: "settings",
 });
-const { onAppMouseDownCapture, onDragRegionMouseDown } = useWindowDragRegion();
+const {
+    onAppMouseDownCapture,
+    onAppTouchStartCapture,
+    onDragRegionMouseDown,
+    onDragRegionTouchStart,
+} = useWindowDragRegion();
 const { mediaInfo, statusBadges } = useMediaInfo(player);
 const currentOrLastPlaybackUrl = computed(
     () => player.state.media.url || player.state.media.lastLoadedUrl,
@@ -399,6 +404,7 @@ useAppStartupBindings({
                 !isPointerOverUi,
         }"
         @mousedown.capture="onAppMouseDownCapture"
+        @touchstart.capture="onAppTouchStartCapture"
     >
         <SideActionsNav
             v-show="!player.state.media.isFileLoaded || isPointerNearLeft"
@@ -438,6 +444,7 @@ useAppStartupBindings({
             @toggle-info="toggleInfo"
             @toggle-playlist="togglePlaylist"
             @url-input-mousedown="onDragRegionMouseDown"
+            @url-input-touchstart="onDragRegionTouchStart"
         />
 
         <PlaybackOverlays

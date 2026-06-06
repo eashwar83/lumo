@@ -139,6 +139,7 @@ onUnmounted(() => {
         <div
             ref="trackRef"
             class="control-slider__track"
+            data-window-no-drag
             @pointerdown.prevent="onPointerDown"
         >
             <div

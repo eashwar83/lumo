@@ -144,6 +144,7 @@ onUnmounted(() => {
     <div
         ref="progressAreaRef"
         class="progress-area"
+        data-window-no-drag
         :class="{ 'is-dragging': isDragging }"
         @pointerdown.prevent="onPointerDown"
         @mousemove="updateHoverTime"
