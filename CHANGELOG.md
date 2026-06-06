@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.5] - 2026-06-06
+
+### Features
+
+- Added optional parallel WebDAV stream downloads for improved network playback buffering. This is disabled by default and can be enabled in Settings > Network.
+- Added touch drag support for frameless windows so the header drag region works with touch input.
+- Added fallback update endpoints to make release update checks more resilient.
+
+### Fixes
+
+- Fixed the Linux startup window behavior so hidden startup windows remain disabled on Linux builds.
+
 ## [0.2.4] - 2026-05-30
 
 ### Features

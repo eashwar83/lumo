@@ -19,19 +19,13 @@ You can also go to System Settings > Privacy & Security and click "Open Anyway" 
 
 The app is open-source and its code is publicly available for anyone to inspect.
 
-## [0.2.4] - 2026-05-30
+## [0.2.5] - 2026-06-06
 
 ### Features
 
-- Added a Live playback experience for IPTV/M3U streams, including a Live indicator and a cleaner control bar without seek progress for live channels.
-- Added a confirmation prompt before Soia automatically creates a playlist from an imported playlist file or URL, with the option to edit the playlist name first.
+- Added optional multi-threaded WebDAV downloading for smoother network playback buffering. It is disabled by default and can be enabled in Settings > Network.
+- Added touch drag support for frameless windows, making borderless window movement work better on touch devices.
 
 ### Fixes
 
-- Fixed Network browser breadcrumbs so deep folder paths collapse by available width instead of overflowing the header.
-- Fixed a startup issue where the app window could briefly appear as a transparent shell before the first render.
-
-### Improvements
-
-- Refined the macOS compact top bar icon styling.
-- Updated the Settings navigation icon.
+- Fixed the Linux startup window behavior so hidden startup windows remain disabled on Linux builds.
