@@ -14,7 +14,7 @@ const onToggle = () => {
 
 <template>
     <button
-        class="playlist-peek-area ui-surface"
+        class="playlist-peek-area"
         :class="{ 'playlist-peek-area--disabled': disabled }"
         type="button"
         title="Playlist"
@@ -60,14 +60,15 @@ const onToggle = () => {
     width: 38px;
     height: 60px;
     border-radius: 999px;
-    border: 1px solid rgba(0, 0, 0, 0.18);
-    background: linear-gradient(
-        135deg,
-        rgba(255, 255, 255, 0.8),
-        rgba(255, 255, 255, 0.6)
-    );
+    border: 1px solid var(--glass-border);
+    background: var(--glass-bg);
     color: var(--text-color);
-    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.18);
+    box-shadow:
+        0 12px 24px rgba(0, 0, 0, 0.18),
+        inset 0 1px 0 var(--glass-highlight);
+    -webkit-backdrop-filter: blur(var(--glass-blur))
+        saturate(var(--glass-saturate));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
     display: flex;
     align-items: center;
     justify-content: center;
@@ -103,11 +104,6 @@ const onToggle = () => {
 @media (prefers-color-scheme: dark) {
     :root:not([data-theme]) .playlist-peek {
         border-color: rgba(255, 255, 255, 0.18);
-        background: linear-gradient(
-            135deg,
-            rgba(26, 26, 26, 0.8),
-            rgba(26, 26, 26, 0.6)
-        );
         color: #f6f6f6;
         box-shadow: 0 16px 30px rgba(0, 0, 0, 0.5);
     }
@@ -120,11 +116,6 @@ const onToggle = () => {
 :root[data-theme="dark"] .playlist-peek,
 :root[data-theme="graphite"] .playlist-peek {
     border-color: rgba(255, 255, 255, 0.18);
-    background: linear-gradient(
-        135deg,
-        rgba(26, 26, 26, 0.8),
-        rgba(26, 26, 26, 0.6)
-    );
     color: #f6f6f6;
     box-shadow: 0 16px 30px rgba(0, 0, 0, 0.5);
 }

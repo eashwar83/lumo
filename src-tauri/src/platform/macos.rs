@@ -29,14 +29,21 @@ mod imp {
     use objc2::msg_send;
     use objc2::rc::Retained;
     use objc2::runtime::{AnyClass, AnyObject};
+    use objc2_app_kit::NSAutoresizingMaskOptions;
+    use objc2_app_kit::NSColor;
     use objc2_app_kit::NSView;
+    use objc2_app_kit::NSVisualEffectBlendingMode;
+    use objc2_app_kit::NSVisualEffectMaterial;
+    use objc2_app_kit::NSVisualEffectState;
+    use objc2_app_kit::NSVisualEffectView;
     use objc2_app_kit::NSWindowButton;
+    use objc2_app_kit::NSWindowOrderingMode;
     use objc2_app_kit::NSWindowStyleMask;
     use objc2_app_kit::NSWindowTitleVisibility;
     use objc2_app_kit::{
         NSWindowWillEnterFullScreenNotification, NSWindowWillExitFullScreenNotification,
     };
-    use objc2_foundation::{NSNotification, NSNotificationCenter};
+    use objc2_foundation::{MainThreadMarker, NSNotification, NSNotificationCenter, NSString};
 
     pub(crate) struct FullscreenObserversRaw {
         pub(crate) enter_observer: usize,
@@ -59,6 +66,7 @@ mod imp {
     const APP_MENU_CHECK_UPDATE_ITEM_ID: &str = "app.check-update";
     const OPEN_SETTINGS_PANEL_EVENT: &str = "soia-open-settings-panel";
     const PROJECT_GITHUB_URL: &str = "https://github.com/FengZeng/soia";
+    const WINDOW_VIBRANCY_VIEW_IDENTIFIER: &str = "soia-window-vibrancy-background";
 
     struct PipEventCtx {
         app_handle: tauri::AppHandle,
@@ -132,6 +140,82 @@ mod imp {
             })
             .map_err(|e| e.to_string())?;
         rx.recv().map_err(|e| e.to_string())?
+    }
+
+    unsafe fn find_window_vibrancy_view(content_view: &NSView) -> Option<Retained<NSView>> {
+        let target_identifier = NSString::from_str(WINDOW_VIBRANCY_VIEW_IDENTIFIER);
+        let subviews = content_view.subviews();
+        let count = subviews.count();
+
+        for index in 0..count {
+            let subview = subviews.objectAtIndex(index);
+            let identifier: *mut NSString = msg_send![&*subview, identifier];
+            if identifier.is_null() {
+                continue;
+            }
+
+            let matches_identifier: bool =
+                msg_send![identifier, isEqualToString: &*target_identifier];
+            if matches_identifier {
+                return Some(subview);
+            }
+        }
+
+        None
+    }
+
+    unsafe fn configure_window_vibrancy_view(view: &AnyObject, frame: objc2_foundation::NSRect) {
+        let _: () = msg_send![view, setFrame: frame];
+        let _: () = msg_send![
+            view,
+            setAutoresizingMask: NSAutoresizingMaskOptions::ViewWidthSizable
+                | NSAutoresizingMaskOptions::ViewHeightSizable
+        ];
+        let _: () = msg_send![
+            view,
+            setMaterial: NSVisualEffectMaterial::UnderWindowBackground
+        ];
+        let _: () = msg_send![view, setBlendingMode: NSVisualEffectBlendingMode::BehindWindow];
+        let _: () = msg_send![view, setState: NSVisualEffectState::Active];
+        let _: () = msg_send![view, setEmphasized: false];
+    }
+
+    unsafe fn install_window_vibrancy_background(
+        ns_window: &objc2_app_kit::NSWindow,
+    ) -> Result<(), String> {
+        ns_window.setOpaque(false);
+        ns_window.setBackgroundColor(Some(&NSColor::clearColor()));
+
+        let content_view = ns_window
+            .contentView()
+            .ok_or("Window has no content view for vibrancy background")?;
+        let content_bounds = content_view.bounds();
+        content_view.setAutoresizesSubviews(true);
+
+        if let Some(existing_view) = find_window_vibrancy_view(&content_view) {
+            let existing_object = &*existing_view as *const NSView as *const AnyObject;
+            configure_window_vibrancy_view(
+                existing_object
+                    .as_ref()
+                    .ok_or("Invalid existing vibrancy view pointer")?,
+                content_bounds,
+            );
+            return Ok(());
+        }
+
+        let mtm = MainThreadMarker::new().ok_or("Vibrancy install is not on main thread")?;
+        let vibrancy_view = NSVisualEffectView::new(mtm);
+        configure_window_vibrancy_view(&vibrancy_view, content_bounds);
+
+        let identifier = NSString::from_str(WINDOW_VIBRANCY_VIEW_IDENTIFIER);
+        let _: () = msg_send![&*vibrancy_view, setIdentifier: &*identifier];
+        content_view.addSubview_positioned_relativeTo(
+            &vibrancy_view,
+            NSWindowOrderingMode::Below,
+            None,
+        );
+
+        Ok(())
     }
 
     fn soia_utils_ptr(app_handle: &tauri::AppHandle) -> Option<*mut SoiaUtils> {
@@ -607,6 +691,34 @@ mod imp {
         })
     }
 
+    pub(crate) fn set_window_vibrancy_visible(
+        window: tauri::Window,
+        visible: bool,
+    ) -> Result<(), String> {
+        let app_handle = window.app_handle();
+        let window_for_thread = window.clone();
+        run_on_main_thread_sync(&app_handle, move || unsafe {
+            let ns_window = window_for_thread
+                .ns_window()
+                .map_err(|e| format!("ns_window error: {e}"))?;
+            let ns_window = (ns_window as *mut objc2_app_kit::NSWindow)
+                .as_ref()
+                .ok_or("Invalid NSWindow pointer")?;
+
+            let Some(content_view) = ns_window.contentView() else {
+                return Ok(());
+            };
+
+            if visible {
+                install_window_vibrancy_background(ns_window)?;
+            } else if let Some(vibrancy_view) = find_window_vibrancy_view(&content_view) {
+                let _: () = msg_send![&*vibrancy_view, removeFromSuperview];
+            }
+
+            Ok(())
+        })
+    }
+
     pub(crate) fn pick_media_paths_native(
         app_handle: tauri::AppHandle,
     ) -> Result<Vec<String>, String> {
@@ -742,8 +854,8 @@ pub(crate) use imp::{
     apply_now_playing_info, apply_now_playing_status, apply_window_appearance,
     cleanup_on_window_close, clear_now_playing_cache, clear_now_playing_info,
     is_native_pip_enabled, pick_media_paths_native, set_native_pip_enabled,
-    set_window_controls_visible, setup, sync_mpv_metal_layer_geometry, update_native_pip_state,
-    PlatformState,
+    set_window_controls_visible, set_window_vibrancy_visible, setup,
+    sync_mpv_metal_layer_geometry, update_native_pip_state, PlatformState,
 };
 
 #[cfg(not(target_os = "macos"))]

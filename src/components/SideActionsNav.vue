@@ -135,11 +135,9 @@ const onNavigate = (panel: SideActionId) => {
     display: flex;
     flex-direction: column;
     z-index: 120;
-    background: rgba(255, 255, 255, 0.6);
-    border: 1px solid rgba(0, 0, 0, 0.15);
+    border: 1px solid var(--glass-border);
     border-radius: 14px;
     overflow: hidden;
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
 }
 
 .side-actions__btn {
@@ -183,9 +181,7 @@ const onNavigate = (panel: SideActionId) => {
 
 @media (prefers-color-scheme: dark) {
     :root:not([data-theme]) .side-actions {
-        background: rgba(20, 20, 20, 0.5);
         border-color: rgba(255, 255, 255, 0.2);
-        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
     }
 
     :root:not([data-theme]) .side-actions__btn {
@@ -207,9 +203,7 @@ const onNavigate = (panel: SideActionId) => {
 
 :root[data-theme="dark"] .side-actions,
 :root[data-theme="graphite"] .side-actions {
-    background: rgba(20, 20, 20, 0.5);
     border-color: rgba(255, 255, 255, 0.2);
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
 }
 
 :root[data-theme="dark"] .side-actions__btn,

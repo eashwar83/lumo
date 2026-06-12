@@ -56,6 +56,14 @@ impl PlatformIntegration for DefaultPlatformIntegration {
         Ok(())
     }
 
+    fn set_window_vibrancy_visible(
+        &self,
+        _window: tauri::Window,
+        _visible: bool,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
     fn pick_media_paths_native(
         &self,
         _app_handle: tauri::AppHandle,

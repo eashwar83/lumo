@@ -911,11 +911,11 @@ watch(
     right: 0;
     bottom: 0;
     width: min(360px, 86vw);
-    background: var(--ui-bg);
     color: var(--text-color);
-    border-left: 1px solid rgba(0, 0, 0, 0.12);
-    box-shadow: -12px 0 28px rgba(0, 0, 0, 0.2);
-    backdrop-filter: blur(12px);
+    border-left: 1px solid var(--glass-border);
+    box-shadow:
+        -12px 0 28px rgba(0, 0, 0, 0.2),
+        inset 1px 0 0 var(--glass-highlight);
     border-radius: 14px 0 0 14px;
     z-index: 130;
     display: flex;
@@ -1406,7 +1406,9 @@ watch(
 @media (prefers-color-scheme: dark) {
     :root:not([data-theme]) .playlist-drawer {
         border-left-color: rgba(255, 255, 255, 0.12);
-        box-shadow: -12px 0 28px rgba(0, 0, 0, 0.45);
+        box-shadow:
+            -12px 0 28px rgba(0, 0, 0, 0.45),
+            inset 1px 0 0 var(--glass-highlight);
     }
 
     :root:not([data-theme]) .playlist-drawer__meta,
@@ -1483,7 +1485,9 @@ watch(
 
 :root:is([data-theme="dark"], [data-theme="graphite"]) .playlist-drawer {
     border-left-color: rgba(255, 255, 255, 0.12);
-    box-shadow: -12px 0 28px rgba(0, 0, 0, 0.45);
+    box-shadow:
+        -12px 0 28px rgba(0, 0, 0, 0.45),
+        inset 1px 0 0 var(--glass-highlight);
 }
 
 :root:is([data-theme="dark"], [data-theme="graphite"]) .playlist-drawer__meta,

@@ -39,6 +39,11 @@ pub(crate) trait PlatformIntegration: Sync {
         compact_mode: bool,
         corner_radius: Option<f64>,
     ) -> Result<(), String>;
+    fn set_window_vibrancy_visible(
+        &self,
+        window: tauri::Window,
+        visible: bool,
+    ) -> Result<(), String>;
     fn pick_media_paths_native(&self, app_handle: tauri::AppHandle) -> Result<Vec<String>, String>;
 }
 
@@ -100,6 +105,14 @@ impl PlatformIntegration for MacPlatformIntegration {
         corner_radius: Option<f64>,
     ) -> Result<(), String> {
         macos::apply_window_appearance(window, compact_mode, corner_radius)
+    }
+
+    fn set_window_vibrancy_visible(
+        &self,
+        window: tauri::Window,
+        visible: bool,
+    ) -> Result<(), String> {
+        macos::set_window_vibrancy_visible(window, visible)
     }
 
     fn pick_media_paths_native(&self, app_handle: tauri::AppHandle) -> Result<Vec<String>, String> {
@@ -167,6 +180,13 @@ pub(crate) fn apply_window_appearance(
     corner_radius: Option<f64>,
 ) -> Result<(), String> {
     platform_integration().apply_window_appearance(window, compact_mode, corner_radius)
+}
+
+pub(crate) fn set_window_vibrancy_visible(
+    window: tauri::Window,
+    visible: bool,
+) -> Result<(), String> {
+    platform_integration().set_window_vibrancy_visible(window, visible)
 }
 
 pub(crate) fn pick_media_paths_native(app_handle: tauri::AppHandle) -> Result<Vec<String>, String> {

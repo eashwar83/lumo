@@ -16,6 +16,14 @@ pub(crate) fn apply_window_appearance(
 }
 
 #[tauri::command]
+pub(crate) fn set_window_vibrancy_visible(
+    window: tauri::Window,
+    visible: bool,
+) -> Result<(), String> {
+    crate::platform::set_window_vibrancy_visible(window, visible)
+}
+
+#[tauri::command]
 pub(crate) fn sync_mpv_render_target(
     window: tauri::WebviewWindow,
 ) -> Result<(), String> {

@@ -658,7 +658,7 @@ watch(
 
 <template>
     <div
-        class="top-bar ui-surface"
+        class="top-bar"
         :class="{
             'top-bar--compact': props.compactModeEnabled,
             'top-bar--compact-macos': shouldReserveMacTrafficLightsSpace,
@@ -887,7 +887,7 @@ watch(
             </div>
             <div
                 v-if="props.isInfoOpen && props.info"
-                class="top-bar__info-panel"
+                class="top-bar__info-panel ui-surface"
             >
                 <div class="info-panel__title">Playback Info (I)</div>
                 <div class="info-panel__meta">{{ props.info.title }}</div>
@@ -1000,6 +1000,7 @@ watch(
     --top-bar-info-panel-top: 48px;
     --top-bar-info-panel-left: 8px;
     padding: 0 12px 8px 0;
+    background: transparent;
     transition: opacity 0.3s;
     z-index: 100;
     pointer-events: auto;
@@ -1308,11 +1309,8 @@ watch(
     overflow: auto;
     padding: 14px 16px;
     border-radius: 14px;
-    background: rgba(18, 18, 18, 0.76);
     color: #f8f8f8;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
-    backdrop-filter: blur(10px);
+    border: 1px solid var(--glass-border);
     z-index: 120;
 }
 

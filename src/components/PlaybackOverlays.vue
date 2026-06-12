@@ -49,7 +49,7 @@ const seekOverlayRightDisplay = computed(() =>
 
 <template>
     <div v-if="isLoading" class="loading-overlay ui-surface">
-        <div class="loading-card">
+        <div class="loading-card ui-surface">
             <div class="loading-spinner"></div>
             <div class="loading-text">Loading...</div>
             <div v-if="loadingSpeedText" class="loading-speed">
@@ -145,6 +145,11 @@ const seekOverlayRightDisplay = computed(() =>
     justify-content: center;
     z-index: 140;
     pointer-events: none;
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
 }
 
 .status-overlay {
@@ -320,15 +325,13 @@ const seekOverlayRightDisplay = computed(() =>
     height: 120px;
     padding: 0;
     border-radius: 14px;
-    background: rgba(18, 18, 18, 0.6);
     color: #f6f6f6;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 12px;
-    box-shadow: 0 16px 32px rgba(0, 0, 0, 0.35);
-    backdrop-filter: blur(10px);
+    border: 1px solid var(--glass-border);
 }
 
 .loading-spinner {
@@ -353,12 +356,8 @@ const seekOverlayRightDisplay = computed(() =>
 }
 
 :root[data-theme="light"] .loading-card {
-    background: rgba(255, 255, 255, 0.9);
     color: rgba(28, 38, 52, 0.9);
     border: 1px solid rgba(0, 0, 0, 0.12);
-    box-shadow:
-        0 14px 28px rgba(0, 0, 0, 0.16),
-        inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
 :root[data-theme="light"] .seek-overlay__hint {
@@ -389,12 +388,8 @@ const seekOverlayRightDisplay = computed(() =>
 }
 
 :root[data-theme="graphite"] .loading-card {
-    background: rgba(37, 42, 48, 0.9);
     color: #edf1f6;
     border: 1px solid rgba(146, 158, 175, 0.32);
-    box-shadow:
-        0 20px 36px rgba(0, 0, 0, 0.42),
-        inset 0 1px 0 rgba(188, 196, 208, 0.08);
 }
 
 :root[data-theme="graphite"] .seek-overlay__hint {

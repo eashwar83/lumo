@@ -141,7 +141,7 @@ onBeforeUnmount(() => {
             <div class="confirm-dialog__backdrop" @click="onBackdropClick"></div>
             <div
                 ref="modalRef"
-                class="confirm-dialog__panel"
+                class="confirm-dialog__panel ui-surface"
                 :class="{
                     'confirm-dialog__panel--wide': props.size === 'wide',
                 }"
@@ -216,13 +216,9 @@ onBeforeUnmount(() => {
     max-height: calc(100% - 40px);
     overflow: auto;
     border-radius: 16px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(26, 26, 26, 0.92);
+    border: 1px solid var(--glass-border);
     color: #f6f6f6;
     padding: 18px;
-    box-shadow:
-        0 12px 28px rgba(0, 0, 0, 0.35),
-        inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .confirm-dialog__panel--wide {
@@ -311,11 +307,7 @@ onBeforeUnmount(() => {
 
 :global(:root[data-theme="graphite"] .confirm-dialog__panel) {
     border-color: rgba(146, 158, 175, 0.34);
-    background: rgba(37, 42, 48, 0.98);
     color: #edf1f6;
-    box-shadow:
-        0 24px 42px rgba(0, 0, 0, 0.48),
-        inset 0 1px 0 rgba(188, 196, 208, 0.08);
 }
 
 :global(:root[data-theme="graphite"] .confirm-dialog__title) {
@@ -368,11 +360,7 @@ onBeforeUnmount(() => {
 
 :global(:root[data-theme="light"] .confirm-dialog__panel) {
     border-color: rgba(0, 0, 0, 0.12);
-    background: rgba(255, 255, 255, 0.95);
     color: rgba(26, 36, 48, 0.92);
-    box-shadow:
-        0 14px 30px rgba(0, 0, 0, 0.14),
-        inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
 
 :global(:root[data-theme="light"] .confirm-dialog__body) {

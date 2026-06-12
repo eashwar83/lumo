@@ -93,7 +93,11 @@ const showPanels = () => !props.isFileLoaded;
     min-height: 0;
     z-index: 10;
     pointer-events: none;
-    /* background-color: green; */
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
 }
 
 .main-panels__content {

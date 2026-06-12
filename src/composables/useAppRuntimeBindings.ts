@@ -1,4 +1,5 @@
 import { onMounted, onUnmounted, watch, type Ref } from "vue";
+import { invoke } from "@tauri-apps/api/core";
 import { useAppEventBindings } from "./useAppEventBindings";
 
 type UseAppEventBindingsOptions = Parameters<typeof useAppEventBindings>[0];
@@ -50,6 +51,15 @@ export const useAppRuntimeBindings = ({
     shouldKeepControlsVisible,
     schedulePointerRefresh,
 }: UseAppRuntimeBindingsOptions) => {
+    const setWindowVibrancyVisible = (visible: boolean) => {
+        void invoke("set_window_vibrancy_visible", { visible }).catch((error) => {
+            console.warn("[windowVibrancy] Failed to toggle window vibrancy", {
+                visible,
+                error,
+            });
+        });
+    };
+
     useAppEventBindings({
         player,
         tracks,
@@ -81,6 +91,7 @@ export const useAppRuntimeBindings = ({
     watch(
         () => player.state.media.isFileLoaded,
         (loaded) => {
+            setWindowVibrancyVisible(!loaded);
             if (!loaded) {
                 isInfoOpen.value = false;
                 nowPlaying.clearNowPlaying();
@@ -90,6 +101,7 @@ export const useAppRuntimeBindings = ({
             }
             schedulePointerRefresh();
         },
+        { immediate: true },
     );
 
     watch(

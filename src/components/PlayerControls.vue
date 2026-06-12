@@ -206,7 +206,7 @@ onUnmounted(() => {
 
 <template>
     <div
-        class="player-controls ui-surface"
+        class="player-controls"
         :class="{ 'ui-hidden': props.isHidden }"
     >
         <div class="player-controls-content">
