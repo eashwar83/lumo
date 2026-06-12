@@ -327,6 +327,7 @@ unsafe extern "C" {
         auth_signature_hex: *const c_char,
     ) -> *mut SoiaUtils;
     pub(super) fn soia_utils_render_target_resize(utils: *mut SoiaUtils, width: u32, height: u32);
+    pub(super) fn soia_utils_set_render_target_visible(utils: *mut SoiaUtils, visible: c_int);
     pub(super) fn soia_utils_render_context_update(utils: *mut SoiaUtils);
     pub(super) fn soia_utils_uses_render_context(utils: *mut SoiaUtils) -> c_int;
     pub(super) fn soia_utils_destroy(utils: *mut SoiaUtils);

@@ -308,6 +308,17 @@ fn emit_end_file_and_progress(
     );
 }
 
+fn set_render_target_visible(app_handle: &AppHandle, visible: bool) {
+    let app_state: tauri::State<'_, AppState> = app_handle.state::<AppState>();
+    match app_state.mpv_player.lock() {
+        Ok(mpv_guard) => mpv_guard.set_render_target_visible(visible),
+        Err(err) => warn!(
+            "MPV Event Loop: failed to lock MPV player for render target visibility: {}",
+            err
+        ),
+    };
+}
+
 fn emit_resize_if_changed(
     app_handle: &AppHandle,
     width: i64,
@@ -587,6 +598,7 @@ pub(super) fn mpv_event_loop(
                 mpv_event_id::MPV_EVENT_START_FILE => {
                     #[cfg(debug_assertions)]
                     debug!("MPV Event Loop: MPV_EVENT_START_FILE received.");
+                    set_render_target_visible(&app_handle, true);
                     end_file_emitted_for_current_item = false;
                     eof_reached.store(false, Ordering::SeqCst);
                     freeze_buffered_pos_until_cache_refresh = false;
@@ -1107,6 +1119,7 @@ pub(super) fn mpv_event_loop(
                 }
                 mpv_event_id::MPV_EVENT_END_FILE => {
                     is_playing.store(false, Ordering::Relaxed);
+                    set_render_target_visible(&app_handle, false);
                     last_is_buffering = false;
                     last_download_speed_bps = 0.0;
                     let reason = if !(*event).data.is_null() {
@@ -1133,6 +1146,12 @@ pub(super) fn mpv_event_loop(
                     }
                     end_file_emitted_for_current_item = reason == 0;
                     is_rendering.store(false, Ordering::Relaxed);
+                    wake_lock_manager.update(false);
+                }
+                mpv_event_id::MPV_EVENT_IDLE => {
+                    is_playing.store(false, Ordering::Relaxed);
+                    is_rendering.store(false, Ordering::Relaxed);
+                    set_render_target_visible(&app_handle, false);
                     wake_lock_manager.update(false);
                 }
                 _ => {}

@@ -5,8 +5,8 @@ use super::ffi::{
     mpv_command, mpv_create, mpv_create_client, mpv_destroy, mpv_format, mpv_free,
     mpv_get_property_string, mpv_initialize, mpv_set_option, mpv_set_option_string,
     mpv_terminate_destroy, resolve_linked_library_path, soia_utils_create, soia_utils_destroy,
-    soia_utils_render_context_update, soia_utils_render_target_resize, soia_utils_uses_render_context,
-    SoiaUtils,
+    soia_utils_render_context_update, soia_utils_render_target_resize,
+    soia_utils_set_render_target_visible, soia_utils_uses_render_context, SoiaUtils,
 };
 use super::stream_https::HttpsStreamRegistry;
 use crate::check_update::SoiaAuthToken;
@@ -286,6 +286,15 @@ impl MpvHandle {
         if !utils.is_null() {
             unsafe {
                 soia_utils_render_target_resize(utils, width, height);
+            }
+        }
+    }
+
+    pub fn set_render_target_visible(&self, visible: bool) {
+        let utils = self.soia_utils.load(Ordering::Acquire);
+        if !utils.is_null() {
+            unsafe {
+                soia_utils_set_render_target_visible(utils, if visible { 1 } else { 0 });
             }
         }
     }
