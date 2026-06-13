@@ -1,6 +1,9 @@
 <script setup lang="ts">
+import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import ContextMenu from "./ContextMenu.vue";
 import type { MediaInfo } from "../mock/mediaInfo";
 import {
     SETTINGS_UPDATED_EVENT,
@@ -75,6 +78,12 @@ type StoredRenderingState = {
     animeModeActiveShaderFiles?: string[];
     animeSelectedShaderFiles?: string[];
     animeActiveShaderFiles?: string[];
+};
+
+type ContextMenuItem = {
+    id: string;
+    label: string;
+    disabled?: boolean;
 };
 
 const refreshWindowMaximizedState = async () => {
@@ -154,6 +163,11 @@ const isUrlInputLocked = computed(
     () => props.isFileLoaded && props.playbackTitleMode !== "Editable",
 );
 const isUrlInputFocused = ref(false);
+const urlInputRef = ref<HTMLInputElement | null>(null);
+const isUrlContextMenuOpen = ref(false);
+const urlContextMenuPosition = ref({ x: 0, y: 0 });
+const urlContextMenuSelection = ref({ start: 0, end: 0 });
+const pendingUrlContextMenuSelection = ref<{ start: number; end: number } | null>(null);
 
 const appendUrlExtensionToTitle = (title: string, url: string) => {
     const normalizedTitle = title.trim();
@@ -203,7 +217,17 @@ const onUrlInputBlur = () => {
     isUrlInputFocused.value = false;
 };
 
+const isUrlInputContextMenuMouseDown = (event: MouseEvent) =>
+    event.button === 2 || event.ctrlKey;
+
 const onUrlInputMouseDown = (event: MouseEvent) => {
+    if (isUrlInputContextMenuMouseDown(event)) {
+        const { start, end } = getUrlInputSelection();
+        pendingUrlContextMenuSelection.value = { start, end };
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+    }
     if (!isUrlInputLocked.value) return;
     event.preventDefault();
     emit("url-input-mousedown", event);
@@ -213,6 +237,187 @@ const onUrlInputTouchStart = (event: TouchEvent) => {
     if (!isUrlInputLocked.value) return;
     event.preventDefault();
     emit("url-input-touchstart", event);
+};
+
+const closeUrlContextMenu = () => {
+    isUrlContextMenuOpen.value = false;
+    pendingUrlContextMenuSelection.value = null;
+};
+
+const restoreUrlInputSelection = (selection: { start: number; end: number }) => {
+    const input = urlInputRef.value;
+    if (!input) return;
+    input.setSelectionRange(selection.start, selection.end);
+};
+
+const onUrlInputContextMenu = (event: MouseEvent) => {
+    if (isPlaybackTitleHidden.value) return;
+    event.preventDefault();
+    event.stopPropagation();
+    isUrlInputFocused.value = true;
+    urlInputRef.value?.focus({ preventScroll: true });
+
+    const fallbackSelection = getUrlInputSelection();
+    const selection = pendingUrlContextMenuSelection.value ?? {
+        start: fallbackSelection.start,
+        end: fallbackSelection.end,
+    };
+    restoreUrlInputSelection(selection);
+    window.requestAnimationFrame(() => {
+        restoreUrlInputSelection(selection);
+    });
+    urlContextMenuSelection.value = selection;
+    urlContextMenuPosition.value = {
+        x: event.clientX,
+        y: event.clientY,
+    };
+    isUrlContextMenuOpen.value = true;
+};
+
+const getUrlInputSelection = () => {
+    const input = urlInputRef.value;
+    if (!input) return { input: null, start: 0, end: 0 };
+    const start = input.selectionStart ?? 0;
+    const end = input.selectionEnd ?? start;
+    return { input, start, end };
+};
+
+const writeClipboardText = async (value: string) => {
+    if (!value) return;
+    try {
+        await writeText(value);
+        return;
+    } catch {
+        // Fall back to the browser API when this component runs outside Tauri.
+    }
+
+    if (!isTauri() && navigator.clipboard?.writeText) {
+        try {
+            await navigator.clipboard.writeText(value);
+            return;
+        } catch {
+            // Fall back to copying the current editable selection when clipboard access is blocked.
+        }
+    }
+
+    document.execCommand("copy");
+};
+
+const updateUrlInputValue = (value: string, selectionStart: number) => {
+    const input = urlInputRef.value;
+    emit("update:url", value);
+    if (!input) return;
+    input.value = value;
+    input.setSelectionRange(selectionStart, selectionStart);
+};
+
+const deleteUrlInputSelection = () => {
+    if (isUrlInputLocked.value) return;
+    const { input, start, end } = getUrlInputSelection();
+    if (!input || start === end) return;
+    updateUrlInputValue(`${input.value.slice(0, start)}${input.value.slice(end)}`, start);
+    closeUrlContextMenu();
+};
+
+const copyUrlInputSelection = async () => {
+    const { input, start, end } = getUrlInputSelection();
+    if (!input) return;
+    const selectedText = input.value.slice(start, end);
+    await writeClipboardText(selectedText || input.value);
+    closeUrlContextMenu();
+};
+
+const cutUrlInputSelection = async () => {
+    if (isUrlInputLocked.value) return;
+    const { input, start, end } = getUrlInputSelection();
+    if (!input || start === end) return;
+    await writeClipboardText(input.value.slice(start, end));
+    updateUrlInputValue(`${input.value.slice(0, start)}${input.value.slice(end)}`, start);
+    closeUrlContextMenu();
+};
+
+const pasteUrlInputClipboard = async () => {
+    if (isUrlInputLocked.value) return;
+    const { input, start, end } = getUrlInputSelection();
+    if (!input) return;
+    closeUrlContextMenu();
+
+    let text = "";
+    try {
+        text = await readText();
+    } catch {
+        if (!isTauri() && navigator.clipboard?.readText) {
+            try {
+                text = await navigator.clipboard.readText();
+            } catch {
+                text = "";
+            }
+        }
+    }
+
+    if (!text) {
+        return;
+    }
+
+    const nextValue = `${input.value.slice(0, start)}${text}${input.value.slice(end)}`;
+    updateUrlInputValue(nextValue, start + text.length);
+};
+
+const selectAllUrlInput = () => {
+    urlInputRef.value?.focus({ preventScroll: true });
+    urlInputRef.value?.select();
+    closeUrlContextMenu();
+};
+
+const hasUrlContextMenuSelection = computed(
+    () => urlContextMenuSelection.value.start !== urlContextMenuSelection.value.end,
+);
+
+const urlContextMenuItems = computed(() => {
+    const items: ContextMenuItem[] = [
+        { id: "copy", label: "Copy" },
+    ];
+
+    if (!isUrlInputLocked.value) {
+        items.push(
+            {
+                id: "cut",
+                label: "Cut",
+                disabled: !hasUrlContextMenuSelection.value,
+            },
+            { id: "paste", label: "Paste" },
+            {
+                id: "delete",
+                label: "Delete",
+                disabled: !hasUrlContextMenuSelection.value,
+            },
+        );
+    }
+
+    items.push({ id: "select-all", label: "Select All" });
+    return items;
+});
+
+const onUrlContextMenuSelect = (id: string) => {
+    if (id === "copy") {
+        void copyUrlInputSelection();
+        return;
+    }
+    if (id === "cut") {
+        void cutUrlInputSelection();
+        return;
+    }
+    if (id === "paste") {
+        void pasteUrlInputClipboard();
+        return;
+    }
+    if (id === "delete") {
+        deleteUrlInputSelection();
+        return;
+    }
+    if (id === "select-all") {
+        selectAllUrlInput();
+    }
 };
 
 const selectedVideoTrack = computed(() =>
@@ -712,6 +917,7 @@ watch(
                     </svg>
                 </button>
                 <input
+                    ref="urlInputRef"
                     class="top-bar__input"
                     :class="{
                         'top-bar__input--loading': props.isLoading,
@@ -721,8 +927,9 @@ watch(
                     :value="displayUrlInputValue"
                     :readonly="isUrlInputLocked"
                     placeholder="Enter a video URL or select files..."
-                    @mousedown="onUrlInputMouseDown"
+                    @mousedown.capture="onUrlInputMouseDown"
                     @touchstart="onUrlInputTouchStart"
+                    @contextmenu="onUrlInputContextMenu"
                     @focus="onUrlInputFocus"
                     @blur="onUrlInputBlur"
                     @input="
@@ -731,6 +938,14 @@ watch(
                             ($event.target as HTMLInputElement).value,
                         )
                     "
+                />
+                <ContextMenu
+                    :open="isUrlContextMenuOpen"
+                    :x="urlContextMenuPosition.x"
+                    :y="urlContextMenuPosition.y"
+                    :items="urlContextMenuItems"
+                    @select="onUrlContextMenuSelect"
+                    @close="closeUrlContextMenu"
                 />
 
                 <button

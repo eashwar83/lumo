@@ -321,6 +321,7 @@ pub fn run() {
             install_frontend_ready_window_show(app);
             Ok(())
         })
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
