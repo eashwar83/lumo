@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.6] - 2026-06-13
+
+### Features
+
+- Added a macOS-only transparent glass window background for a lighter native desktop feel.
+- Added a built-in Favorites Playlist that stays at the top of the playlist drawer.
+- Added a playback context menu with an Add to Favorites action during playback.
+- Added right-click editing actions for the URL input, including copy, cut, paste, delete, and select all.
+
+### Fixes
+
+- Fixed excessive playback progress disk writes by staging progress in memory and flushing it on player lifecycle events.
+
 ## [0.2.5] - 2026-06-06
 
 ### Features

@@ -19,13 +19,14 @@ You can also go to System Settings > Privacy & Security and click "Open Anyway" 
 
 The app is open-source and its code is publicly available for anyone to inspect.
 
-## [0.2.5] - 2026-06-06
+## [0.2.6] - 2026-06-13
 
-### Features
+### Highlights
 
-- Added optional multi-threaded WebDAV downloading for smoother network playback buffering. It is disabled by default and can be enabled in Settings > Network.
-- Added touch drag support for frameless windows, making borderless window movement work better on touch devices.
+- macOS now uses a vibrancy effect with a transparent glass background for a more native desktop look.
+- Added a built-in Favorites Playlist that stays at the top of the playlist drawer, with an Add to Favorites action in the playback right-click menu.
+- Added right-click actions to the URL field for copy, cut, paste, delete, and select all.
 
 ### Fixes
 
-- Fixed the Linux startup window behavior so hidden startup windows remain disabled on Linux builds.
+- Fixed excessive playback progress disk writes while media is playing.
