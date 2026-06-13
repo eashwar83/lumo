@@ -1,5 +1,5 @@
 :root {
-    --app-bg: rgba(244, 247, 251, 0.36);
+    --app-bg: #f6f6f6;
     --ui-bg: rgba(255, 255, 255, 0.9);
     --text-color: #333;
     --focus-color: #396cd8;
@@ -24,7 +24,7 @@
 }
 
 :root[data-theme="graphite"] {
-    --app-bg: rgba(19, 23, 28, 0.36);
+    --app-bg: #1e2227;
     --ui-bg: rgba(30, 34, 39, 0.9);
     --text-color: #edf1f7;
     --focus-color: #8ab7ff;
@@ -39,13 +39,12 @@
     --glass-shadow: 0 18px 42px rgba(0, 0, 0, 0.38);
 }
 
-:root[data-platform="linux"][data-theme="graphite"],
-:root[data-platform="windows"][data-theme="graphite"] {
-    --app-bg: rgb(19, 23, 28);
+:root[data-platform="macos"][data-theme="graphite"] {
+    --app-bg: rgba(19, 23, 28, 0.36);
 }
 
 :root[data-theme="light"] {
-    --app-bg: rgba(244, 247, 251, 0.36);
+    --app-bg: #f6f6f6;
     --ui-bg: rgba(255, 255, 255, 0.9);
     --text-color: #333;
     --focus-color: #396cd8;
@@ -60,15 +59,13 @@
     --glass-shadow: 0 16px 36px rgba(31, 42, 56, 0.16);
 }
 
-:root[data-platform="linux"],
-:root[data-platform="windows"],
-:root[data-platform="linux"][data-theme="light"],
-:root[data-platform="windows"][data-theme="light"] {
-    --app-bg: rgb(244, 247, 251);
+:root[data-platform="macos"],
+:root[data-platform="macos"][data-theme="light"] {
+    --app-bg: rgba(244, 247, 251, 0.36);
 }
 
 :root[data-theme="dark"] {
-    --app-bg: rgba(12, 14, 17, 0.4);
+    --app-bg: #0f0f0f;
     --ui-bg: #0f0f0f98;
     --text-color: #f6f6f6;
     --focus-color: #8ab7ff;
@@ -83,14 +80,13 @@
     --glass-shadow: 0 18px 42px rgba(0, 0, 0, 0.42);
 }
 
-:root[data-platform="linux"][data-theme="dark"],
-:root[data-platform="windows"][data-theme="dark"] {
-    --app-bg: rgb(12, 14, 17);
+:root[data-platform="macos"][data-theme="dark"] {
+    --app-bg: rgba(12, 14, 17, 0.4);
 }
 
 @media (prefers-color-scheme: dark) {
     :root:not([data-theme]) {
-        --app-bg: rgba(12, 14, 17, 0.4);
+        --app-bg: #0f0f0f;
         --ui-bg: #0f0f0f98;
         --text-color: #f6f6f6;
         --app-window-border: rgba(255, 255, 255, 0.18);
@@ -103,9 +99,8 @@
         --glass-shadow: 0 18px 42px rgba(0, 0, 0, 0.42);
     }
 
-    :root[data-platform="linux"]:not([data-theme]),
-    :root[data-platform="windows"]:not([data-theme]) {
-        --app-bg: rgb(12, 14, 17);
+    :root[data-platform="macos"]:not([data-theme]) {
+        --app-bg: rgba(12, 14, 17, 0.4);
     }
 }
 

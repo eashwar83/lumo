@@ -8,6 +8,8 @@ if (/\bwindows\b/i.test(userAgent)) {
     document.documentElement.setAttribute("data-platform", "windows");
 } else if (/\blinux\b/i.test(userAgent)) {
     document.documentElement.setAttribute("data-platform", "linux");
+} else if (/mac|darwin/i.test(userAgent)) {
+    document.documentElement.setAttribute("data-platform", "macos");
 }
 
 if (!import.meta.env.DEV) {

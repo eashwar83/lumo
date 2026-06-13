@@ -51,7 +51,10 @@ export const useAppRuntimeBindings = ({
     shouldKeepControlsVisible,
     schedulePointerRefresh,
 }: UseAppRuntimeBindingsOptions) => {
+    const isMacPlatform =
+        typeof navigator !== "undefined" && /mac|darwin/i.test(navigator.userAgent);
     const setWindowVibrancyVisible = (visible: boolean) => {
+        if (!isMacPlatform) return;
         void invoke("set_window_vibrancy_visible", { visible }).catch((error) => {
             console.warn("[windowVibrancy] Failed to toggle window vibrancy", {
                 visible,
