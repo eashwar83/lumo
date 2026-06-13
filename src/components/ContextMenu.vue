@@ -8,6 +8,7 @@ const props = defineProps<{
     items: {
         id: string;
         label: string;
+        icon?: "heart" | "settings";
         disabled?: boolean;
     }[];
 }>();
@@ -100,11 +101,45 @@ onUnmounted(() => {
                 v-for="item in props.items"
                 :key="item.id"
                 class="context-menu__item"
+                :class="{ 'context-menu__item--with-icon': item.icon }"
                 type="button"
                 role="menuitem"
                 :disabled="item.disabled"
                 @click="onItemClick(item.id, item.disabled)"
             >
+                <span
+                    v-if="item.icon"
+                    class="context-menu__icon"
+                    aria-hidden="true"
+                >
+                    <svg
+                        v-if="item.icon === 'heart'"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <path
+                            d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78Z"
+                        />
+                    </svg>
+                    <svg
+                        v-else-if="item.icon === 'settings'"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <circle cx="12" cy="12" r="3" />
+                        <path
+                            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.4 1.1V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-.4-1.1 1.65 1.65 0 0 0-1-.6 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 0-1.1-.4H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.1-.4 1.65 1.65 0 0 0 .6-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .4-1.1V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 .4 1.1 1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 .6 1 1.65 1.65 0 0 0 1.1.4H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.1.4 1.65 1.65 0 0 0-.6 1Z"
+                        />
+                    </svg>
+                </span>
                 {{ item.label }}
             </button>
         </div>
@@ -162,9 +197,32 @@ onUnmounted(() => {
     min-height: 30px;
     padding: 6px 12px;
     text-align: left;
+    display: grid;
+    align-items: center;
     transition:
         background-color 80ms ease,
         color 80ms ease;
+}
+
+.context-menu__item--with-icon {
+    grid-template-columns: 16px 1fr;
+    gap: 8px;
+}
+
+.context-menu__icon {
+    width: 16px;
+    height: 16px;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    color: currentColor;
+    opacity: 0.88;
+}
+
+.context-menu__icon svg {
+    width: 12px;
+    height: 12px;
+    display: block;
 }
 
 .context-menu__item:not(:disabled):hover,

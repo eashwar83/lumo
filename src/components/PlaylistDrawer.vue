@@ -7,6 +7,7 @@ import type {
     PlaylistLoopMode,
     PlaylistSortMode,
 } from "../types/playlist";
+import { FAVORITES_PLAYLIST_ID } from "../types/playlist";
 import { getPathDisplayName } from "../utils/getPathDisplayName";
 import { getPlaybackDisplayPathWithHomePrefix } from "../utils/playbackDisplay";
 
@@ -73,8 +74,17 @@ let isPointerSortingActive = false;
 let activeDragSourceElement: HTMLElement | null = null;
 
 const playlistItems = computed(() => props.entries);
-const playlistCollections = computed(() => props.playlists);
+const favoritesPlaylist = computed(
+    () =>
+        props.playlists.find((item) => item.id === FAVORITES_PLAYLIST_ID) ?? null,
+);
+const playlistCollections = computed(() =>
+    props.playlists.filter((item) => item.id !== FAVORITES_PLAYLIST_ID),
+);
 const isInPlaylist = computed(() => !!props.activePlaylistId);
+const isFavoritesActive = computed(
+    () => props.activePlaylistId === FAVORITES_PLAYLIST_ID,
+);
 const hasPlaylistCollectionId = (
     playlistId: string | null,
 ): playlistId is string =>
@@ -331,6 +341,12 @@ const onPlaylistCardActivate = (playlistId: string, event: Event) => {
     if (isEventFromPlaylistControl(event)) return;
     openedMenuPlaylistId.value = null;
     emit("enter-playlist", playlistId);
+};
+
+const enterFavoritesPlaylist = () => {
+    if (!favoritesPlaylist.value) return;
+    openedMenuPlaylistId.value = null;
+    emit("enter-playlist", FAVORITES_PLAYLIST_ID);
 };
 
 const cleanupPointerSorting = () => {
@@ -624,12 +640,47 @@ watch(
                         <div v-if="!isInPlaylist" class="playlist-drawer__title">
                             {{ titleLabel }}
                         </div>
+                        <div
+                            v-else
+                            class="playlist-drawer__active-name"
+                            :class="{
+                                'playlist-drawer__active-name--favorites':
+                                    isFavoritesActive,
+                            }"
+                        >
+                            <svg
+                                v-if="isFavoritesActive"
+                                class="playlist-drawer__active-name-icon"
+                                viewBox="0 0 24 24"
+                                fill="currentColor"
+                                aria-hidden="true"
+                            >
+                                <path
+                                    d="M12 21.35 10.55 20.03C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.08C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35Z"
+                                />
+                            </svg>
+                            {{ props.activePlaylistName || titleLabel }}
+                        </div>
                         <div class="playlist-drawer__meta">
                             {{ metaLabel }}
                         </div>
                     </div>
                 </div>
                 <div class="playlist-drawer__actions">
+                    <button
+                        v-if="!isInPlaylist"
+                        class="playlist-drawer__tool playlist-drawer__tool--favorites"
+                        type="button"
+                        aria-label="Favorites"
+                        title="Favorites"
+                        @click="enterFavoritesPlaylist"
+                    >
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <path
+                                d="M12 21.35 10.55 20.03C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.08C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35Z"
+                            />
+                        </svg>
+                    </button>
                     <button
                         class="playlist-drawer__tool playlist-drawer__tool--add"
                         type="button"
@@ -1013,6 +1064,10 @@ watch(
     height: 18px;
 }
 
+.playlist-drawer__tool--favorites {
+    color: rgba(213, 46, 89, 0.95);
+}
+
 .playlist-drawer__title {
     font-size: 16px;
     font-weight: 700;
@@ -1028,6 +1083,20 @@ watch(
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.playlist-drawer__active-name--favorites {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    opacity: 1;
+}
+
+.playlist-drawer__active-name-icon {
+    width: 15px;
+    height: 15px;
+    color: rgba(213, 46, 89, 0.95);
+    flex-shrink: 0;
 }
 
 .playlist-drawer__meta {

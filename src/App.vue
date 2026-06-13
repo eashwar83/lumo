@@ -9,6 +9,7 @@ import PlaylistPeekButton from "./components/PlaylistPeekButton.vue";
 import PlaylistDrawer from "./components/PlaylistDrawer.vue";
 import PlaylistCreationDialog from "./components/PlaylistCreationDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
+import ContextMenu from "./components/ContextMenu.vue";
 import WindowResizeRegions from "./components/WindowResizeRegions.vue";
 import { usePlaybackShortcuts } from "./composables/usePlaybackShortcuts";
 import { usePlaybackFlow } from "./composables/usePlaybackFlow";
@@ -30,6 +31,7 @@ import { usePlaybackLoadingState } from "./composables/usePlaybackLoadingState";
 import { usePlaybackNavigation } from "./composables/usePlaybackNavigation";
 import { usePlaybackVolumePersistence } from "./composables/usePlaybackVolumePersistence";
 import { usePlaylistCreationPrompt } from "./composables/usePlaylistCreationPrompt";
+import { usePlaybackContextMenu } from "./composables/usePlaybackContextMenu";
 
 const {
     isMacOS,
@@ -244,6 +246,11 @@ const onSideNavNavigate = async (
     await onNavAction(panel);
 };
 
+const openSettingsFromPlaybackContextMenu = async () => {
+    clearNavSelectionDuringLoad.value = false;
+    await onNavAction("settings");
+};
+
 const { onSeek, onSeekRelative } = usePlaybackSeekActions({
     player,
     isLoading,
@@ -304,6 +311,14 @@ const playlistEntriesWithProgress = usePlaylistEntriesWithProgress(
     orderedPlaylist,
     history.history,
 );
+const playbackContextMenu = usePlaybackContextMenu({
+    isFileLoaded: () => player.state.media.isFileLoaded,
+    getCurrentPath: () => player.state.media.url,
+    getCurrentTitle: () => player.state.media.title,
+    addToFavorites: playlistState.addToFavorites,
+    openSettings: openSettingsFromPlaybackContextMenu,
+    hideAllMenus,
+});
 
 const { hasLoadedPanel, loadActivePanel } = useAppUiPersistence({
     activePanel,
@@ -405,6 +420,7 @@ useAppStartupBindings({
         }"
         @mousedown.capture="onAppMouseDownCapture"
         @touchstart.capture="onAppTouchStartCapture"
+        @contextmenu="playbackContextMenu.onContextMenu"
     >
         <SideActionsNav
             v-show="!player.state.media.isFileLoaded || isPointerNearLeft"
@@ -509,6 +525,15 @@ useAppStartupBindings({
             @move-playlist="onMovePlaylist"
             @width-ratio-change="onPlaylistDrawerWidthRatioChange"
             @scroll-position-change="onPlaylistScrollPositionChange"
+        />
+
+        <ContextMenu
+            :open="playbackContextMenu.isOpen.value"
+            :x="playbackContextMenu.position.value.x"
+            :y="playbackContextMenu.position.value.y"
+            :items="playbackContextMenu.items.value"
+            @select="playbackContextMenu.onSelect"
+            @close="playbackContextMenu.close"
         />
 
         <PlayerControls

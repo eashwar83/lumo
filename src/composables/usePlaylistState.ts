@@ -1,9 +1,12 @@
 import { computed, ref } from "vue";
-import type {
-    Playlist,
-    PlaylistEntry,
-    PlaylistLoopMode,
-    PlaylistSortMode,
+import {
+    FAVORITES_PLAYLIST_ID,
+    FAVORITES_PLAYLIST_NAME,
+    LEGACY_FAVOURITE_PLAYLIST_ID,
+    type Playlist,
+    type PlaylistEntry,
+    type PlaylistLoopMode,
+    type PlaylistSortMode,
 } from "../types/playlist";
 import { getPathDisplayName } from "../utils/getPathDisplayName";
 
@@ -31,6 +34,21 @@ const isValidSortMode = (value: unknown): value is PlaylistSortMode =>
 
 const createPlaylistId = () =>
     `pl_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
+const isFavoritesPlaylist = (playlistId: string | null) =>
+    playlistId === FAVORITES_PLAYLIST_ID;
+
+const normalizePlaylistId = (playlistId: string | null | undefined) =>
+    playlistId === LEGACY_FAVOURITE_PLAYLIST_ID
+        ? FAVORITES_PLAYLIST_ID
+        : playlistId ?? null;
+
+const createFavoritesPlaylist = (): Playlist => ({
+    id: FAVORITES_PLAYLIST_ID,
+    name: FAVORITES_PLAYLIST_NAME,
+    entries: [],
+    createdAt: 0,
+});
 
 const stripExtension = (fileName: string) => {
     const trimmed = fileName.trim();
@@ -112,6 +130,39 @@ const normalizePlaylistName = (name: string | undefined, fallback: string) => {
     return trimmed || fallback;
 };
 
+const normalizePlaylists = (items: Playlist[] | undefined): Playlist[] => {
+    const source = items ?? [];
+    let favoritesPlaylist: Playlist | null = null;
+    const userPlaylists: Playlist[] = [];
+
+    source.forEach((item, index) => {
+        const normalizedPlaylist: Playlist = {
+            id: item.id || createPlaylistId(),
+            name: normalizePlaylistName(item.name, `Playlist ${index + 1}`),
+            entries: normalizePlaylistEntries(item.entries ?? []),
+            createdAt:
+                typeof item.createdAt === "number" ? item.createdAt : Date.now(),
+        };
+
+        if (
+            normalizedPlaylist.id === FAVORITES_PLAYLIST_ID ||
+            normalizedPlaylist.id === LEGACY_FAVOURITE_PLAYLIST_ID
+        ) {
+            favoritesPlaylist = {
+                ...normalizedPlaylist,
+                id: FAVORITES_PLAYLIST_ID,
+                name: FAVORITES_PLAYLIST_NAME,
+                createdAt: normalizedPlaylist.createdAt || 0,
+            };
+            return;
+        }
+
+        userPlaylists.push(normalizedPlaylist);
+    });
+
+    return [favoritesPlaylist ?? createFavoritesPlaylist(), ...userPlaylists];
+};
+
 const sortEntries = (
     entries: PlaylistEntry[],
     mode: PlaylistSortMode,
@@ -132,7 +183,7 @@ const sortEntries = (
 };
 
 export const usePlaylistState = () => {
-    const playlists = ref<Playlist[]>([]);
+    const playlists = ref<Playlist[]>([createFavoritesPlaylist()]);
     const activePlaylistId = ref<string | null>(null);
     const playbackPlaylistId = ref<string | null>(null);
     const loopMode = ref<PlaylistLoopMode>("list");
@@ -195,6 +246,49 @@ export const usePlaylistState = () => {
         playlists.value = nextPlaylists;
     };
 
+    const addEntryToPlaylist = (
+        playlistId: string,
+        item: CreatePlaylistEntryInput,
+    ) => {
+        const playlistIndex = playlists.value.findIndex((entry) => entry.id === playlistId);
+        if (playlistIndex < 0) return;
+
+        const path = item.path?.trim() ?? "";
+        if (!path) return;
+
+        const target = playlists.value[playlistIndex];
+        const title = item.title?.trim() || undefined;
+        const iconUrl = item.iconUrl?.trim() || undefined;
+        const existingIndex = target.entries.findIndex((entry) => entry.path === path);
+        const nextEntries = [...target.entries];
+
+        if (existingIndex >= 0) {
+            nextEntries[existingIndex] = {
+                ...nextEntries[existingIndex],
+                title: title ?? nextEntries[existingIndex]?.title,
+                iconUrl: iconUrl ?? nextEntries[existingIndex]?.iconUrl,
+            };
+        } else {
+            nextEntries.push({
+                path,
+                title,
+                iconUrl,
+                addedAt: Date.now(),
+            });
+        }
+
+        const nextPlaylists = [...playlists.value];
+        nextPlaylists[playlistIndex] = {
+            ...target,
+            entries: nextEntries,
+        };
+        playlists.value = nextPlaylists;
+    };
+
+    const addToFavorites = (item: CreatePlaylistEntryInput) => {
+        addEntryToPlaylist(FAVORITES_PLAYLIST_ID, item);
+    };
+
     const createPlaylistWithEntries = (
         items: CreatePlaylistEntryInput[],
         options: CreatePlaylistOptions = {},
@@ -217,7 +311,9 @@ export const usePlaylistState = () => {
         if (!normalizedEntries.length) return null;
 
         const playlistId = createPlaylistId();
-        const fallbackName = `Playlist ${playlists.value.length + 1}`;
+        const fallbackName = `Playlist ${
+            playlists.value.filter((item) => !isFavoritesPlaylist(item.id)).length + 1
+        }`;
         const derivedName = derivePlaylistNameFromPaths(
             normalizedEntries.map((item) => item.path),
             fallbackName,
@@ -246,7 +342,12 @@ export const usePlaylistState = () => {
         const normalizedPaths = items
             .map((item) => item.path?.trim() ?? "")
             .filter(Boolean);
-        const fallbackName = fallback?.trim() || `Playlist ${playlists.value.length + 1}`;
+        const fallbackName =
+            fallback?.trim() ||
+            `Playlist ${
+                playlists.value.filter((item) => !isFavoritesPlaylist(item.id)).length +
+                1
+            }`;
         return derivePlaylistNameFromPaths(normalizedPaths, fallbackName);
     };
 
@@ -267,13 +368,7 @@ export const usePlaylistState = () => {
 
     const applyPersistedState = (stored: PersistedPlaylistState) => {
         if (stored.playlists) {
-            playlists.value = stored.playlists.map((item, index) => ({
-                id: item.id || createPlaylistId(),
-                name: normalizePlaylistName(item.name, `Playlist ${index + 1}`),
-                entries: normalizePlaylistEntries(item.entries ?? []),
-                createdAt:
-                    typeof item.createdAt === "number" ? item.createdAt : Date.now(),
-            }));
+            playlists.value = normalizePlaylists(stored.playlists);
         }
         if (stored.playlistLoopMode) {
             loopMode.value =
@@ -283,8 +378,9 @@ export const usePlaylistState = () => {
             sortMode.value = stored.playlistSortMode;
         }
 
-        activePlaylistId.value = hasPlaylist(stored.activePlaylistId ?? null)
-            ? stored.activePlaylistId ?? null
+        const storedActivePlaylistId = normalizePlaylistId(stored.activePlaylistId);
+        activePlaylistId.value = hasPlaylist(storedActivePlaylistId)
+            ? storedActivePlaylistId
             : null;
         syncSelectionAfterMutation();
     };
@@ -326,6 +422,7 @@ export const usePlaylistState = () => {
     };
 
     const renamePlaylist = (playlistId: string, name: string) => {
+        if (isFavoritesPlaylist(playlistId)) return;
         const normalizedName = name.trim();
         if (!normalizedName) return;
         playlists.value = playlists.value.map((item) =>
@@ -334,12 +431,16 @@ export const usePlaylistState = () => {
     };
 
     const deletePlaylist = (playlistId: string) => {
+        if (isFavoritesPlaylist(playlistId)) return;
         if (!hasPlaylist(playlistId)) return;
         playlists.value = playlists.value.filter((item) => item.id !== playlistId);
         syncSelectionAfterMutation();
     };
 
     const movePlaylist = (fromPlaylistId: string, toPlaylistId: string) => {
+        if (isFavoritesPlaylist(fromPlaylistId) || isFavoritesPlaylist(toPlaylistId)) {
+            return;
+        }
         if (fromPlaylistId === toPlaylistId) return;
         const fromIndex = playlists.value.findIndex(
             (item) => item.id === fromPlaylistId,
@@ -497,6 +598,7 @@ export const usePlaylistState = () => {
         getDefaultPlaylistNameForPaths,
         getDefaultPlaylistNameForEntries,
         addFromDrawerSelection,
+        addToFavorites,
         clearActivePlaylist,
         removeFromActivePlaylist,
         renamePlaylist,

@@ -12,6 +12,10 @@ export type Playlist = {
     createdAt: number;
 };
 
+export const FAVORITES_PLAYLIST_ID = "favorites";
+export const LEGACY_FAVOURITE_PLAYLIST_ID = "favourite";
+export const FAVORITES_PLAYLIST_NAME = "Favorites";
+
 export type PlaylistLoopMode = "list" | "shuffle";
 
 export type PlaylistSortMode = "name" | "added";
