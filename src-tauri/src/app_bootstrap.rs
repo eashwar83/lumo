@@ -70,6 +70,7 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
 fn build_app_state(mpv_player_handle: MpvHandle) -> AppState {
     AppState {
         mpv_player: Arc::new(Mutex::new(mpv_player_handle)),
+        pending_play_history_entry: Mutex::new(None),
         now_playing: Mutex::new(Default::default()),
     }
 }
@@ -205,6 +206,11 @@ fn install_window_event_handlers(window: tauri::WebviewWindow, initial_scale_fac
                 );
             }
             tauri::WindowEvent::CloseRequested { .. } => {
+                if let Err(error) =
+                    crate::flush_pending_play_history_entry(&window_clone.app_handle())
+                {
+                    warn!("Failed to flush pending play history on window close: {error}");
+                }
                 if let Ok(mpv_guard) = state.mpv_player.lock() {
                     mpv_guard.terminate();
                 }

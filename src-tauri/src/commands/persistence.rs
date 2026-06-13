@@ -43,6 +43,22 @@ pub(crate) fn save_play_history_entry(
 }
 
 #[tauri::command]
+pub(crate) fn stage_play_history_entry(
+    state: tauri::State<'_, AppState>,
+    entry: PlayHistoryEntry,
+) -> Result<(), String> {
+    crate::stage_pending_play_history_entry(&state, entry)
+}
+
+#[tauri::command]
+pub(crate) fn clear_staged_play_history_entry(
+    state: tauri::State<'_, AppState>,
+    path: Option<String>,
+) -> Result<(), String> {
+    crate::clear_pending_play_history_entry(&state, path)
+}
+
+#[tauri::command]
 pub(crate) fn get_installation_state(app: tauri::AppHandle) -> Result<InstallationState, String> {
     crate::store::installation_store::get_installation_state(&app)
 }

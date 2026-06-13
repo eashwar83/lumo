@@ -269,6 +269,9 @@ fn emit_end_file_and_progress(
     last_buffered_pos: &mut f64,
     last_video_bitrate: &mut f64,
 ) {
+    if let Err(error) = crate::flush_pending_play_history_entry(app_handle) {
+        warn!("MPV Event Loop: failed to flush pending play history on end-file: {error}");
+    }
     let reason_label = end_file_reason_label(reason);
     let ended_time_pos = if reason == 0 {
         if last_duration.is_finite() && last_duration > 0.0 {
@@ -677,6 +680,11 @@ pub(super) fn mpv_event_loop(
                     eof_reached.store(false, Ordering::SeqCst);
                 }
                 mpv_event_id::MPV_EVENT_SHUTDOWN => {
+                    if let Err(error) = crate::flush_pending_play_history_entry(&app_handle) {
+                        warn!(
+                            "MPV Event Loop: failed to flush pending play history on shutdown: {error}"
+                        );
+                    }
                     wake_lock_manager.update(false);
                     #[cfg(debug_assertions)]
                     debug!("MPV Event Loop: MPV_EVENT_SHUTDOWN received. Exiting.");
@@ -767,6 +775,7 @@ pub(super) fn mpv_event_loop(
                                     && !value_ptr.is_null()
                                 {
                                     let is_paused_int = *(value_ptr as *mut c_int);
+                                    let was_paused = last_is_paused;
                                     last_is_paused = is_paused_int != 0;
                                     #[cfg(any(target_os = "macos", target_os = "windows"))]
                                     {
@@ -781,6 +790,15 @@ pub(super) fn mpv_event_loop(
                                     if last_is_paused {
                                         is_playing.store(false, Ordering::Relaxed);
                                         wake_lock_manager.update(false);
+                                        if !was_paused {
+                                            if let Err(error) =
+                                                crate::flush_pending_play_history_entry(&app_handle)
+                                            {
+                                                warn!(
+                                                    "MPV Event Loop: failed to flush pending play history on pause: {error}"
+                                                );
+                                            }
+                                        }
                                     } else {
                                         is_playing.store(true, Ordering::Relaxed);
                                         wake_lock_manager.update(true);
@@ -1149,6 +1167,11 @@ pub(super) fn mpv_event_loop(
                     wake_lock_manager.update(false);
                 }
                 mpv_event_id::MPV_EVENT_IDLE => {
+                    if let Err(error) = crate::flush_pending_play_history_entry(&app_handle) {
+                        warn!(
+                            "MPV Event Loop: failed to flush pending play history on idle: {error}"
+                        );
+                    }
                     is_playing.store(false, Ordering::Relaxed);
                     is_rendering.store(false, Ordering::Relaxed);
                     set_render_target_visible(&app_handle, false);

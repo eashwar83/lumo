@@ -23,6 +23,7 @@ const STARTUP_WINDOW_SHOW_FALLBACK_MS: u64 = 3000;
 
 pub struct AppState {
     pub mpv_player: Arc<Mutex<MpvHandle>>,
+    pub pending_play_history_entry: Mutex<Option<store::play_history::PlayHistoryEntry>>,
     now_playing: Mutex<NowPlayingState>,
 }
 
@@ -89,6 +90,55 @@ fn with_mpv<R>(
 ) -> AppResult<R> {
     let mpv_guard = lock_mutex(state.mpv_player.as_ref())?;
     f(&mpv_guard)
+}
+
+pub(crate) fn stage_pending_play_history_entry(
+    state: &tauri::State<'_, AppState>,
+    entry: store::play_history::PlayHistoryEntry,
+) -> AppResult<()> {
+    let mut pending = lock_mutex(&state.pending_play_history_entry)?;
+    *pending = Some(entry);
+    Ok(())
+}
+
+pub(crate) fn clear_pending_play_history_entry(
+    state: &tauri::State<'_, AppState>,
+    path: Option<String>,
+) -> AppResult<()> {
+    let mut pending = lock_mutex(&state.pending_play_history_entry)?;
+    match path {
+        Some(path) if pending.as_ref().is_some_and(|entry| entry.path == path) => {
+            *pending = None;
+        }
+        None => {
+            *pending = None;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+pub(crate) fn flush_pending_play_history_entry(app_handle: &tauri::AppHandle) -> AppResult<()> {
+    let state: tauri::State<'_, AppState> = app_handle.state::<AppState>();
+    let entry = {
+        let mut pending = lock_mutex(&state.pending_play_history_entry)?;
+        pending.take()
+    };
+    let Some(entry) = entry else {
+        return Ok(());
+    };
+
+    if let Err(error) =
+        store::play_history::save_play_history_progress_entry(app_handle, entry.clone())
+    {
+        if let Ok(mut pending) = state.pending_play_history_entry.lock() {
+            if pending.is_none() {
+                *pending = Some(entry);
+            }
+        }
+        return Err(error);
+    }
+    Ok(())
 }
 
 fn with_now_playing_mut<R>(
@@ -361,6 +411,8 @@ pub fn run() {
             commands::persistence::load_play_history,
             commands::persistence::save_play_history,
             commands::persistence::save_play_history_entry,
+            commands::persistence::stage_play_history_entry,
+            commands::persistence::clear_staged_play_history_entry,
             commands::persistence::get_installation_state,
             commands::persistence::update_uuid_update_data,
             commands::persistence::factory_reset,

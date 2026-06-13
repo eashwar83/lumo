@@ -35,6 +35,38 @@ const PLAY_HISTORY_UPSERT_SQL: &str = "INSERT INTO play_history (
          last_modified_by_device_id = excluded.last_modified_by_device_id,
          sync_status = 1";
 
+const PLAY_HISTORY_PROGRESS_UPSERT_SQL: &str = "INSERT INTO play_history (
+         id,
+         path,
+         title,
+         last_position,
+         duration,
+         last_played_at,
+         is_pinned,
+         is_live_playback,
+         external_audio,
+         external_sub,
+         created_at,
+         updated_at,
+         record_version,
+         last_modified_by_device_id,
+         sync_status
+     )
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 1, ?13, 1)
+     ON CONFLICT(path) DO UPDATE SET
+         title = CASE
+             WHEN play_history.title = '' THEN excluded.title
+             ELSE play_history.title
+         END,
+         last_position = excluded.last_position,
+         duration = excluded.duration,
+         last_played_at = excluded.last_played_at,
+         is_live_playback = excluded.is_live_playback,
+         updated_at = excluded.updated_at,
+         record_version = play_history.record_version + 1,
+         last_modified_by_device_id = excluded.last_modified_by_device_id,
+         sync_status = 1";
+
 const PLAYLIST_UPSERT_SQL: &str = "INSERT INTO playlist_entries (
          id,
          playlist_id,
@@ -378,6 +410,34 @@ fn upsert_play_history_entries(
     Ok(())
 }
 
+fn upsert_play_history_progress_entry(
+    tx: &Transaction<'_>,
+    entry: &PlayHistoryEntry,
+    device_id: &str,
+    now: i64,
+) -> Result<(), String> {
+    tx.execute(
+        PLAY_HISTORY_PROGRESS_UPSERT_SQL,
+        params![
+            media_db::normalize_uuid_or_new(&entry.id),
+            entry.path,
+            entry.title,
+            entry.last_position,
+            entry.duration,
+            entry.last_played_at,
+            entry.is_pinned,
+            entry.is_live_playback,
+            serialize_external_tracks(&entry.external_audio_tracks),
+            serialize_external_tracks(&entry.external_sub_tracks),
+            now,
+            now,
+            device_id,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 fn delete_play_history_except(
     tx: &Transaction<'_>,
     entries: &[PlayHistoryEntry],
@@ -545,6 +605,23 @@ pub fn save_play_history_entry(
 
     touch_sync_state(&tx, "play_history", now)?;
     touch_sync_state(&tx, "tombstones", now)?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn save_play_history_progress_entry(
+    app: &tauri::AppHandle,
+    entry: PlayHistoryEntry,
+) -> Result<(), String> {
+    let mut conn = media_db::open_db(app)?;
+    let device_id = media_db::local_device_id(&conn)?;
+    let now = media_db::now_millis();
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    upsert_play_history_progress_entry(&tx, &entry, &device_id, now)?;
+    trim_play_history(&tx, &device_id, now)?;
+
+    touch_sync_state(&tx, "play_history", now)?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }

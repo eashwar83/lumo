@@ -38,7 +38,7 @@ type HistoryApi = {
         duration: number,
         title?: string,
         isLivePlayback?: boolean,
-    ) => void;
+    ) => Promise<void>;
     updateTitle: (path: string, title: string) => void;
 };
 
@@ -910,7 +910,7 @@ export const usePlaybackFlow = ({
         isLoading.value = false;
         loadingUrl.value = "";
         nowPlaying.clearNowPlaying();
-        history.recordStop(
+        await history.recordStop(
             player.state.media.url,
             player.state.playback.currentTime,
             player.state.playback.duration,

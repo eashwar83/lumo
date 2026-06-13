@@ -40,3 +40,10 @@ pub fn save_play_history_entry(
 ) -> Result<(), String> {
     playback_store::save_play_history_entry(app, entry)
 }
+
+pub fn save_play_history_progress_entry(
+    app: &tauri::AppHandle,
+    entry: PlayHistoryEntry,
+) -> Result<(), String> {
+    playback_store::save_play_history_progress_entry(app, entry)
+}

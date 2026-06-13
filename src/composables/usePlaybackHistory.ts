@@ -1,11 +1,10 @@
-import { onMounted, ref } from "vue";
+import { onBeforeUnmount, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { HistoryEntry } from "../types/history";
 import { normalizePlaybackKey } from "../utils/playbackDisplay";
 
 const MAX_HISTORY = 100;
 const SAVE_DEBOUNCE_MS = 800;
-const MIN_PROGRESS_UPDATE_MS = 1000;
 const RESUME_FROM_START_THRESHOLD = 0.99;
 
 const normalizeTrackList = (value: unknown): string[] => {
@@ -65,7 +64,7 @@ export const usePlaybackHistory = () => {
     const history = ref<HistoryEntry[]>([]);
     const isReady = ref(false);
     let saveTimer: number | null = null;
-    let lastProgressSaveAt = 0;
+    let pendingProgressEntry: HistoryEntry | null = null;
 
     const clearSaveTimer = () => {
         if (saveTimer) {
@@ -82,12 +81,38 @@ export const usePlaybackHistory = () => {
         await invoke("save_play_history_entry", { entry });
     };
 
+    const stageHistoryEntry = async (entry: HistoryEntry) => {
+        await invoke("stage_play_history_entry", { entry });
+    };
+
+    const clearStagedHistoryEntry = async (path?: string) => {
+        await invoke("clear_staged_play_history_entry", { path: path ?? null });
+    };
+
     const scheduleSave = () => {
         clearSaveTimer();
         saveTimer = window.setTimeout(() => {
             void saveHistory();
             saveTimer = null;
         }, SAVE_DEBOUNCE_MS);
+    };
+
+    const stagePendingProgress = async () => {
+        const entry = pendingProgressEntry;
+        if (!entry) return;
+        pendingProgressEntry = null;
+        await stageHistoryEntry(entry);
+    };
+
+    const discardPendingProgress = (path?: string) => {
+        if (!pendingProgressEntry) return;
+        if (path && pendingProgressEntry.path !== path) return;
+        pendingProgressEntry = null;
+    };
+
+    const discardStagedProgress = (path?: string) => {
+        discardPendingProgress(path);
+        void clearStagedHistoryEntry(path);
     };
 
     const loadHistory = async () => {
@@ -103,11 +128,17 @@ export const usePlaybackHistory = () => {
 
     const clearHistory = () => {
         history.value = [];
+        discardStagedProgress();
         scheduleSave();
     };
 
     const removeEntry = (path: string) => {
-        history.value = history.value.filter((entry) => entry.path !== path);
+        const normalizedPath = normalizePlaybackKey(path);
+        if (!normalizedPath) return;
+        history.value = history.value.filter(
+            (entry) => entry.path !== normalizedPath,
+        );
+        discardStagedProgress(normalizedPath);
         scheduleSave();
     };
 
@@ -118,6 +149,9 @@ export const usePlaybackHistory = () => {
         ]);
         history.value = next;
     };
+
+    const findEntry = (path: string): HistoryEntry | undefined =>
+        history.value.find((item) => item.path === path);
 
     const createEntry = (
         path: string,
@@ -142,10 +176,25 @@ export const usePlaybackHistory = () => {
         externalSubTracks,
     });
 
-    const upsertAndPersistEntry = async (entry: HistoryEntry) => {
-        upsertEntry(entry);
-        await saveHistoryEntry(entry);
-    };
+    const createPlaybackEntry = (
+        path: string,
+        position: number,
+        duration: number,
+        title: string,
+        isLivePlayback: boolean,
+        existing?: HistoryEntry,
+    ): HistoryEntry =>
+        createEntry(
+            path,
+            position,
+            duration,
+            existing?.isPinned ?? false,
+            resolveIsLivePlayback(existing, isLivePlayback),
+            normalizeTrackList(existing?.externalAudioTracks),
+            normalizeTrackList(existing?.externalSubTracks),
+            title.trim() || existing?.title || "",
+            existing?.id,
+        );
 
     const resolveIsLivePlayback = (
         existing: HistoryEntry | undefined,
@@ -154,7 +203,7 @@ export const usePlaybackHistory = () => {
 
     const getResumePosition = (path: string): number => {
         const normalizedPath = normalizePlaybackKey(path);
-        const entry = history.value.find((item) => item.path === normalizedPath);
+        const entry = findEntry(normalizedPath);
         if (!entry) return 0;
         if (
             entry.duration > 0 &&
@@ -170,7 +219,36 @@ export const usePlaybackHistory = () => {
         return history.value.some((item) => item.path === normalizedPath);
     };
 
-    const markPlayed = (
+    const queueProgressForSave = (entry: HistoryEntry) => {
+        pendingProgressEntry = entry;
+    };
+
+    const updateProgressInMemory = (
+        path: string,
+        position: number,
+        duration: number,
+        title: string,
+        isLivePlayback: boolean,
+    ): HistoryEntry | null => {
+        const existing = findEntry(path);
+        const resolvedPosition =
+            position > 0 ? position : existing?.lastPosition ?? 0;
+        if (resolvedPosition <= 0) return null;
+
+        const entry = createPlaybackEntry(
+            path,
+            resolvedPosition,
+            duration,
+            title,
+            isLivePlayback,
+            existing,
+        );
+        entry.lastPlayedAt = existing?.lastPlayedAt ?? entry.lastPlayedAt;
+        upsertEntry(entry);
+        return entry;
+    };
+
+    const markPlaybackStarted = (
         path: string,
         position: number,
         duration = 0,
@@ -179,24 +257,17 @@ export const usePlaybackHistory = () => {
     ) => {
         if (!path) return;
         const normalizedPath = normalizePlaybackKey(path);
-        const existing = history.value.find(
-            (item) => item.path === normalizedPath,
+        const existing = findEntry(normalizedPath);
+        const entry = createPlaybackEntry(
+            normalizedPath,
+            existing?.lastPosition ?? position,
+            duration,
+            title,
+            isLivePlayback,
+            existing,
         );
-        const isPinned = existing?.isPinned ?? false;
-        const resolvedTitle = title.trim() || existing?.title || "";
-        void upsertAndPersistEntry(
-            createEntry(
-                normalizedPath,
-                position,
-                duration,
-                isPinned,
-                resolveIsLivePlayback(existing, isLivePlayback),
-                normalizeTrackList(existing?.externalAudioTracks),
-                normalizeTrackList(existing?.externalSubTracks),
-                resolvedTitle,
-                existing?.id,
-            ),
-        );
+        entry.lastPlayedAt = Date.now();
+        upsertEntry(entry);
     };
 
     const recordProgress = (
@@ -209,93 +280,83 @@ export const usePlaybackHistory = () => {
     ) => {
         if (!path || !isPlaying) return;
         if (!Number.isFinite(position)) return;
-        const now = Date.now();
-        if (isPlaying && now - lastProgressSaveAt < MIN_PROGRESS_UPDATE_MS) {
-            return;
-        }
-        lastProgressSaveAt = now;
         const normalizedPath = normalizePlaybackKey(path);
-        const existing = history.value.find(
-            (item) => item.path === normalizedPath,
-        );
-        const isPinned = existing?.isPinned ?? false;
-        const resolvedTitle = title.trim() || existing?.title || "";
-        const entry: HistoryEntry = createEntry(
+        if (!normalizedPath) return;
+        const entry = updateProgressInMemory(
             normalizedPath,
             position,
             duration,
-            isPinned,
-            resolveIsLivePlayback(existing, isLivePlayback),
-            normalizeTrackList(existing?.externalAudioTracks),
-            normalizeTrackList(existing?.externalSubTracks),
-            resolvedTitle,
-            existing?.id,
+            title,
+            isLivePlayback,
         );
-        entry.lastPlayedAt = now;
-        upsertEntry(entry);
-        void saveHistoryEntry(entry);
+        if (!entry) return;
+
+        queueProgressForSave(entry);
+        void stageHistoryEntry(entry);
     };
 
-    const recordStop = (
+    const recordStop = async (
         path: string,
         position: number,
         duration = 0,
         title = "",
         isLivePlayback = false,
     ) => {
-        if (!path || position === 0) return;
+        if (!path) return;
         const normalizedPath = normalizePlaybackKey(path);
-        const existing = history.value.find(
-            (item) => item.path === normalizedPath,
+        if (!normalizedPath) return;
+        const pendingEntry =
+            pendingProgressEntry?.path === normalizedPath
+                ? pendingProgressEntry
+                : undefined;
+        const existing = findEntry(normalizedPath);
+        const resolvedPosition =
+            Number.isFinite(position) && position > 0
+                ? position
+                : pendingEntry?.lastPosition ?? existing?.lastPosition ?? 0;
+        const entry = updateProgressInMemory(
+            normalizedPath,
+            resolvedPosition,
+            duration,
+            title,
+            isLivePlayback,
         );
-        const isPinned = existing?.isPinned ?? false;
-        const resolvedTitle = title.trim() || existing?.title || "";
-        void upsertAndPersistEntry(
-            createEntry(
-                normalizedPath,
-                position,
-                duration,
-                isPinned,
-                resolveIsLivePlayback(existing, isLivePlayback),
-                normalizeTrackList(existing?.externalAudioTracks),
-                normalizeTrackList(existing?.externalSubTracks),
-                resolvedTitle,
-                existing?.id,
-            ),
-        );
+        if (!entry) return;
+        discardPendingProgress(normalizedPath);
+        await stageHistoryEntry(entry);
     };
 
     const updateTitle = (path: string, title: string) => {
         const normalizedPath = normalizePlaybackKey(path);
         const normalizedTitle = title.trim();
         if (!normalizedPath || !normalizedTitle) return;
-        const existing = history.value.find(
-            (item) => item.path === normalizedPath,
-        );
+        const existing = findEntry(normalizedPath);
         if (!existing || existing.title === normalizedTitle) return;
         const nextEntry: HistoryEntry = {
             ...existing,
             title: normalizedTitle,
         };
+        discardStagedProgress(normalizedPath);
         upsertEntry(nextEntry);
         void saveHistoryEntry(nextEntry);
     };
 
     const togglePinned = (path: string) => {
         const normalizedPath = normalizePlaybackKey(path);
-        const target = history.value.find((item) => item.path === normalizedPath);
+        const target = findEntry(normalizedPath);
         if (!target) return;
         const nextEntry: HistoryEntry = {
             ...target,
             isPinned: !target.isPinned,
         };
+        discardStagedProgress(normalizedPath);
         upsertEntry(nextEntry);
         void saveHistoryEntry(nextEntry);
     };
 
     const getExternalTracks = (path: string) => {
         const normalizedPath = normalizePlaybackKey(path);
-        const entry = history.value.find((item) => item.path === normalizedPath);
+        const entry = findEntry(normalizedPath);
         return {
             audio: normalizeTrackList(entry?.externalAudioTracks),
             sub: normalizeTrackList(entry?.externalSubTracks),
@@ -310,9 +371,7 @@ export const usePlaybackHistory = () => {
         const normalizedPath = normalizePlaybackKey(path);
         const trimmed = trackPath.trim();
         if (!normalizedPath || !trimmed) return;
-        const existing = history.value.find(
-            (item) => item.path === normalizedPath,
-        );
+        const existing = findEntry(normalizedPath);
         const audio = normalizeTrackList(existing?.externalAudioTracks);
         const sub = normalizeTrackList(existing?.externalSubTracks);
         const list = kind === "audio" ? audio : sub;
@@ -335,6 +394,7 @@ export const usePlaybackHistory = () => {
                   externalAudioTracks: audio,
                   externalSubTracks: sub,
               };
+        discardStagedProgress(normalizedPath);
         upsertEntry(nextEntry);
         await saveHistoryEntry(nextEntry);
     };
@@ -343,13 +403,17 @@ export const usePlaybackHistory = () => {
         void loadHistory();
     });
 
+    onBeforeUnmount(() => {
+        void stagePendingProgress();
+    });
+
     return {
         history,
         isReady,
         loadHistory,
         getResumePosition,
         hasEntry,
-        markPlayed,
+        markPlaybackStarted,
         recordProgress,
         recordStop,
         updateTitle,

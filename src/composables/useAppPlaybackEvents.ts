@@ -31,7 +31,7 @@ type PlayerApi = {
 };
 
 type HistoryApi = {
-    markPlayed: (
+    markPlaybackStarted: (
         path: string,
         position: number,
         duration: number,
@@ -116,7 +116,7 @@ export const useAppPlaybackEvents = ({
             pendingResume.value = null;
         }
 
-        history.markPlayed(
+        history.markPlaybackStarted(
             player.state.media.url,
             resumePosition,
             player.state.playback.duration,
