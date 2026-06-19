@@ -11,13 +11,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 use keepawake::{Builder, KeepAwake};
 
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 pub struct WakeLockManager {
     lock: Option<KeepAwake>,
     is_active: bool,
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 impl WakeLockManager {
     pub fn new() -> Self {
         Self {
@@ -63,10 +66,23 @@ impl WakeLockManager {
     }
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 impl Drop for WakeLockManager {
     fn drop(&mut self) {
         self.disable();
     }
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub struct WakeLockManager;
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+impl WakeLockManager {
+    pub fn new() -> Self {
+        Self
+    }
+
+    pub fn update(&mut self, _should_keep_awake: bool) {}
 }
 
 #[derive(Serialize, Clone)]

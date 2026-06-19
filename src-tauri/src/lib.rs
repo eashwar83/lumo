@@ -329,6 +329,7 @@ fn handle_run_event(app_handle: &tauri::AppHandle, event: tauri::RunEvent) {
     let _ = (app_handle, event);
 }
 
+#[cfg(desktop)]
 fn show_main_window(app_handle: &tauri::AppHandle) {
     let app_handle_for_thread = app_handle.clone();
     let app_handle_for_show = app_handle.clone();
@@ -339,6 +340,7 @@ fn show_main_window(app_handle: &tauri::AppHandle) {
     });
 }
 
+#[cfg(desktop)]
 fn install_frontend_ready_window_show(app: &mut tauri::App) {
     let app_handle = app.handle().clone();
     app.listen(FRONTEND_READY_EVENT, move |_| {
@@ -358,7 +360,7 @@ fn install_frontend_ready_window_show(app: &mut tauri::App) {
 pub fn run() {
     init_logging();
 
-    let app = tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .manage(OpenFileState::default())
         .setup(|app| {
             #[cfg(desktop)]
@@ -368,13 +370,20 @@ pub fn run() {
             let startup_paths = collect_open_media_paths_from_args();
             queue_open_media_paths(&app.handle(), startup_paths, false);
             app_bootstrap::setup(app)?;
+            #[cfg(desktop)]
             install_frontend_ready_window_show(app);
             Ok(())
         })
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_opener::init());
+
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_process::init());
+    }
+
+    let app = builder
         .invoke_handler(tauri::generate_handler![
             commands::playback::mpv_run_command,
             commands::playback::mpv_set_option_string,
