@@ -30,6 +30,9 @@ mod imp {
     use objc2::rc::Retained;
     use objc2::runtime::{AnyClass, AnyObject};
     use objc2_app_kit::NSAutoresizingMaskOptions;
+    use objc2_app_kit::NSAppearance;
+    use objc2_app_kit::NSAppearanceNameAqua;
+    use objc2_app_kit::NSAppearanceNameDarkAqua;
     use objc2_app_kit::NSColor;
     use objc2_app_kit::NSView;
     use objc2_app_kit::NSVisualEffectBlendingMode;
@@ -216,6 +219,20 @@ mod imp {
         );
 
         Ok(())
+    }
+
+    unsafe fn apply_native_window_theme(
+        ns_window: &objc2_app_kit::NSWindow,
+        theme: Option<&str>,
+    ) {
+        let appearance_name = match theme {
+            Some("dark") | Some("graphite") => Some(NSAppearanceNameDarkAqua),
+            Some("light") => Some(NSAppearanceNameAqua),
+            _ => None,
+        };
+        let appearance = appearance_name.and_then(NSAppearance::appearanceNamed);
+        let appearance_ref = appearance.as_deref();
+        let _: () = msg_send![ns_window, setAppearance: appearance_ref];
     }
 
     fn soia_utils_ptr(app_handle: &tauri::AppHandle) -> Option<*mut SoiaUtils> {
@@ -645,6 +662,7 @@ mod imp {
         window: tauri::Window,
         compact_mode: bool,
         corner_radius: Option<f64>,
+        theme: Option<String>,
     ) -> Result<(), String> {
         let app_handle = window.app_handle();
         let window_for_thread = window.clone();
@@ -655,6 +673,8 @@ mod imp {
             let ns_window = (ns_window as *mut objc2_app_kit::NSWindow)
                 .as_ref()
                 .ok_or("Invalid NSWindow pointer")?;
+
+            apply_native_window_theme(ns_window, theme.as_deref());
 
             if compact_mode {
                 ns_window.setTitleVisibility(NSWindowTitleVisibility::Hidden);

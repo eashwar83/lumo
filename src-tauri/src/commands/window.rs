@@ -11,8 +11,9 @@ pub(crate) fn apply_window_appearance(
     window: tauri::Window,
     compact_mode: bool,
     corner_radius: Option<f64>,
+    theme: Option<String>,
 ) -> Result<(), String> {
-    crate::platform::apply_window_appearance(window, compact_mode, corner_radius)
+    crate::platform::apply_window_appearance(window, compact_mode, corner_radius, theme)
 }
 
 #[tauri::command]

@@ -1,6 +1,7 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { ENABLE_COMPACT_MODE_SETTING_LABEL } from "../mock/settings";
+import { extractAppThemeFromSettingGroups } from "./theme";
 
 type StoredSettingItemLike = { label?: string; value?: string };
 type StoredSettingGroupLike = { title?: string; items?: StoredSettingItemLike[] };
@@ -24,6 +25,7 @@ export const applyWindowDecorationsFromSettingGroups = async (
 ) => {
     if (typeof window === "undefined") return;
     const compactModeEnabled = isCompactModeEnabled(groups);
+    const theme = extractAppThemeFromSettingGroups(groups);
     const isMacPlatform =
         typeof navigator !== "undefined" && /mac|darwin/i.test(navigator.userAgent);
     const isLinuxPlatform =
@@ -68,6 +70,7 @@ export const applyWindowDecorationsFromSettingGroups = async (
         await invoke("apply_window_appearance", {
             compactMode: compactModeEnabled,
             cornerRadius: COMPACT_MODE_CORNER_RADIUS,
+            theme,
         });
     } catch (error) {
         console.warn("[windowDecorations] Failed to apply window appearance", {

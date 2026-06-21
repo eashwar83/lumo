@@ -52,6 +52,7 @@ impl PlatformIntegration for DefaultPlatformIntegration {
         _window: tauri::Window,
         _compact_mode: bool,
         _corner_radius: Option<f64>,
+        _theme: Option<String>,
     ) -> Result<(), String> {
         Ok(())
     }

@@ -48,9 +48,11 @@ export const applyAppTheme = (theme: AppTheme) => {
     const root = document.documentElement;
     if (theme === "system") {
         root.removeAttribute("data-theme");
+        root.style.colorScheme = "";
         return;
     }
     root.setAttribute("data-theme", theme);
+    root.style.colorScheme = theme === "light" ? "light" : "dark";
 };
 
 export const applyThemeFromSettingGroups = (

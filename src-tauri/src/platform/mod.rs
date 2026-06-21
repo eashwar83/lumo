@@ -38,6 +38,7 @@ pub(crate) trait PlatformIntegration: Sync {
         window: tauri::Window,
         compact_mode: bool,
         corner_radius: Option<f64>,
+        theme: Option<String>,
     ) -> Result<(), String>;
     fn set_window_vibrancy_visible(
         &self,
@@ -103,8 +104,9 @@ impl PlatformIntegration for MacPlatformIntegration {
         window: tauri::Window,
         compact_mode: bool,
         corner_radius: Option<f64>,
+        theme: Option<String>,
     ) -> Result<(), String> {
-        macos::apply_window_appearance(window, compact_mode, corner_radius)
+        macos::apply_window_appearance(window, compact_mode, corner_radius, theme)
     }
 
     fn set_window_vibrancy_visible(
@@ -178,8 +180,9 @@ pub(crate) fn apply_window_appearance(
     window: tauri::Window,
     compact_mode: bool,
     corner_radius: Option<f64>,
+    theme: Option<String>,
 ) -> Result<(), String> {
-    platform_integration().apply_window_appearance(window, compact_mode, corner_radius)
+    platform_integration().apply_window_appearance(window, compact_mode, corner_radius, theme)
 }
 
 pub(crate) fn set_window_vibrancy_visible(
