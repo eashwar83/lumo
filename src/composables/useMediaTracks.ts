@@ -16,10 +16,12 @@ type HistoryApi = {
 
 type ExternalSubtitleMatch = {
     path: string;
+    name?: string;
 };
 
 type BackgroundSubtitleItem = {
     path: string;
+    title?: string;
     mode: "select" | "auto";
     mediaKey: string;
 };
@@ -87,10 +89,15 @@ export const useMediaTracks = (
         await history.recordExternalTrack(mediaKey, kind, path);
     };
 
-    const getAutoSubtitlePaths = async (
+    const titleFromPath = (path: string): string => {
+        const normalized = path.replace(/\\/g, "/");
+        return normalized.split("/").filter(Boolean).pop() || path;
+    };
+
+    const getAutoSubtitleMatches = async (
         mediaKey: string,
         mediaTitle?: string,
-    ): Promise<string[]> => {
+    ): Promise<ExternalSubtitleMatch[]> => {
         const matches = await invoke<ExternalSubtitleMatch[]>(
             "find_fuzzy_external_subtitle_matches",
             {
@@ -100,18 +107,20 @@ export const useMediaTracks = (
                 },
             },
         ).catch(() => []);
-        return matches.map((match) => match.path).filter(Boolean);
+        return matches.filter((match) => !!match.path);
     };
 
     const addExternalSubPath = async (
         path: string,
         mode: "select" | "auto",
         mediaKey?: string,
+        title?: string,
     ): Promise<boolean> => {
         if (mediaKey && getMediaKey() !== mediaKey) return false;
         try {
+            const displayTitle = title?.trim() || titleFromPath(path);
             await invoke("mpv_run_command", {
-                args: ["sub-add", path, mode],
+                args: ["sub-add", path, mode, displayTitle],
             });
             return true;
         } catch {
@@ -180,7 +189,12 @@ export const useMediaTracks = (
         }
         isAddingBackgroundSubtitle = true;
         const trackUpdateWaiter = waitForNextTracksUpdate();
-        const added = await addExternalSubPath(next.path, next.mode, next.mediaKey);
+        const added = await addExternalSubPath(
+            next.path,
+            next.mode,
+            next.mediaKey,
+            next.title,
+        );
         if (generation !== backgroundSubtitleGeneration) {
             trackUpdateWaiter.cancel();
             isAddingBackgroundSubtitle = false;
@@ -309,7 +323,9 @@ export const useMediaTracks = (
         const [path] = normalizeSelectedPaths(selected);
         if (!path) return;
         await recordExternalTrack("sub", path);
-        await invoke("mpv_run_command", { args: ["sub-add", path, "select"] });
+        await invoke("mpv_run_command", {
+            args: ["sub-add", path, "select", titleFromPath(path)],
+        });
     };
 
     const applyExternalTracksForUrl = async (url: string, mediaTitle?: string) => {
@@ -331,18 +347,20 @@ export const useMediaTracks = (
                 // ignore if file is missing or mpv rejects it
             }
         }
-        const autoSubPaths = (await getAutoSubtitlePaths(mediaKey, mediaTitle)).filter(
-            (path) => !rememberedSubPaths.has(normalizeLocalPathForCompare(path)),
+        const autoSubMatches = (await getAutoSubtitleMatches(mediaKey, mediaTitle)).filter(
+            (match) => !rememberedSubPaths.has(normalizeLocalPathForCompare(match.path)),
         );
         if (getMediaKey() !== mediaKey) return;
         enqueueBackgroundSubtitles([
-            ...autoSubPaths.map((path, index) => ({
-                path,
+            ...autoSubMatches.map((match, index) => ({
+                path: match.path,
+                title: match.name,
                 mode: index === 0 ? "select" as const : "auto" as const,
                 mediaKey,
             })),
             ...subPaths.map((path) => ({
                 path,
+                title: titleFromPath(path),
                 mode: "select" as const,
                 mediaKey,
             })),

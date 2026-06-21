@@ -85,6 +85,28 @@ struct SoiaSmbBrowseResult {
     error: *mut c_char,
 }
 
+#[repr(C)]
+struct SoiaSmbReadResult {
+    data: *mut u8,
+    data_len: usize,
+    file_size: u64,
+    has_file_size: c_int,
+    error: *mut c_char,
+}
+
+#[repr(C)]
+struct SoiaSmbOpenResult {
+    file: *mut SoiaSmbFile,
+    file_size: u64,
+    has_file_size: c_int,
+    error: *mut c_char,
+}
+
+#[repr(C)]
+struct SoiaSmbFile {
+    _private: [u8; 0],
+}
+
 #[link(name = "soia_utils")]
 unsafe extern "C" {
     fn soia_smb_browse_directory(
@@ -97,6 +119,16 @@ unsafe extern "C" {
         result: *mut SoiaSmbBrowseResult,
     ) -> c_int;
     fn soia_smb_browse_result_free(result: *mut SoiaSmbBrowseResult);
+    fn soia_smb_read_result_free(result: *mut SoiaSmbReadResult);
+    fn soia_smb_file_open(uri: *const c_char, result: *mut SoiaSmbOpenResult) -> c_int;
+    fn soia_smb_open_result_free(result: *mut SoiaSmbOpenResult);
+    fn soia_smb_file_read_at(
+        file: *mut SoiaSmbFile,
+        offset: u64,
+        length: usize,
+        result: *mut SoiaSmbReadResult,
+    ) -> c_int;
+    fn soia_smb_file_close(file: *mut SoiaSmbFile);
 }
 
 struct ParsedSmbConnection {
@@ -346,16 +378,149 @@ pub fn build_playback_url(
     }
     let path = encode_smb_path(&target.target_path);
     let share = encode_smb_segment(&target.share);
-    let credentials = format_smb_credentials(&connection);
     let suffix = if path.is_empty() {
         "/".to_string()
     } else {
         format!("/{}", path)
     };
     Ok(format!(
-        "smb://{}{}/{}{}",
-        credentials, connection.server, share, suffix
+        "smb://{}/{}{}",
+        connection.server, share, suffix
     ))
+}
+
+pub(crate) fn playback_url_with_credentials(
+    playback_url: &str,
+    username: &str,
+    password: &str,
+) -> Result<String, String> {
+    let username = username.trim();
+    if username.is_empty() {
+        return Ok(playback_url.to_string());
+    }
+    let rest = playback_url
+        .strip_prefix("smb://")
+        .ok_or_else(|| "SMB playback URL must start with smb://".to_string())?;
+    let (authority, suffix) = rest
+        .split_once('/')
+        .map(|(authority, suffix)| (authority, format!("/{suffix}")))
+        .unwrap_or((rest, "/".to_string()));
+    let authority = authority.rsplit_once('@').map(|(_, value)| value).unwrap_or(authority);
+    let (domain, username) = username
+        .split_once(';')
+        .map(|(domain, user)| (domain.trim(), user.trim()))
+        .unwrap_or(("", username));
+    let domain = if domain.is_empty() {
+        String::new()
+    } else {
+        format!("{};", encode_smb_userinfo(domain))
+    };
+    Ok(format!(
+        "smb://{}{}:{}@{}{}",
+        domain,
+        encode_smb_userinfo(username),
+        encode_smb_userinfo(password),
+        authority,
+        suffix
+    ))
+}
+
+pub struct SmbReadRangeResult {
+    pub data: Vec<u8>,
+}
+
+pub struct SmbPlaybackFile {
+    file: *mut SoiaSmbFile,
+    file_size: Option<u64>,
+}
+
+unsafe impl Send for SmbPlaybackFile {}
+
+impl SmbPlaybackFile {
+    pub fn file_size(&self) -> Option<u64> {
+        self.file_size
+    }
+
+    pub fn read_range(&mut self, offset: u64, length: usize) -> Result<SmbReadRangeResult, String> {
+        if self.file.is_null() {
+            return Err("SMB file is closed".to_string());
+        }
+        let mut result = SoiaSmbReadResult {
+            data: std::ptr::null_mut(),
+            data_len: 0,
+            file_size: 0,
+            has_file_size: 0,
+            error: std::ptr::null_mut(),
+        };
+        let status = unsafe {
+            soia_smb_file_read_at(self.file, offset, length, &mut result)
+        };
+        read_result_from_ffi(status, result)
+    }
+}
+
+impl Drop for SmbPlaybackFile {
+    fn drop(&mut self) {
+        if !self.file.is_null() {
+            unsafe {
+                soia_smb_file_close(self.file);
+            }
+            self.file = std::ptr::null_mut();
+        }
+    }
+}
+
+pub async fn open_playback_url(playback_url: String) -> Result<SmbPlaybackFile, String> {
+    tauri::async_runtime::spawn_blocking(move || open_playback_url_blocking(&playback_url))
+        .await
+        .map_err(|e| format!("SMB open task failed: {}", e))?
+}
+
+fn open_playback_url_blocking(playback_url: &str) -> Result<SmbPlaybackFile, String> {
+    let uri = cstring("SMB URI", playback_url)?;
+    let mut result = SoiaSmbOpenResult {
+        file: std::ptr::null_mut(),
+        file_size: 0,
+        has_file_size: 0,
+        error: std::ptr::null_mut(),
+    };
+    let status = unsafe { soia_smb_file_open(uri.as_ptr(), &mut result) };
+    if status != 0 || result.file.is_null() {
+        let error = c_string_lossy(result.error).unwrap_or_else(|| "SMB open failed".to_string());
+        unsafe {
+            soia_smb_open_result_free(&mut result);
+        }
+        return Err(error);
+    }
+    let file = result.file;
+    let file_size = (result.has_file_size != 0).then_some(result.file_size);
+    unsafe {
+        soia_smb_open_result_free(&mut result);
+    }
+    Ok(SmbPlaybackFile { file, file_size })
+}
+
+fn read_result_from_ffi(
+    status: c_int,
+    mut result: SoiaSmbReadResult,
+) -> Result<SmbReadRangeResult, String> {
+    if status != 0 {
+        let error = c_string_lossy(result.error).unwrap_or_else(|| "SMB read failed".to_string());
+        unsafe {
+            soia_smb_read_result_free(&mut result);
+        }
+        return Err(error);
+    }
+
+    let data = if result.data.is_null() || result.data_len == 0 {
+        Vec::new()
+    } else {
+        unsafe { std::slice::from_raw_parts(result.data, result.data_len).to_vec() }
+    };
+    unsafe {
+        soia_smb_read_result_free(&mut result);
+    }
+    Ok(SmbReadRangeResult { data })
 }
 
 fn browse_directory_blocking(
@@ -600,23 +765,6 @@ fn normalize_path_without_root(root: &str, path: &str) -> String {
     path.strip_prefix(root.trim_end_matches('/'))
         .map(normalize_path)
         .unwrap_or(path)
-}
-
-fn format_smb_credentials(connection: &ParsedSmbConnection) -> String {
-    if connection.username.is_empty() {
-        return String::new();
-    }
-    let domain = if connection.domain.is_empty() {
-        String::new()
-    } else {
-        format!("{};", encode_smb_userinfo(&connection.domain))
-    };
-    format!(
-        "{}{}:{}@",
-        domain,
-        encode_smb_userinfo(&connection.username),
-        encode_smb_userinfo(&connection.password),
-    )
 }
 
 fn encode_smb_segment(value: &str) -> String {

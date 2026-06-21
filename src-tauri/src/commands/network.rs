@@ -4,7 +4,6 @@ use crate::network::types::{
 };
 use crate::store::network_connection_store::NetworkConnectionRecord;
 use crate::{build_load_file_command_args_with_options, mpv_command_checked, with_mpv, AppState};
-use base64::{engine::general_purpose::STANDARD, Engine};
 
 #[tauri::command]
 pub(crate) fn list_network_connections(
@@ -97,13 +96,10 @@ pub(crate) fn load_network_file(
     //     }
     // }
     let username = connection.username.trim();
-    if protocol == "webdav" && !username.is_empty() {
-        let auth_value = STANDARD.encode(format!("{}:{}", username, connection.password));
-        load_options.push(format!(
-            "http-header-fields=Authorization: Basic {}",
-            auth_value
-        ));
-        crate::mpv::register_https_basic_auth(&playback_url, username, &connection.password);
+    // Remote protocol credentials must stay inside stream_proxy backends. mpv should only see
+    // localhost token URLs and non-sensitive playback options.
+    if matches!(protocol.as_str(), "webdav" | "smb" | "samba") && !username.is_empty() {
+        crate::mpv::register_stream_basic_auth(&playback_url, username, &connection.password);
     }
     // Network URLs should not trigger yt-dlp probing on failure.
     load_options.push("ytdl=no".to_string());

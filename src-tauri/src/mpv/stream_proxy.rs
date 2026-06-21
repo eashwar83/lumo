@@ -1,16 +1,17 @@
 use log::{debug, info, warn};
-use percent_encoding::{percent_decode_str, utf8_percent_encode, NON_ALPHANUMERIC};
+use percent_encoding::percent_decode_str;
 use reqwest::header::{
     HeaderName, HeaderValue, ACCEPT_ENCODING, ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE,
     CONTENT_TYPE, RANGE, USER_AGENT,
 };
+use futures_util::future::BoxFuture;
 use futures_util::stream::{FuturesUnordered, StreamExt};
 use reqwest::{Client, RequestBuilder, Response, StatusCode};
 use std::collections::HashMap;
 use std::net::TcpListener as StdTcpListener;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 use tauri::AppHandle;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -22,6 +23,11 @@ const PARALLEL_RANGE_MIN_BYTES: u64 = 16 * 1024 * 1024;
 const PARALLEL_RANGE_CHUNK_BYTES: u64 = 2 * 1024 * 1024;
 const PARALLEL_RANGE_CONNECTIONS: usize = 3;
 const PARALLEL_RANGE_SETTING_LABEL: &str = "NETWORK_PARALLEL_DOWNLOAD";
+const SMB_STREAM_CHUNK_BYTES: u64 = 4 * 1024 * 1024;
+const STREAM_BACKEND_IDLE_TIMEOUT: Duration = Duration::from_secs(2 * 60 * 60);
+const STREAM_BACKEND_CLEANUP_INTERVAL: Duration = Duration::from_secs(60);
+const STREAM_BACKEND_MAX_ENTRIES: usize = 4096;
+const STREAM_BACKEND_TARGET_ENTRIES: usize = 3072;
 
 type BasicAuth = (String, String);
 pub(crate) type ProxyHeaders = Vec<(String, String)>;
@@ -31,6 +37,8 @@ static STREAM_PROXY_BASIC_AUTH: OnceLock<Mutex<HashMap<String, BasicAuth>>> = On
 static STREAM_PROXY_HEADERS: OnceLock<Mutex<HashMap<String, ProxyHeaders>>> = OnceLock::new();
 static STREAM_PROXY_CLIENT: OnceLock<Mutex<Option<CachedClient>>> = OnceLock::new();
 static STREAM_PROXY_PARALLEL_RANGE_ENABLED: AtomicBool = AtomicBool::new(false);
+static STREAM_PROXY_BACKENDS: OnceLock<Mutex<StreamBackendRegistry>> =
+    OnceLock::new();
 
 struct CachedClient {
     proxy_key: Option<String>,
@@ -49,6 +57,244 @@ struct ParallelRangePlan {
     response_end: u64,
     total_size: u64,
     content_length: u64,
+}
+
+struct StreamBackendEntry {
+    backend: Arc<dyn StreamBackend>,
+    last_access: Instant,
+}
+
+struct StreamBackendRegistry {
+    entries: HashMap<String, StreamBackendEntry>,
+    last_cleanup: Instant,
+}
+
+impl StreamBackendRegistry {
+    fn new() -> Self {
+        let now = Instant::now();
+        Self {
+            entries: HashMap::new(),
+            last_cleanup: now,
+        }
+    }
+
+    fn insert(&mut self, token: String, backend: Arc<dyn StreamBackend>) {
+        let now = Instant::now();
+        self.cleanup_if_due(now);
+        self.entries.insert(
+            token,
+            StreamBackendEntry {
+                backend,
+                last_access: now,
+            },
+        );
+        self.enforce_limit(now);
+    }
+
+    fn get(&mut self, token: &str) -> Option<Arc<dyn StreamBackend>> {
+        let now = Instant::now();
+        self.cleanup_if_due(now);
+        let entry = self.entries.get_mut(token)?;
+        entry.last_access = now;
+        Some(entry.backend.clone())
+    }
+
+    fn cleanup_if_due(&mut self, now: Instant) {
+        if now.duration_since(self.last_cleanup) < STREAM_BACKEND_CLEANUP_INTERVAL
+            && self.entries.len() <= STREAM_BACKEND_MAX_ENTRIES
+        {
+            return;
+        }
+        self.cleanup_idle(now);
+    }
+
+    fn cleanup_idle(&mut self, now: Instant) {
+        let before = self.entries.len();
+        self.entries
+            .retain(|_, entry| now.duration_since(entry.last_access) <= STREAM_BACKEND_IDLE_TIMEOUT);
+        self.last_cleanup = now;
+        let removed = before.saturating_sub(self.entries.len());
+        if removed > 0 {
+            debug!("stream proxy: cleaned up {removed} idle backend token(s)");
+        }
+    }
+
+    fn enforce_limit(&mut self, now: Instant) {
+        if self.entries.len() <= STREAM_BACKEND_MAX_ENTRIES {
+            return;
+        }
+        let remove_count = self
+            .entries
+            .len()
+            .saturating_sub(STREAM_BACKEND_TARGET_ENTRIES);
+        let mut oldest = self
+            .entries
+            .iter()
+            .map(|(token, entry)| (token.clone(), entry.last_access))
+            .collect::<Vec<_>>();
+        oldest.sort_by_key(|(_, last_access)| *last_access);
+        for (token, _) in oldest.into_iter().take(remove_count) {
+            self.entries.remove(&token);
+        }
+        self.last_cleanup = now;
+        debug!(
+            "stream proxy: evicted {remove_count} backend token(s) to enforce registry limit"
+        );
+    }
+}
+
+trait StreamBackend: Send + Sync {
+    fn label(&self) -> &'static str;
+
+    fn origin(&self) -> &str;
+
+    fn handle<'a>(
+        &'a self,
+        app_handle: &'a AppHandle,
+        stream: &'a mut TcpStream,
+        method: &'a str,
+        range: Option<&'a str>,
+    ) -> BoxFuture<'a, Result<(), String>>;
+}
+
+struct HttpStreamBackend {
+    url: String,
+}
+
+impl HttpStreamBackend {
+    fn new(url: String) -> Self {
+        Self { url }
+    }
+}
+
+impl StreamBackend for HttpStreamBackend {
+    fn label(&self) -> &'static str {
+        "http"
+    }
+
+    fn origin(&self) -> &str {
+        &self.url
+    }
+
+    fn handle<'a>(
+        &'a self,
+        app_handle: &'a AppHandle,
+        stream: &'a mut TcpStream,
+        method: &'a str,
+        range: Option<&'a str>,
+    ) -> BoxFuture<'a, Result<(), String>> {
+        Box::pin(async move {
+            handle_http_stream_source(app_handle, stream, method, &self.url, range).await
+        })
+    }
+}
+
+struct SmbStreamBackend {
+    url: String,
+    open_url: String,
+    file: Mutex<Option<Arc<Mutex<crate::network::protocols::smb::SmbPlaybackFile>>>>,
+}
+
+impl SmbStreamBackend {
+    fn new(url: String, open_url: String) -> Self {
+        Self {
+            url,
+            open_url,
+            file: Mutex::new(None),
+        }
+    }
+
+    async fn playback_file(
+        &self,
+    ) -> Result<Arc<Mutex<crate::network::protocols::smb::SmbPlaybackFile>>, String> {
+        if let Some(file) = self.file.lock().map_err(|error| error.to_string())?.clone() {
+            return Ok(file);
+        }
+
+        let opened = crate::network::protocols::smb::open_playback_url(self.open_url.clone()).await?;
+        let opened = Arc::new(Mutex::new(opened));
+        let mut slot = self.file.lock().map_err(|error| error.to_string())?;
+        if let Some(file) = slot.as_ref() {
+            return Ok(file.clone());
+        }
+        *slot = Some(opened.clone());
+        Ok(opened)
+    }
+
+    fn clear_playback_file(&self) {
+        if let Ok(mut slot) = self.file.lock() {
+            *slot = None;
+        }
+    }
+
+    async fn file_size(&self) -> Result<Option<u64>, String> {
+        let file = self.playback_file().await?;
+        let guard = file.lock().map_err(|error| error.to_string())?;
+        Ok(guard.file_size())
+    }
+
+    async fn read_range(
+        &self,
+        offset: u64,
+        length: usize,
+    ) -> Result<crate::network::protocols::smb::SmbReadRangeResult, String> {
+        match self.read_range_once(offset, length).await {
+            Ok(result) => Ok(result),
+            Err(first_error) => {
+                warn!(
+                    "stream proxy: SMB persistent read failed, reconnecting url={} offset={} length={} error={first_error}",
+                    redact_url(&self.url),
+                    offset,
+                    length
+                );
+                self.clear_playback_file();
+                self.read_range_once(offset, length).await
+            }
+        }
+    }
+
+    async fn read_range_once(
+        &self,
+        offset: u64,
+        length: usize,
+    ) -> Result<crate::network::protocols::smb::SmbReadRangeResult, String> {
+        let file = self.playback_file().await?;
+        tauri::async_runtime::spawn_blocking(move || {
+            let mut guard = file.lock().map_err(|error| error.to_string())?;
+            guard.read_range(offset, length)
+        })
+        .await
+        .map_err(|error| format!("SMB read task failed: {error}"))?
+    }
+
+    async fn handle_smb_stream_source(
+        &self,
+        stream: &mut TcpStream,
+        method: &str,
+        range: Option<&str>,
+    ) -> Result<(), String> {
+        handle_smb_stream_source(self, stream, method, &self.url, range).await
+    }
+}
+
+impl StreamBackend for SmbStreamBackend {
+    fn label(&self) -> &'static str {
+        "smb"
+    }
+
+    fn origin(&self) -> &str {
+        &self.url
+    }
+
+    fn handle<'a>(
+        &'a self,
+        _app_handle: &'a AppHandle,
+        stream: &'a mut TcpStream,
+        method: &'a str,
+        range: Option<&'a str>,
+    ) -> BoxFuture<'a, Result<(), String>> {
+        Box::pin(async move { self.handle_smb_stream_source(stream, method, range).await })
+    }
 }
 
 enum RequestHeaderRead {
@@ -137,7 +383,7 @@ pub(crate) fn start(app_handle: AppHandle) -> Result<(), String> {
         .set_nonblocking(true)
         .map_err(|error| error.to_string())?;
 
-    let base_url = format!("http://{addr}/stream?url=");
+    let base_url = format!("http://{addr}");
     let _ = STREAM_PROXY_BASE_URL.set(base_url);
 
     std::thread::Builder::new()
@@ -187,6 +433,28 @@ pub(crate) fn rewrite_http_stream_url(url: &str) -> Option<String> {
     Some(proxied)
 }
 
+pub(crate) fn rewrite_smb_stream_url(url: &str) -> Option<String> {
+    if !is_smb_url(url) {
+        return None;
+    }
+    let open_url = lookup_basic_auth(url)
+        .and_then(|(username, password)| {
+            crate::network::protocols::smb::playback_url_with_credentials(
+                url,
+                &username,
+                &password,
+            )
+            .ok()
+        })
+        .unwrap_or_else(|| url.to_string());
+    let proxied = proxy_url_for_backend(Arc::new(SmbStreamBackend::new(
+        url.to_string(),
+        open_url,
+    )))?;
+    info!("stream proxy: rewrote SMB stream url={}", redact_url(url));
+    Some(proxied)
+}
+
 fn is_http_url(raw: &str) -> bool {
     let Ok(url) = Url::parse(raw) else {
         return false;
@@ -201,13 +469,38 @@ fn is_https_url(raw: &str) -> bool {
     url.scheme() == "https"
 }
 
+fn is_smb_url(raw: &str) -> bool {
+    let Ok(url) = Url::parse(raw) else {
+        return false;
+    };
+    url.scheme().eq_ignore_ascii_case("smb")
+}
+
+fn stream_backends() -> &'static Mutex<StreamBackendRegistry> {
+    STREAM_PROXY_BACKENDS.get_or_init(|| Mutex::new(StreamBackendRegistry::new()))
+}
+
 fn proxy_url_for(raw: &str) -> Option<String> {
+    proxy_url_for_backend(Arc::new(HttpStreamBackend::new(raw.to_string())))
+}
+
+fn proxy_url_for_backend(backend: Arc<dyn StreamBackend>) -> Option<String> {
     let base = STREAM_PROXY_BASE_URL.get()?;
-    Some(format!(
-        "{}{}",
-        base,
-        utf8_percent_encode(raw, NON_ALPHANUMERIC)
-    ))
+    let token = uuid::Uuid::now_v7().to_string();
+    stream_backends().lock().ok()?.insert(token.clone(), backend);
+    Some(format!("{base}/stream/{token}"))
+}
+
+fn lookup_stream_backend(target: &str) -> Option<Arc<dyn StreamBackend>> {
+    if let Some(remote_url) = parse_remote_url(target) {
+        return Some(Arc::new(HttpStreamBackend::new(remote_url)));
+    }
+    let path = target.split_once('?').map(|(path, _)| path).unwrap_or(target);
+    let token = path.strip_prefix("/stream/")?.trim();
+    if token.is_empty() {
+        return None;
+    }
+    stream_backends().lock().ok()?.get(token)
 }
 
 fn redact_url(raw: &str) -> String {
@@ -276,20 +569,38 @@ async fn handle_connection(mut stream: TcpStream, app_handle: &AppHandle) -> Res
         return Ok(());
     }
 
-    let Some(remote_url) = parse_remote_url(&target) else {
-        write_status(&mut stream, 400, "Bad Request", b"missing url").await?;
+    let Some(backend) = lookup_stream_backend(&target) else {
+        write_status(&mut stream, 400, "Bad Request", b"missing stream source").await?;
         return Ok(());
     };
-    info!("stream proxy: fetch {}", redact_url(&remote_url));
 
-    let response = match fetch_remote(app_handle, &remote_url, range.as_deref()).await {
+    debug!(
+        "stream proxy: dispatch backend={} origin={}",
+        backend.label(),
+        redact_url(backend.origin())
+    );
+    backend
+        .handle(app_handle, &mut stream, &method, range.as_deref())
+        .await
+}
+
+async fn handle_http_stream_source(
+    app_handle: &AppHandle,
+    stream: &mut TcpStream,
+    method: &str,
+    remote_url: &str,
+    range: Option<&str>,
+) -> Result<(), String> {
+    debug!("stream proxy: fetch {}", redact_url(remote_url));
+
+    let response = match fetch_remote(app_handle, remote_url, range).await {
         Ok(response) => response,
         Err(error) => {
             warn!(
                 "stream proxy: upstream fetch failed url={} error={error}",
-                redact_url(&remote_url)
+                redact_url(remote_url)
             );
-            write_status(&mut stream, 502, "Bad Gateway", error.as_bytes()).await?;
+            write_status(stream, 502, "Bad Gateway", error.as_bytes()).await?;
             return Ok(());
         }
     };
@@ -298,19 +609,19 @@ async fn handle_connection(mut stream: TcpStream, app_handle: &AppHandle) -> Res
         let code = status.as_u16();
         let reason = status.canonical_reason().unwrap_or("Upstream Error").to_string();
         let body = response.bytes().await.map_err(|error| error.to_string())?;
-        write_status(&mut stream, code, &reason, &body).await?;
+        write_status(stream, code, &reason, &body).await?;
         return Ok(());
     }
 
-    if should_rewrite_playlist(&remote_url, &response) {
+    if should_rewrite_playlist(remote_url, &response) {
         let content_type = content_type(&response);
         let reason = status.canonical_reason().unwrap_or("OK").to_string();
         let bytes = response.bytes().await.map_err(|error| error.to_string())?;
         let text = String::from_utf8_lossy(&bytes);
-        let inherited_headers = lookup_headers(&remote_url);
-        let body = rewrite_playlist(&remote_url, &text, inherited_headers.as_deref()).into_bytes();
+        let inherited_headers = lookup_headers(remote_url);
+        let body = rewrite_playlist(remote_url, &text, inherited_headers.as_deref()).into_bytes();
         write_response(
-            &mut stream,
+            stream,
             status.as_u16(),
             &reason,
             &content_type,
@@ -330,13 +641,124 @@ async fn handle_connection(mut stream: TcpStream, app_handle: &AppHandle) -> Res
 
     stream_response(
         app_handle,
-        &mut stream,
-        &method,
-        &remote_url,
-        range.as_deref(),
+        stream,
+        method,
+        remote_url,
+        range,
         response,
     )
     .await
+}
+
+async fn handle_smb_stream_source(
+    backend: &SmbStreamBackend,
+    stream: &mut TcpStream,
+    method: &str,
+    remote_url: &str,
+    range: Option<&str>,
+) -> Result<(), String> {
+    debug!("stream proxy: fetch {}", redact_url(remote_url));
+    let total_size = match backend.file_size().await {
+        Ok(Some(size)) => size,
+        Ok(None) => {
+            write_status(stream, 502, "Bad Gateway", b"SMB file size unavailable").await?;
+            return Ok(());
+        }
+        Err(error) => {
+            warn!(
+                "stream proxy: SMB metadata failed url={} error={error}",
+                redact_url(remote_url)
+            );
+            return Err(error);
+        }
+    };
+
+    let (status, response_start, response_end, content_range) = if let Some(range) = range {
+        let parsed_range = parse_open_ended_range(Some(range))
+            .and_then(|start| {
+                (start < total_size).then(|| {
+                    let end = start
+                        .saturating_add(SMB_STREAM_CHUNK_BYTES - 1)
+                        .min(total_size.saturating_sub(1));
+                    (start, end)
+                })
+            })
+            .or_else(|| parse_single_byte_range(range, total_size));
+        let Some((start, end)) = parsed_range else {
+            write_response(
+                stream,
+                StatusCode::RANGE_NOT_SATISFIABLE.as_u16(),
+                StatusCode::RANGE_NOT_SATISFIABLE
+                    .canonical_reason()
+                    .unwrap_or("Range Not Satisfiable"),
+                "text/plain; charset=utf-8",
+                Some(0),
+                Some(&format!("bytes */{total_size}")),
+                Some("bytes"),
+            )
+            .await?;
+            return Ok(());
+        };
+        (
+            StatusCode::PARTIAL_CONTENT,
+            start,
+            end,
+            Some(format!("bytes {start}-{end}/{total_size}")),
+        )
+    } else {
+        let end = total_size.saturating_sub(1);
+        (StatusCode::OK, 0, end, None)
+    };
+
+    let content_length = if total_size == 0 {
+        0
+    } else {
+        response_end.saturating_sub(response_start).saturating_add(1)
+    };
+    write_response(
+        stream,
+        status.as_u16(),
+        status.canonical_reason().unwrap_or("OK"),
+        "application/octet-stream",
+        Some(content_length),
+        content_range.as_deref(),
+        Some("bytes"),
+    )
+    .await?;
+
+    if method == "HEAD" || content_length == 0 {
+        return Ok(());
+    }
+
+    let mut next = response_start;
+    while next <= response_end {
+        let length = response_end
+            .saturating_sub(next)
+            .saturating_add(1)
+            .min(SMB_STREAM_CHUNK_BYTES) as usize;
+        let chunk = match backend.read_range(next, length).await {
+            Ok(chunk) => chunk,
+            Err(error) => {
+                warn!(
+                    "stream proxy: SMB read failed url={} offset={} length={} error={error}",
+                    redact_url(remote_url),
+                    next,
+                    length
+                );
+                return Err(error);
+            }
+        };
+        if chunk.data.is_empty() {
+            break;
+        }
+        stream
+            .write_all(&chunk.data)
+            .await
+            .map_err(|error| error.to_string())?;
+        next = next.saturating_add(chunk.data.len() as u64);
+    }
+
+    Ok(())
 }
 
 async fn read_request_header(stream: &mut TcpStream) -> Result<RequestHeaderRead, String> {
@@ -601,9 +1023,7 @@ fn rewrite_playlist_url(
         register_headers(resolved.as_str(), headers);
     }
     match resolved.scheme() {
-        "https" => proxy_url_for(resolved.as_str()),
-        "http" if inherited_headers.is_some() => proxy_url_for(resolved.as_str()),
-        "http" => Some(resolved.to_string()),
+        "http" | "https" => proxy_url_for(resolved.as_str()),
         _ => None,
     }
 }
@@ -617,6 +1037,42 @@ fn parse_open_ended_range(value: Option<&str>) -> Option<u64> {
         return None;
     }
     start.trim().parse::<u64>().ok()
+}
+
+fn parse_single_byte_range(value: &str, total_size: u64) -> Option<(u64, u64)> {
+    let range = value.trim();
+    let bytes = range.strip_prefix("bytes=")?;
+    if bytes.contains(',') {
+        return None;
+    }
+    let (start, end) = bytes.split_once('-')?;
+    let start = start.trim();
+    let end = end.trim();
+    if total_size == 0 {
+        return None;
+    }
+    if start.is_empty() {
+        let suffix_len = end.parse::<u64>().ok()?;
+        if suffix_len == 0 {
+            return None;
+        }
+        let range_start = total_size.saturating_sub(suffix_len);
+        return Some((range_start, total_size - 1));
+    }
+
+    let range_start = start.parse::<u64>().ok()?;
+    if range_start >= total_size {
+        return None;
+    }
+    let range_end = if end.is_empty() {
+        total_size - 1
+    } else {
+        end.parse::<u64>().ok()?.min(total_size - 1)
+    };
+    if range_end < range_start {
+        return None;
+    }
+    Some((range_start, range_end))
 }
 
 fn parse_content_range(value: &str) -> Option<(u64, u64, u64)> {

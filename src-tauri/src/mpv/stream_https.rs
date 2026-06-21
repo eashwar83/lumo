@@ -41,6 +41,9 @@ struct HttpsStream {
     canceled: AtomicBool,
 }
 
+// Legacy callback path kept for the old soia-https stream protocol. New remote playback should
+// register credentials with stream_proxy and expose only localhost token URLs to mpv.
+#[allow(dead_code)]
 pub(crate) fn register_basic_auth(playback_url: &str, username: &str, password: &str) {
     let username = username.trim();
     if username.is_empty() {

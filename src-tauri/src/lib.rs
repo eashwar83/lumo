@@ -171,7 +171,12 @@ fn rewrite_mpv_command_urls(args: &[&str]) -> Option<Vec<String>> {
         return None;
     }
 
-    let rewritten_url = crate::mpv::rewrite_https_stream_url(args[1])
+    // Remote protocol credentials, headers, cookies, and connection state belong in stream_proxy
+    // backends. mpv should receive only localhost token URLs so secrets do not leak into mpv
+    // command logs, options, or protocol-specific URL handling.
+    let rewritten_url = crate::mpv::rewrite_http_stream_url(args[1])
+        .or_else(|| crate::mpv::rewrite_https_stream_url(args[1]))
+        .or_else(|| crate::mpv::rewrite_smb_stream_url(args[1]))
         .or_else(|| crate::mpv::rewrite_https_callback_url(args[1]))?;
     let mut rewritten: Vec<String> = args.iter().map(|arg| (*arg).to_string()).collect();
     rewritten[1] = rewritten_url;

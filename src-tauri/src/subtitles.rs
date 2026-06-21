@@ -15,6 +15,7 @@ pub(crate) struct ExternalSubtitleMatchesPayload {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ExternalSubtitleMatch {
     path: String,
+    name: String,
 }
 
 #[derive(Clone)]
@@ -234,17 +235,21 @@ fn matching_subtitle_entries(
     scored.into_iter().map(|(_, _, entry)| entry).collect()
 }
 
-fn resolve_webdav_subtitle_url(
+fn resolve_network_subtitle_url(
     connection: &crate::store::network_connection_store::NetworkConnectionRecord,
+    protocol_hint: &str,
     path: &str,
 ) -> Result<String, String> {
     let playback_url =
-        crate::network::service::resolve_network_playback_url(connection, Some("webdav"), path)?;
+        crate::network::service::resolve_network_playback_url(connection, Some(protocol_hint), path)?;
     let username = connection.username.trim();
     if !username.is_empty() {
-        crate::mpv::register_https_basic_auth(&playback_url, username, &connection.password);
+        crate::mpv::register_stream_basic_auth(&playback_url, username, &connection.password);
     }
-    Ok(crate::mpv::rewrite_http_stream_url(&playback_url).unwrap_or(playback_url))
+    Ok(crate::mpv::rewrite_smb_stream_url(&playback_url)
+        .or_else(|| crate::mpv::rewrite_http_stream_url(&playback_url))
+        .or_else(|| crate::mpv::rewrite_https_stream_url(&playback_url))
+        .unwrap_or(playback_url))
 }
 
 async fn network_subtitle_matches(
@@ -322,19 +327,17 @@ async fn network_subtitle_matches(
         .filter_map(|entry| {
             let path = match protocol {
                 crate::network::service::BrowseProtocol::Webdav => {
-                    resolve_webdav_subtitle_url(&connection, &entry.path).ok()?
+                    resolve_network_subtitle_url(&connection, "webdav", &entry.path).ok()?
                 }
                 crate::network::service::BrowseProtocol::Smb => {
-                    crate::network::service::resolve_network_playback_url(
-                        &connection,
-                        Some("smb"),
-                        &entry.path,
-                    )
-                    .ok()?
+                    resolve_network_subtitle_url(&connection, "smb", &entry.path).ok()?
                 }
                 crate::network::service::BrowseProtocol::Dlna => entry.path,
             };
-            Some(ExternalSubtitleMatch { path })
+            Some(ExternalSubtitleMatch {
+                path,
+                name: entry.name,
+            })
         })
         .collect())
 }
@@ -423,7 +426,10 @@ pub(crate) async fn find_fuzzy_external_subtitle_matches(
             }
             Ok(matching_subtitle_entries(&media_names, &path, entries)
                 .into_iter()
-                .map(|entry| ExternalSubtitleMatch { path: entry.path })
+                .map(|entry| ExternalSubtitleMatch {
+                    path: entry.path,
+                    name: entry.name,
+                })
                 .collect())
         }
         PlaybackSource::Webdav {
