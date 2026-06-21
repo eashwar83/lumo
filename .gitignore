@@ -41,5 +41,6 @@ dist-ssr
 # Generated runtime bundle config
 src-tauri/tauri.runtime.macos.json
 src-tauri/libs/mpv/MoltenVK_icd.json
+src-tauri/libs/mpv/android/**/*.so
 
 src-tauri/gen/android

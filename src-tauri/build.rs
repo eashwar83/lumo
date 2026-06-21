@@ -21,6 +21,20 @@ fn has_linux_soia_utils_runtime(dir: &Path) -> bool {
     directory_contains_file(dir, |name| name.starts_with("libsoia_utils.so"))
 }
 
+fn has_android_soia_utils_runtime(dir: &Path) -> bool {
+    directory_contains_file(dir, |name| name == "libsoia_utils.so")
+}
+
+fn android_abi_for_target(target_triple: &str) -> Option<&'static str> {
+    match target_triple {
+        "aarch64-linux-android" => Some("arm64-v8a"),
+        "armv7-linux-androideabi" => Some("armeabi-v7a"),
+        "i686-linux-android" => Some("x86"),
+        "x86_64-linux-android" => Some("x86_64"),
+        _ => None,
+    }
+}
+
 fn has_windows_soia_utils_runtime(dir: &Path) -> bool {
     directory_contains_file(dir, |name| {
         let lower = name.to_ascii_lowercase();
@@ -75,11 +89,26 @@ fn soia_windows_link_name(dir: &Path) -> Option<String> {
 
 fn main() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
-    let mpv_lib_dir = PathBuf::from(manifest_dir.clone()).join("libs").join("mpv");
-    let config_file = mpv_lib_dir.join("config.data");
-
+    let manifest_path = PathBuf::from(manifest_dir.clone());
+    let desktop_mpv_lib_dir = manifest_path.join("libs").join("mpv");
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let target_triple = env::var("TARGET").unwrap_or_default();
+    let mpv_lib_dir = if target_os == "android" {
+        let abi = android_abi_for_target(&target_triple).unwrap_or_else(|| {
+            panic!(
+                "\n[!] Unsupported Android target '{}'. Expected one of: aarch64-linux-android, armv7-linux-androideabi, i686-linux-android, x86_64-linux-android\n",
+                target_triple
+            );
+        });
+        manifest_path
+            .join("libs")
+            .join("mpv")
+            .join("android")
+            .join(abi)
+    } else {
+        desktop_mpv_lib_dir
+    };
+    let config_file = mpv_lib_dir.join("config.data");
 
     let windows_link_name = if mpv_lib_dir.join("mpv.lib").exists() {
         Some("mpv")
@@ -109,6 +138,7 @@ fn main() {
                 || mpv_lib_dir.join("libmpv.so.2").exists()
                 || mpv_lib_dir.join("libmpv.so.1").exists()
         }
+        "android" => mpv_lib_dir.join("libmpv.so").exists(),
         _ => mpv_lib_dir.join("libmpv.dylib").exists(),
     };
 
@@ -167,6 +197,17 @@ fn main() {
             if !has_linux_soia_utils_runtime(&mpv_lib_dir) {
                 panic!(
                     "\n[!] Cannot find libsoia_utils.so* for target '{}'.\n    Expected under libs/mpv: {}\n    Please run: pnpm setup:libs\n",
+                    target_triple,
+                    mpv_lib_dir.display()
+                );
+            }
+            println!("cargo:rustc-link-search=native={}", mpv_lib_dir.display());
+            println!("cargo:rustc-link-lib=dylib=soia_utils");
+        }
+        "android" => {
+            if !has_android_soia_utils_runtime(&mpv_lib_dir) {
+                panic!(
+                    "\n[!] Cannot find libsoia_utils.so for target '{}'.\n    Expected under libs/mpv/android: {}\n",
                     target_triple,
                     mpv_lib_dir.display()
                 );

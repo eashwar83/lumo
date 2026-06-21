@@ -10,6 +10,7 @@ const projectRoot = dirname(scriptDir);
 const shellScript = resolve(scriptDir, "setup_runtime_libs_macos.sh");
 const linuxShellScript = resolve(scriptDir, "setup_runtime_libs_linux.sh");
 const windowsScript = resolve(scriptDir, "setup_runtime_libs_windows.mjs");
+const androidScript = resolve(scriptDir, "setup_runtime_libs_android.mjs");
 const rawArgs = process.argv.slice(2);
 const passthroughArgs = [];
 
@@ -48,7 +49,6 @@ function normalizePlatform(input) {
 }
 
 const platform = normalizePlatform(requestedPlatform);
-const isExplicitPlatformRequest = typeof requestedPlatform === "string" && requestedPlatform.length > 0;
 
 if (!["darwin", "linux", "win32", "android"].includes(platform)) {
   console.error(`[ERROR] Unsupported platform: ${platform}`);
@@ -116,10 +116,15 @@ if (platform === "win32") {
   process.exit(result.status ?? 1);
 }
 
-if (!isExplicitPlatformRequest) {
-  console.log("[INFO] setup:libs skipped on android (not implemented yet).");
-  process.exit(0);
+if (!existsSync(androidScript)) {
+  console.error(`[ERROR] Missing script: ${androidScript}`);
+  process.exit(1);
 }
 
-console.error("[ERROR] TODO: add scripts/setup_runtime_libs_android.mjs and dispatch here.");
-process.exit(1);
+const result = spawnSync(process.execPath, [androidScript, ...passthroughArgs], {
+  cwd: projectRoot,
+  stdio: "inherit",
+  env: process.env,
+});
+
+process.exit(result.status ?? 1);
