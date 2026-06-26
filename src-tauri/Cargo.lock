@@ -4342,6 +4342,7 @@ dependencies = [
  "cfg-if",
  "chrono",
  "env_logger",
+ "flate2",
  "futures-util",
  "keepawake",
  "libc",

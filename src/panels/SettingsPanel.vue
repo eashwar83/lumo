@@ -4,6 +4,7 @@ import { useSettingsPanel } from "../composables/useSettingsPanel";
 import { getPathDisplayName } from "../utils/getPathDisplayName";
 import {
     ENABLE_COMPACT_MODE_SETTING_LABEL,
+    ONLINE_SUBTITLES_SETTING_GROUP_TITLE,
     WALLPAPER_MODE_SETTING_LABEL,
     type SettingItem,
     type SettingGroup,
@@ -33,6 +34,9 @@ const {
     resetAllSettings,
     factoryReset,
     isFactoryResetInProgress,
+    clearDownloadedSubtitles,
+    isClearingOnlineSubtitleCache,
+    onlineSubtitleCacheStatus,
     browseForPath,
     browseForCustomShaders,
     selectedShaderFiles,
@@ -664,6 +668,38 @@ onBeforeUnmount(() => {
                                     </Teleport>
                                 </div>
                             </template>
+                        </div>
+                    </div>
+                    <div
+                        v-if="group.title === ONLINE_SUBTITLES_SETTING_GROUP_TITLE"
+                        class="panel__row panel__row--card"
+                    >
+                        <div class="panel__card-text">
+                            <div class="panel__card-title">Downloaded Subtitles</div>
+                            <div class="panel__card-subtitle">
+                                Cache is kept under 64 MB.
+                            </div>
+                        </div>
+                        <div class="panel__control panel__control--card panel__control--stack">
+                            <button
+                                class="panel__action panel__action--ghost panel__action--compact"
+                                type="button"
+                                :disabled="isClearingOnlineSubtitleCache"
+                                @click="clearDownloadedSubtitles"
+                            >
+                                {{
+                                    isClearingOnlineSubtitleCache
+                                        ? "Clearing..."
+                                        : "Clear Downloaded Subtitles"
+                                }}
+                            </button>
+                            <div
+                                v-if="onlineSubtitleCacheStatus"
+                                class="panel__cache-status"
+                                role="status"
+                            >
+                                {{ onlineSubtitleCacheStatus }}
+                            </div>
                         </div>
                     </div>
                 </div>

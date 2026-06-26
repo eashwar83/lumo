@@ -905,6 +905,14 @@
     color: rgba(0, 0, 0, 0.66);
 }
 
+.panel__cache-status {
+    max-width: 260px;
+    color: rgba(0, 0, 0, 0.58);
+    font-size: 12px;
+    line-height: 1.35;
+    text-align: right;
+}
+
 .panel__subtitle--large {
     font-size: 14px;
     color: rgba(0, 0, 0, 0.68);
@@ -1993,6 +2001,10 @@
 
 :root:is([data-theme="dark"], [data-theme="graphite"]) .panel__card-subtitle {
     color: rgba(255, 255, 255, 0.55);
+}
+
+:root:is([data-theme="dark"], [data-theme="graphite"]) .panel__cache-status {
+    color: rgba(255, 255, 255, 0.58);
 }
 
 :root:is([data-theme="dark"], [data-theme="graphite"]) .panel__subtitle--large {

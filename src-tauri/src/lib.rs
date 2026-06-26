@@ -9,6 +9,7 @@ mod commands;
 mod media_extensions;
 mod mpv;
 mod network;
+mod online_subtitles;
 mod platform;
 mod playback_source;
 mod remote_control;
@@ -450,6 +451,9 @@ pub fn run() {
             playback_source::resolve::resolve_playback_source,
             playback_source::adjacency::resolve_adjacent_playback_source,
             subtitles::find_fuzzy_external_subtitle_matches,
+            online_subtitles::search_online_subtitles,
+            online_subtitles::download_online_subtitle,
+            online_subtitles::clear_online_subtitle_cache,
             commands::playback::parse_playlist_file,
             commands::playback::parse_playlist_source,
             commands::network::list_network_connections,

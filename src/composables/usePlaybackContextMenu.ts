@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 type ContextMenuItem = {
     id: string;
     label: string;
-    icon?: "heart" | "settings";
+    icon?: "heart" | "settings" | "subtitle";
     disabled?: boolean;
 };
 
@@ -12,11 +12,13 @@ type UsePlaybackContextMenuOptions = {
     getCurrentPath: () => string;
     getCurrentTitle: () => string;
     addToFavorites: (item: { path: string; title?: string }) => void;
+    searchOnlineSubtitles: (path: string, title?: string) => void | Promise<void>;
     openSettings: () => void | Promise<void>;
     hideAllMenus: () => void;
 };
 
 const ADD_TO_FAVORITES_ID = "add-to-favorites";
+const FIND_ONLINE_SUBTITLE_ID = "find-online-subtitle";
 const OPEN_SETTINGS_ID = "open-settings";
 
 const isInteractiveContextTarget = (target: HTMLElement | null) =>
@@ -43,6 +45,7 @@ export const usePlaybackContextMenu = ({
     getCurrentPath,
     getCurrentTitle,
     addToFavorites,
+    searchOnlineSubtitles,
     openSettings,
     hideAllMenus,
 }: UsePlaybackContextMenuOptions) => {
@@ -54,6 +57,12 @@ export const usePlaybackContextMenu = ({
             id: ADD_TO_FAVORITES_ID,
             label: "Add to Favorites",
             icon: "heart",
+            disabled: !getCurrentPath().trim(),
+        },
+        {
+            id: FIND_ONLINE_SUBTITLE_ID,
+            label: "Find Online Subtitle",
+            icon: "subtitle",
             disabled: !getCurrentPath().trim(),
         },
         {
@@ -93,6 +102,12 @@ export const usePlaybackContextMenu = ({
                     path,
                     title: getCurrentTitle().trim() || undefined,
                 });
+            }
+        }
+        if (id === FIND_ONLINE_SUBTITLE_ID) {
+            const path = getCurrentPath().trim();
+            if (path) {
+                void searchOnlineSubtitles(path, getCurrentTitle().trim() || undefined);
             }
         }
         close();

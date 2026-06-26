@@ -10,6 +10,7 @@ import PlaylistDrawer from "./components/PlaylistDrawer.vue";
 import PlaylistCreationDialog from "./components/PlaylistCreationDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import ContextMenu from "./components/ContextMenu.vue";
+import OnlineSubtitleDialog from "./components/OnlineSubtitleDialog.vue";
 import WindowResizeRegions from "./components/WindowResizeRegions.vue";
 import { usePlaybackShortcuts } from "./composables/usePlaybackShortcuts";
 import { usePlaybackFlow } from "./composables/usePlaybackFlow";
@@ -316,6 +317,7 @@ const playbackContextMenu = usePlaybackContextMenu({
     getCurrentPath: () => player.state.media.url,
     getCurrentTitle: () => player.state.media.title,
     addToFavorites: playlistState.addToFavorites,
+    searchOnlineSubtitles: tracks.searchOnlineSubtitleTracks,
     openSettings: openSettingsFromPlaybackContextMenu,
     hideAllMenus,
 });
@@ -534,6 +536,16 @@ useAppStartupBindings({
             :items="playbackContextMenu.items.value"
             @select="playbackContextMenu.onSelect"
             @close="playbackContextMenu.close"
+        />
+
+        <OnlineSubtitleDialog
+            :open="tracks.isOnlineSubtitleDialogOpen.value"
+            :results="tracks.onlineSubtitleResults.value"
+            :loading="tracks.isSearchingOnlineSubtitles.value"
+            :applying="tracks.isLoadingOnlineSubtitle.value"
+            :error-message="tracks.onlineSubtitleErrorMessage.value"
+            @close="tracks.closeOnlineSubtitleDialog"
+            @select="tracks.addSelectedOnlineSubtitleTrack"
         />
 
         <PlayerControls

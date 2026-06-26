@@ -8,7 +8,7 @@ const props = defineProps<{
     items: {
         id: string;
         label: string;
-        icon?: "heart" | "settings";
+        icon?: "heart" | "settings" | "subtitle";
         disabled?: boolean;
     }[];
 }>();
@@ -124,6 +124,22 @@ onUnmounted(() => {
                         <path
                             d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78Z"
                         />
+                    </svg>
+                    <svg
+                        v-else-if="item.icon === 'subtitle'"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <path d="M4 5h16" />
+                        <path d="M4 19h16" />
+                        <path d="M7 9h4" />
+                        <path d="M13 9h4" />
+                        <path d="M7 15h2" />
+                        <path d="M11 15h6" />
                     </svg>
                     <svg
                         v-else-if="item.icon === 'settings'"

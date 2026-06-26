@@ -20,6 +20,10 @@ type RenderingSettingsState = {
     selectedShaderFiles: string[];
     activeShaderFiles: string[];
 };
+type OnlineSubtitleCacheClearResult = {
+    removedFiles: number;
+    removedBytes: number;
+};
 
 let cachedUiState: UiStateObject | null = null;
 let hasCachedUiState = false;
@@ -154,6 +158,13 @@ export const applyRenderingSettings = async (
         return null;
     }
 };
+
+export const clearOnlineSubtitleCache =
+    async (): Promise<OnlineSubtitleCacheClearResult> => {
+        return await invoke<OnlineSubtitleCacheClearResult>(
+            "clear_online_subtitle_cache",
+        );
+    };
 
 export const resolveShaderCandidates = async (
     paths: string[],

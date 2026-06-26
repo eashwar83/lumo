@@ -19,6 +19,22 @@ type ExternalSubtitleMatch = {
     name?: string;
 };
 
+type OnlineSubtitleDownload = {
+    path: string;
+    title: string;
+};
+
+export type OnlineSubtitleSearchResult = {
+    id: string;
+    providerId: string;
+    downloadId: string;
+    fileId?: number;
+    title: string;
+    fileName: string;
+    language: string;
+    downloads?: number | null;
+};
+
 type BackgroundSubtitleItem = {
     path: string;
     title?: string;
@@ -57,6 +73,11 @@ export const useMediaTracks = (
     const videoTracks = ref<MediaTrack[]>([]);
     const audioTracks = ref<MediaTrack[]>([]);
     const subTracks = ref<MediaTrack[]>([]);
+    const onlineSubtitleResults = ref<OnlineSubtitleSearchResult[]>([]);
+    const onlineSubtitleErrorMessage = ref("");
+    const isOnlineSubtitleDialogOpen = ref(false);
+    const isSearchingOnlineSubtitles = ref(false);
+    const isLoadingOnlineSubtitle = ref(false);
 
     const showAudioMenu = ref(false);
     const showSubMenu = ref(false);
@@ -65,6 +86,8 @@ export const useMediaTracks = (
     let tracksUpdateFrame: number | null = null;
     let backgroundSubtitleQueue: BackgroundSubtitleItem[] = [];
     let isAddingBackgroundSubtitle = false;
+    let onlineSubtitleMediaKey = "";
+    let onlineSubtitleMediaTitle: string | undefined;
     let backgroundSubtitleGeneration = 0;
     let trackUpdateWaiters: TrackUpdateWaiter[] = [];
 
@@ -328,6 +351,89 @@ export const useMediaTracks = (
         });
     };
 
+    const searchOnlineSubtitleTracks = async (
+        playbackKey: string,
+        mediaTitle?: string,
+    ): Promise<void> => {
+        const mediaKey = getMediaKey(playbackKey);
+        if (!mediaKey) return;
+        onlineSubtitleMediaKey = mediaKey;
+        onlineSubtitleMediaTitle = mediaTitle;
+        onlineSubtitleResults.value = [];
+        onlineSubtitleErrorMessage.value = "";
+        isOnlineSubtitleDialogOpen.value = true;
+        isSearchingOnlineSubtitles.value = true;
+        try {
+            const results = await invoke<OnlineSubtitleSearchResult[]>(
+                "search_online_subtitles",
+                {
+                    payload: {
+                        playbackKey: mediaKey,
+                        mediaTitle,
+                    },
+                },
+            );
+            if (getMediaKey() !== mediaKey) return;
+            onlineSubtitleResults.value = results;
+            if (!results.length) {
+                onlineSubtitleErrorMessage.value = "No OpenSubtitles results found.";
+            }
+        } catch (error) {
+            if (getMediaKey() !== mediaKey) return;
+            onlineSubtitleErrorMessage.value = String(error);
+        } finally {
+            if (getMediaKey() === mediaKey) {
+                isSearchingOnlineSubtitles.value = false;
+            }
+        }
+    };
+
+    const closeOnlineSubtitleDialog = () => {
+        if (isLoadingOnlineSubtitle.value) return;
+        isOnlineSubtitleDialogOpen.value = false;
+        onlineSubtitleErrorMessage.value = "";
+    };
+
+    const addSelectedOnlineSubtitleTrack = async (
+        result: OnlineSubtitleSearchResult,
+    ): Promise<boolean> => {
+        const mediaKey = onlineSubtitleMediaKey;
+        if (!mediaKey || getMediaKey() !== mediaKey) return false;
+        isLoadingOnlineSubtitle.value = true;
+        onlineSubtitleErrorMessage.value = "";
+        try {
+            const subtitle = await invoke<OnlineSubtitleDownload>(
+                "download_online_subtitle",
+                {
+                    payload: {
+                        providerId: result.providerId,
+                        downloadId: result.downloadId,
+                        fileId: result.fileId,
+                        fileName: result.fileName,
+                        title: result.title || onlineSubtitleMediaTitle || result.fileName,
+                    },
+                },
+            );
+            if (getMediaKey() !== mediaKey) return false;
+            const added = await addExternalSubPath(
+                subtitle.path,
+                "select",
+                mediaKey,
+                subtitle.title,
+            );
+            if (added) {
+                await recordExternalTrack("sub", subtitle.path);
+                isOnlineSubtitleDialogOpen.value = false;
+            }
+            return added;
+        } catch (error) {
+            onlineSubtitleErrorMessage.value = String(error);
+            return false;
+        } finally {
+            isLoadingOnlineSubtitle.value = false;
+        }
+    };
+
     const applyExternalTracksForUrl = async (url: string, mediaTitle?: string) => {
         const mediaKey = getMediaKey(url);
         if (!mediaKey) return;
@@ -379,6 +485,13 @@ export const useMediaTracks = (
         subTracks.value = [];
         showAudioMenu.value = false;
         showSubMenu.value = false;
+        onlineSubtitleResults.value = [];
+        onlineSubtitleErrorMessage.value = "";
+        isOnlineSubtitleDialogOpen.value = false;
+        isSearchingOnlineSubtitles.value = false;
+        isLoadingOnlineSubtitle.value = false;
+        onlineSubtitleMediaKey = "";
+        onlineSubtitleMediaTitle = undefined;
         subtitleState.resetSubtitleState();
     };
 
@@ -397,6 +510,11 @@ export const useMediaTracks = (
         videoTracks,
         audioTracks,
         subTracks,
+        onlineSubtitleResults,
+        onlineSubtitleErrorMessage,
+        isOnlineSubtitleDialogOpen,
+        isSearchingOnlineSubtitles,
+        isLoadingOnlineSubtitle,
         handleTracksUpdate,
         showAudioMenu,
         showSubMenu,
@@ -409,6 +527,9 @@ export const useMediaTracks = (
         setActiveSubTarget: subtitleState.setActiveSubTarget,
         addExternalAudioTrack,
         addExternalSubtitleTrack,
+        searchOnlineSubtitleTracks,
+        addSelectedOnlineSubtitleTrack,
+        closeOnlineSubtitleDialog,
         applyExternalTracksForUrl,
         setSubtitlesDisabled,
         resetTracks,

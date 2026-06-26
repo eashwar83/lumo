@@ -4,6 +4,7 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { SETTINGS_UPDATED_EVENT } from "../mock/settings";
 import {
     createDebouncedUiStateSaver,
+    clearOnlineSubtitleCache,
     factoryReset as invokeFactoryReset,
     loadUiState,
 } from "./useUiStateStore";
@@ -25,6 +26,8 @@ export const useSettingsPanel = () => {
 
     const isLoading = ref(true);
     const isFactoryResetInProgress = ref(false);
+    const isClearingOnlineSubtitleCache = ref(false);
+    const onlineSubtitleCacheStatus = ref("");
     const uiStateSaver = createDebouncedUiStateSaver(300);
 
     const general = useGeneralSettingsSection(isWindowsPlatform);
@@ -100,6 +103,31 @@ export const useSettingsPanel = () => {
         }
     };
 
+    const formatBytes = (bytes: number): string => {
+        if (bytes < 1024) return `${bytes} B`;
+        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    };
+
+    const clearDownloadedSubtitles = async () => {
+        if (isClearingOnlineSubtitleCache.value) return;
+        isClearingOnlineSubtitleCache.value = true;
+        onlineSubtitleCacheStatus.value = "";
+        try {
+            const result = await clearOnlineSubtitleCache();
+            onlineSubtitleCacheStatus.value =
+                result.removedFiles === 0
+                    ? "No downloaded subtitles to clear."
+                    : `Cleared ${result.removedFiles} file${
+                          result.removedFiles === 1 ? "" : "s"
+                      } (${formatBytes(result.removedBytes)}).`;
+        } catch (error) {
+            onlineSubtitleCacheStatus.value = String(error);
+        } finally {
+            isClearingOnlineSubtitleCache.value = false;
+        }
+    };
+
     onMounted(() => {
         void loadState();
         void about.loadRuntimeVersions();
@@ -172,6 +200,9 @@ export const useSettingsPanel = () => {
         resetAllSettings,
         factoryReset,
         isFactoryResetInProgress,
+        clearDownloadedSubtitles,
+        isClearingOnlineSubtitleCache,
+        onlineSubtitleCacheStatus,
         browseForPath: general.browseForPath,
         browseForCustomShaders: rendering.browseForCustomShaders,
         selectedShaderFiles: rendering.selectedShaderFiles,

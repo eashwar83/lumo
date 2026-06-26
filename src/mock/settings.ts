@@ -77,9 +77,13 @@ export const ALLOW_URL_INPUT_DURING_PLAYBACK_SETTING_LABEL =
 export const DEFAULT_SPEED_SETTING_LABEL = "Default Speed";
 export const IMAGE_DISPLAY_DURATION_SETTING_LABEL = "IMAGE_DISPLAY_DURATION";
 export const DISABLE_SUBTITLES_SETTING_LABEL = "DISABLE_SUBTITLES";
+export const OPENSUBTITLES_ENABLED_SETTING_LABEL = "OPENSUBTITLES_ENABLED";
+export const OPENSUBTITLES_API_KEY_SETTING_LABEL = "OPENSUBTITLES_API_KEY";
+export const OPENSUBTITLES_LANGUAGES_SETTING_LABEL = "OPENSUBTITLES_LANGUAGES";
 export const NETWORK_START_AT_ROOT_SETTING_LABEL = "NETWORK_START_AT_ROOT";
 export const NETWORK_PARALLEL_DOWNLOAD_SETTING_LABEL =
     "NETWORK_PARALLEL_DOWNLOAD";
+export const ONLINE_SUBTITLES_SETTING_GROUP_TITLE = "Online Subtitles";
 export const SETTINGS_UPDATED_EVENT = "soia:settings-updated";
 
 export type PlaybackTitleMode = "Show" | "Editable" | "Hidden";
@@ -199,6 +203,33 @@ export const defaultSettingGroups: SettingGroup[] = [
                 type: "toggle",
                 onValue: "On",
                 offValue: "Off",
+            },
+        ],
+    },
+    {
+        title: ONLINE_SUBTITLES_SETTING_GROUP_TITLE,
+        items: [
+            {
+                label: OPENSUBTITLES_ENABLED_SETTING_LABEL,
+                displayLabel: "OpenSubtitles",
+                value: "Off",
+                type: "toggle",
+                onValue: "On",
+                offValue: "Off",
+            },
+            {
+                label: OPENSUBTITLES_API_KEY_SETTING_LABEL,
+                displayLabel: "OpenSubtitles API Key (Optional)",
+                value: "",
+                type: "text",
+                placeholder: "Leave empty to use Soia's shared API key",
+            },
+            {
+                label: OPENSUBTITLES_LANGUAGES_SETTING_LABEL,
+                displayLabel: "Subtitle Languages",
+                value: "en",
+                type: "text",
+                placeholder: "en,zh",
             },
         ],
     },
