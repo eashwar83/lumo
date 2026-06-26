@@ -242,13 +242,13 @@ fn resolve_network_subtitle_url(
 ) -> Result<String, String> {
     let playback_url =
         crate::network::service::resolve_network_playback_url(connection, Some(protocol_hint), path)?;
-    let username = connection.username.trim();
-    if !username.is_empty() {
-        crate::mpv::register_stream_basic_auth(&playback_url, username, &connection.password);
-    }
-    Ok(crate::mpv::rewrite_smb_stream_url(&playback_url)
-        .or_else(|| crate::mpv::rewrite_http_stream_url(&playback_url))
-        .or_else(|| crate::mpv::rewrite_https_stream_url(&playback_url))
+    let playback_url = crate::mpv::prepare_network_stream_url(
+        protocol_hint,
+        &playback_url,
+        &connection.username,
+        &connection.password,
+    )?;
+    Ok(crate::mpv::rewrite_network_stream_url(protocol_hint, &playback_url)
         .unwrap_or(playback_url))
 }
 

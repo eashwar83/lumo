@@ -434,6 +434,9 @@ pub(crate) fn rewrite_http_stream_url(url: &str) -> Option<String> {
 }
 
 pub(crate) fn rewrite_smb_stream_url(url: &str) -> Option<String> {
+    if !super::USE_SMB_STREAM_PROXY {
+        return None;
+    }
     if !is_smb_url(url) {
         return None;
     }

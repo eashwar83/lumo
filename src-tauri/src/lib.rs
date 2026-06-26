@@ -159,11 +159,51 @@ fn mpv_command_checked(mpv: &MpvHandle, args: &[&str]) -> AppResult<()> {
     if result_code == 0 {
         Ok(())
     } else {
+        let log_args = redact_mpv_command_args(&command_args);
         Err(format!(
             "MPV command {:?} failed with error code: {}",
-            command_args, result_code
+            log_args, result_code
         ))
     }
+}
+
+fn mpv_command_direct_checked(mpv: &MpvHandle, args: &[&str]) -> AppResult<()> {
+    let result_code = mpv.command(args);
+    if result_code == 0 {
+        Ok(())
+    } else {
+        let log_args = redact_mpv_command_args(args);
+        Err(format!(
+            "MPV command {:?} failed with error code: {}",
+            log_args, result_code
+        ))
+    }
+}
+
+fn redact_mpv_command_args(args: &[&str]) -> Vec<String> {
+    args.iter()
+        .enumerate()
+        .map(|(index, arg)| {
+            if index == 1 && args.first().copied() == Some("loadfile") {
+                redact_url(arg)
+            } else {
+                (*arg).to_string()
+            }
+        })
+        .collect()
+}
+
+fn redact_url(raw: &str) -> String {
+    let Ok(mut url) = url::Url::parse(raw) else {
+        return raw.to_string();
+    };
+    if !url.username().is_empty() {
+        let _ = url.set_username("<user>");
+        let _ = url.set_password(Some("<redacted>"));
+    }
+    url.set_query(None);
+    url.set_fragment(None);
+    url.to_string()
 }
 
 fn rewrite_mpv_command_urls(args: &[&str]) -> Option<Vec<String>> {

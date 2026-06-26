@@ -3,7 +3,10 @@ use crate::network::types::{
     LoadNetworkFilePayload, NetworkBrowseResult,
 };
 use crate::store::network_connection_store::NetworkConnectionRecord;
-use crate::{build_load_file_command_args_with_options, mpv_command_checked, with_mpv, AppState};
+use crate::{
+    build_load_file_command_args_with_options, mpv_command_checked, mpv_command_direct_checked,
+    with_mpv, AppState,
+};
 
 #[tauri::command]
 pub(crate) fn list_network_connections(
@@ -77,8 +80,7 @@ pub(crate) fn load_network_file(
         &app,
         &payload.connection_id,
     )?;
-    // let mut playback_url = crate::network::service::resolve_network_playback_url(
-    let playback_url = crate::network::service::resolve_network_playback_url(
+    let mut playback_url = crate::network::service::resolve_network_playback_url(
         &connection,
         payload.protocol.as_deref(),
         &payload.file_path,
@@ -90,16 +92,14 @@ pub(crate) fn load_network_file(
         .unwrap_or(&connection.protocol)
         .trim()
         .to_ascii_lowercase();
-    // if protocol == "webdav" {
-    //     if let Some(rewritten) = crate::mpv::rewrite_https_callback_url(&playback_url) {
-    //         playback_url = rewritten;
-    //     }
-    // }
-    let username = connection.username.trim();
-    // Remote protocol credentials must stay inside stream_proxy backends. mpv should only see
-    // localhost token URLs and non-sensitive playback options.
-    if matches!(protocol.as_str(), "webdav" | "smb" | "samba") && !username.is_empty() {
-        crate::mpv::register_stream_basic_auth(&playback_url, username, &connection.password);
+    playback_url = crate::mpv::prepare_network_stream_url(
+        &protocol,
+        &playback_url,
+        &connection.username,
+        &connection.password,
+    )?;
+    if let Some(rewritten) = crate::mpv::rewrite_network_stream_url(&protocol, &playback_url) {
+        playback_url = rewritten;
     }
     // Network URLs should not trigger yt-dlp probing on failure.
     load_options.push("ytdl=no".to_string());
@@ -110,7 +110,7 @@ pub(crate) fn load_network_file(
     let command_refs: Vec<&str> = command_args.iter().map(String::as_str).collect();
 
     with_mpv(&state, |mpv_guard| {
-        mpv_command_checked(mpv_guard, &command_refs)?;
+        mpv_command_direct_checked(mpv_guard, &command_refs)?;
         mpv_command_checked(
             mpv_guard,
             &["set", "pause", if auto_play { "no" } else { "yes" }],
