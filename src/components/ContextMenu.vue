@@ -147,6 +147,82 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+:global(:root) {
+    --context-menu-border: rgba(33, 45, 60, 0.12);
+    --context-menu-background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.5)),
+        rgba(247, 249, 252, 0.9);
+    --context-menu-shadow:
+        0 18px 42px rgba(33, 45, 60, 0.18),
+        0 2px 8px rgba(33, 45, 60, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    --context-menu-macos-border: rgba(33, 45, 60, 0.11);
+    --context-menu-macos-background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.74), rgba(255, 255, 255, 0.36)),
+        rgba(246, 248, 252, 0.58);
+    --context-menu-macos-shadow:
+        0 22px 56px rgba(33, 45, 60, 0.2),
+        0 7px 18px rgba(33, 45, 60, 0.12),
+        inset 0 1px 0 rgba(255, 255, 255, 0.95);
+    --context-menu-item-color: rgba(33, 45, 60, 0.9);
+    --context-menu-item-hover-bg: rgba(57, 108, 216, 0.9);
+    --context-menu-item-hover-color: #fff;
+    --context-menu-item-active-bg: rgba(73, 122, 211, 0.9);
+    --context-menu-item-disabled-color: rgba(33, 45, 60, 0.36);
+}
+
+:global(:root:is([data-theme="dark"], [data-theme="graphite"])) {
+    --context-menu-border: rgba(255, 255, 255, 0.16);
+    --context-menu-background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0)),
+        rgba(20, 22, 29, 0.94);
+    --context-menu-shadow:
+        0 18px 42px rgba(0, 0, 0, 0.42),
+        0 2px 8px rgba(0, 0, 0, 0.22),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    --context-menu-macos-border: rgba(255, 255, 255, 0.2);
+    --context-menu-macos-background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.03)),
+        rgba(30, 32, 40, 0.62);
+    --context-menu-macos-shadow:
+        0 22px 56px rgba(0, 0, 0, 0.38),
+        0 7px 18px rgba(0, 0, 0, 0.22),
+        inset 0 1px 0 rgba(255, 255, 255, 0.18),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+    --context-menu-item-color: rgba(255, 255, 255, 0.9);
+    --context-menu-item-hover-bg: rgba(86, 137, 232, 0.86);
+    --context-menu-item-hover-color: #fff;
+    --context-menu-item-active-bg: rgba(73, 122, 211, 0.9);
+    --context-menu-item-disabled-color: rgba(255, 255, 255, 0.34);
+}
+
+@media (prefers-color-scheme: dark) {
+    :global(:root:not([data-theme])) {
+        --context-menu-border: rgba(255, 255, 255, 0.16);
+        --context-menu-background:
+            linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0)),
+            rgba(20, 22, 29, 0.94);
+        --context-menu-shadow:
+            0 18px 42px rgba(0, 0, 0, 0.42),
+            0 2px 8px rgba(0, 0, 0, 0.22),
+            inset 0 1px 0 rgba(255, 255, 255, 0.08);
+        --context-menu-macos-border: rgba(255, 255, 255, 0.2);
+        --context-menu-macos-background:
+            linear-gradient(180deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.03)),
+            rgba(30, 32, 40, 0.62);
+        --context-menu-macos-shadow:
+            0 22px 56px rgba(0, 0, 0, 0.38),
+            0 7px 18px rgba(0, 0, 0, 0.22),
+            inset 0 1px 0 rgba(255, 255, 255, 0.18),
+            inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+        --context-menu-item-color: rgba(255, 255, 255, 0.9);
+        --context-menu-item-hover-bg: rgba(86, 137, 232, 0.86);
+        --context-menu-item-hover-color: #fff;
+        --context-menu-item-active-bg: rgba(73, 122, 211, 0.9);
+        --context-menu-item-disabled-color: rgba(255, 255, 255, 0.34);
+    }
+}
+
 .context-menu {
     position: fixed;
     z-index: 2600;
@@ -154,15 +230,10 @@ onUnmounted(() => {
     min-width: 156px;
     overflow: hidden;
     padding: 6px;
-    border: 1px solid rgba(255, 255, 255, 0.16);
+    border: 1px solid var(--context-menu-border);
     border-radius: 11px;
-    background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0)),
-        rgba(20, 22, 29, 0.94);
-    box-shadow:
-        0 18px 42px rgba(0, 0, 0, 0.42),
-        0 2px 8px rgba(0, 0, 0, 0.22),
-        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    background: var(--context-menu-background);
+    box-shadow: var(--context-menu-shadow);
     backdrop-filter: blur(22px) saturate(1.18);
     -webkit-backdrop-filter: blur(22px) saturate(1.18);
     transform-origin: top left;
@@ -170,15 +241,9 @@ onUnmounted(() => {
 }
 
 .context-menu--macos {
-    border-color: rgba(255, 255, 255, 0.2);
-    background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.03)),
-        rgba(30, 32, 40, 0.62);
-    box-shadow:
-        0 22px 56px rgba(0, 0, 0, 0.38),
-        0 7px 18px rgba(0, 0, 0, 0.22),
-        inset 0 1px 0 rgba(255, 255, 255, 0.18),
-        inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+    border-color: var(--context-menu-macos-border);
+    background: var(--context-menu-macos-background);
+    box-shadow: var(--context-menu-macos-shadow);
     backdrop-filter: blur(34px) saturate(1.85) brightness(1.04);
     -webkit-backdrop-filter: blur(34px) saturate(1.85) brightness(1.04);
 }
@@ -188,7 +253,7 @@ onUnmounted(() => {
     border: none;
     border-radius: 7px;
     background: transparent;
-    color: rgba(255, 255, 255, 0.9);
+    color: var(--context-menu-item-color);
     cursor: default;
     font: inherit;
     font-size: 13px;
@@ -227,53 +292,17 @@ onUnmounted(() => {
 
 .context-menu__item:not(:disabled):hover,
 .context-menu__item:not(:disabled):focus-visible {
-    background: rgba(86, 137, 232, 0.86);
-    color: #fff;
+    background: var(--context-menu-item-hover-bg);
+    color: var(--context-menu-item-hover-color);
     outline: none;
 }
 
 .context-menu__item:not(:disabled):active {
-    background: rgba(73, 122, 211, 0.9);
+    background: var(--context-menu-item-active-bg);
 }
 
 .context-menu__item:disabled {
-    color: rgba(255, 255, 255, 0.34);
-}
-
-:global(:root[data-theme="light"]) .context-menu {
-    border-color: rgba(33, 45, 60, 0.12);
-    background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.5)),
-        rgba(247, 249, 252, 0.9);
-    box-shadow:
-        0 18px 42px rgba(33, 45, 60, 0.18),
-        0 2px 8px rgba(33, 45, 60, 0.1),
-        inset 0 1px 0 rgba(255, 255, 255, 0.9);
-}
-
-:global(:root[data-theme="light"]) .context-menu--macos {
-    border-color: rgba(33, 45, 60, 0.11);
-    background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.74), rgba(255, 255, 255, 0.36)),
-        rgba(246, 248, 252, 0.58);
-    box-shadow:
-        0 22px 56px rgba(33, 45, 60, 0.2),
-        0 7px 18px rgba(33, 45, 60, 0.12),
-        inset 0 1px 0 rgba(255, 255, 255, 0.95);
-}
-
-:global(:root[data-theme="light"]) .context-menu__item {
-    color: rgba(33, 45, 60, 0.9);
-}
-
-:global(:root[data-theme="light"]) .context-menu__item:not(:disabled):hover,
-:global(:root[data-theme="light"]) .context-menu__item:not(:disabled):focus-visible {
-    background: rgba(57, 108, 216, 0.9);
-    color: #fff;
-}
-
-:global(:root[data-theme="light"]) .context-menu__item:disabled {
-    color: rgba(33, 45, 60, 0.36);
+    color: var(--context-menu-item-disabled-color);
 }
 
 @keyframes context-menu-pop {
