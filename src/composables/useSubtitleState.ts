@@ -12,10 +12,7 @@ type SelectSubtitlePayload = {
 const isSameTrackId = (left: MediaTrack["id"], right: MediaTrack["id"]) =>
     String(left) === String(right);
 
-export const useSubtitleState = (
-    subTracks: Ref<MediaTrack[]>,
-    showSubMenu: Ref<boolean>,
-) => {
+export const useSubtitleState = (subTracks: Ref<MediaTrack[]>) => {
     const dualSubEnabled = ref(false);
     const secondarySubId = ref<MediaTrack["id"]>(0);
     const activeSubTarget = ref<SubtitleTarget>("primary");
@@ -53,9 +50,6 @@ export const useSubtitleState = (
 
     const selectPrimarySub = async (track: MediaTrack) => {
         subTracks.value.forEach((t) => (t.selected = t.id === track.id));
-        if (!dualSubEnabled.value) {
-            showSubMenu.value = false;
-        }
         if (track.id !== 0 && isSameTrackId(track.id, secondarySubId.value)) {
             await clearSecondarySid();
         }

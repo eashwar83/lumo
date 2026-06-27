@@ -97,6 +97,7 @@ export const useAppBootstrap = () => {
         () => player.state.media.isFileLoaded,
         hideAllMenus,
         shouldKeepControlsVisible,
+        schedulePointerRefresh,
     );
 
     watch(isPipEnabled, (enabled) => {

@@ -180,7 +180,7 @@ export const useMediaTracks = (
 
     const showAudioMenu = ref(false);
     const showSubMenu = ref(false);
-    const subtitleState = useSubtitleState(subTracks, showSubMenu);
+    const subtitleState = useSubtitleState(subTracks);
     let pendingTracksUpdate: { tracks: MediaTrack[] } | null = null;
     let tracksUpdateFrame: number | null = null;
     let backgroundSubtitleQueue: BackgroundSubtitleItem[] = [];
@@ -406,7 +406,6 @@ export const useMediaTracks = (
 
     const selectAudio = async (track: MediaTrack) => {
         audioTracks.value.forEach((t) => (t.selected = t.id === track.id));
-        showAudioMenu.value = false;
         await invoke("mpv_set_option_string", { name: "aid", value: track.id });
     };
 

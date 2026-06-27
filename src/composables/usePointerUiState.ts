@@ -27,9 +27,14 @@ export const usePointerUiState = (options: UsePointerUiStateOptions = {}) => {
     };
 
     const setPointerFlags = (x: number, target: Element | null) => {
-        isPointerOverUi.value = !!target?.closest(".ui-surface");
         const isOverControls = !!target?.closest(".player-controls");
+        const isOverTrackMenu = !!target?.closest(".track-menu");
         const isOverTopBar = !!target?.closest(".top-bar");
+        isPointerOverUi.value =
+            !!target?.closest(".ui-surface") ||
+            isOverControls ||
+            isOverTrackMenu ||
+            isOverTopBar;
         isPointerNearLeft.value =
             x <= revealWidth.value && !isOverControls && !isOverTopBar;
     };

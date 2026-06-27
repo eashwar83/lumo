@@ -4,6 +4,7 @@ export const useUiControls = (
     isFileLoaded: () => boolean,
     onHideMenus: () => void,
     shouldKeepVisible: () => boolean,
+    onShowControls?: () => void,
 ) => {
     const showControls = ref(true);
     const hoverFilePicker = ref(false);
@@ -17,7 +18,11 @@ export const useUiControls = (
         showControls.value = false;
         onHideMenus();
     };
-    const showBar = () => (showControls.value = true);
+    const showBar = () => {
+        const wasHidden = !showControls.value;
+        showControls.value = true;
+        if (wasHidden) onShowControls?.();
+    };
 
     const resetInactivityTimer = () => {
         if (hideTimeout) clearTimeout(hideTimeout);
