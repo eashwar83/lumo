@@ -261,6 +261,45 @@ pub(crate) fn consume_pending_open_files(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct ResolveYoutubePlaylistPayload {
+    url: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ResolvedYoutubePlaylistEntry {
+    url: String,
+    title: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ResolvedYoutubePlaylist {
+    playlist_title: Option<String>,
+    entries: Vec<ResolvedYoutubePlaylistEntry>,
+}
+
+#[tauri::command]
+pub(crate) async fn resolve_youtube_playlist(
+    app: tauri::AppHandle,
+    payload: ResolveYoutubePlaylistPayload,
+) -> Result<ResolvedYoutubePlaylist, String> {
+    let resolved = crate::mpv::resolve_ytdlp_playlist(&app, &payload.url).await?;
+    Ok(ResolvedYoutubePlaylist {
+        playlist_title: resolved.title,
+        entries: resolved
+            .entries
+            .into_iter()
+            .map(|entry| ResolvedYoutubePlaylistEntry {
+                url: entry.url,
+                title: entry.title,
+            })
+            .collect(),
+    })
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct ParsePlaylistFilePayload {
     path: String,
 }

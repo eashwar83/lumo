@@ -12,6 +12,7 @@ import type {
     ParsedPlaylistEntry,
     ParsedPlaylistFile,
     ParsedPlaylistMetadata,
+    ResolvedYoutubePlaylist,
 } from "./usePlaybackCommands";
 import {
     ALLOW_URL_INPUT_DURING_PLAYBACK_SETTING_LABEL,
@@ -189,6 +190,21 @@ const isPlaylistSource = (value: string) => {
     } catch {
         const lower = trimmed.toLowerCase();
         return lower.endsWith(".m3u") || lower.endsWith(".m3u8");
+    }
+};
+
+const isYoutubePlaylistUrl = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return false;
+    try {
+        const parsed = new URL(trimmed);
+        return (
+            (parsed.hostname === "www.youtube.com" ||
+                parsed.hostname === "youtube.com") &&
+            parsed.pathname === "/playlist"
+        );
+    } catch {
+        return false;
     }
 };
 
@@ -758,6 +774,52 @@ export const usePlaybackFlow = ({
         return true;
     };
 
+    const youtubePlaylistEntriesToPlaylistEntries = (
+        entries: ResolvedYoutubePlaylist["entries"],
+    ) =>
+        entries.map((entry) => ({
+            path: entry.url.trim(),
+            title: entry.title?.trim() || undefined,
+            iconUrl: undefined,
+        }));
+
+    const playYoutubePlaylist = async (url: string): Promise<boolean> => {
+        let resolved: ResolvedYoutubePlaylist;
+        try {
+            resolved = await player.resolveYoutubePlaylist(url);
+        } catch {
+            return false;
+        }
+        if (!resolved.entries.length) return false;
+
+        const playlistEntries = youtubePlaylistEntriesToPlaylistEntries(resolved.entries);
+        const defaultName =
+            resolved.playlistTitle?.trim() ||
+            playlistState.getDefaultPlaylistNameForEntries(
+                playlistEntries,
+                "YouTube Playlist",
+            );
+        const confirmation = await confirmPlaylistCreation(
+            defaultName,
+            resolved.entries.length,
+            url,
+        );
+        if (confirmation.shouldCreate) {
+            const playlistId = playlistState.createPlaylistWithEntries(
+                playlistEntries,
+                {
+                    name: confirmation.name,
+                    openInDrawer: true,
+                    setAsPlayback: true,
+                },
+            );
+            if (playlistId) onPlaylistCreated?.(playlistId);
+        }
+        const firstEntry = playlistEntries[0];
+        await playPath(firstEntry.path, firstEntry.title);
+        return true;
+    };
+
     const openWithSelected = async (selected: string[]) => {
         if (!selected.length) {
             hideHistory.value = false;
@@ -823,6 +885,11 @@ export const usePlaybackFlow = ({
 
     const onLoadFile = async () => {
         if (!player.state.media.url) return;
+        if (isYoutubePlaylistUrl(player.state.media.url)) {
+            if (await playYoutubePlaylist(player.state.media.url)) {
+                return;
+            }
+        }
         if (isPlaylistSource(player.state.media.url)) {
             try {
                 const source = player.state.media.url;
@@ -855,6 +922,11 @@ export const usePlaybackFlow = ({
 
     const onPlayHistory = async (entry: HistoryEntry) => {
         const preferredTitle = entry.title?.trim() || "";
+        if (isYoutubePlaylistUrl(entry.path)) {
+            if (await playYoutubePlaylist(entry.path)) {
+                return;
+            }
+        }
         if (isPlaylistSource(entry.path)) {
             try {
                 const parsed = await player.parsePlaylistSource(entry.path);

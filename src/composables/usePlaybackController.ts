@@ -4,6 +4,7 @@ import {
   usePlaybackCommands,
   type LoadFileResult,
   type ParsedPlaylistFile,
+  type ResolvedYoutubePlaylist,
 } from "./usePlaybackCommands";
 import { formatTime } from "../utils/formatTime";
 
@@ -52,6 +53,7 @@ export type PlayerApi = {
   ) => Promise<void>;
   parsePlaylistFile: (path: string) => Promise<ParsedPlaylistFile>;
   parsePlaylistSource: (source: string) => Promise<ParsedPlaylistFile>;
+  resolveYoutubePlaylist: (url: string) => Promise<ResolvedYoutubePlaylist>;
   pickMediaPathsAuto: () => Promise<string[]>;
   pickFiles: () => Promise<string[]>;
   togglePlayPause: () => Promise<void>;

@@ -42,6 +42,16 @@ export type LoadFileResult = {
   isLivePlayback?: boolean;
 };
 
+export type ResolvedYoutubePlaylistEntry = {
+  url: string;
+  title?: string | null;
+};
+
+export type ResolvedYoutubePlaylist = {
+  playlistTitle?: string | null;
+  entries: ResolvedYoutubePlaylistEntry[];
+};
+
 export const usePlaybackCommands = (
   state: PlayerEffectState,
   currentWindow: CurrentWindow,
@@ -154,6 +164,15 @@ export const usePlaybackCommands = (
     return normalizeParsedPlaylistFile(response);
   };
 
+  const resolveYoutubePlaylist = async (
+    url: string,
+  ): Promise<ResolvedYoutubePlaylist> => {
+    return await invoke<ResolvedYoutubePlaylist>(
+      "resolve_youtube_playlist",
+      { payload: { url } },
+    );
+  };
+
   const togglePlayPause = async (): Promise<void> => {
     await invoke("cycle_pause");
   };
@@ -230,6 +249,7 @@ export const usePlaybackCommands = (
     loadNetworkFile,
     parsePlaylistFile,
     parsePlaylistSource,
+    resolveYoutubePlaylist,
     pickMediaPathsAuto,
     pickFiles,
     togglePlayPause,

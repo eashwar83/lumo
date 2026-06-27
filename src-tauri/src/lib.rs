@@ -456,6 +456,7 @@ pub fn run() {
             online_subtitles::clear_online_subtitle_cache,
             commands::playback::parse_playlist_file,
             commands::playback::parse_playlist_source,
+            commands::playback::resolve_youtube_playlist,
             commands::network::list_network_connections,
             commands::network::save_network_connection,
             commands::network::delete_network_connection,

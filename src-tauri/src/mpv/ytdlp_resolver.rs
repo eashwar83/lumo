@@ -32,6 +32,180 @@ pub(crate) struct ResolvedMedia {
     pub(crate) is_live_playback: bool,
 }
 
+pub(crate) struct ResolvedPlaylistEntry {
+    pub(crate) url: String,
+    pub(crate) title: Option<String>,
+}
+
+pub(crate) struct ResolvedPlaylist {
+    pub(crate) title: Option<String>,
+    pub(crate) entries: Vec<ResolvedPlaylistEntry>,
+}
+
+pub(crate) async fn resolve_playlist(
+    app: &AppHandle,
+    raw_url: &str,
+) -> Result<ResolvedPlaylist, String> {
+    let Some(ytdl_path) = crate::app_bootstrap::resolve_ytdl_path(app) else {
+        return Err("yt-dlp is not configured".to_string());
+    };
+
+    let proxy_url = crate::network::proxy::current_proxy_key(app)?;
+    let raw_url = raw_url.to_string();
+    let output = tauri::async_runtime::spawn_blocking(move || {
+        run_ytdlp_playlist_command(&ytdl_path, proxy_url.as_deref(), &raw_url)
+    })
+    .await
+    .map_err(|error| format!("yt-dlp worker failed: {error}"))??;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "yt-dlp exited with status {}: {}",
+            output.status,
+            stderr.trim()
+        ));
+    }
+
+    let value: Value = serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("yt-dlp returned invalid JSON: {error}"))?;
+
+    let entries = extract_playlist_entries(&value);
+    if entries.is_empty() {
+        return Err("yt-dlp did not return any playlist entries".to_string());
+    }
+
+    let title = extract_media_title(&value);
+    info!(
+        "yt-dlp: resolved {} playlist entries title={:?}",
+        entries.len(),
+        title
+    );
+    Ok(ResolvedPlaylist { title, entries })
+}
+
+fn run_ytdlp_playlist_command(
+    ytdl_path: &str,
+    proxy_url: Option<&str>,
+    raw_url: &str,
+) -> Result<std::process::Output, String> {
+    let mut command = Command::new(ytdl_path);
+    let mut log_args = vec![
+        "--dump-single-json".to_string(),
+        "--flat-playlist".to_string(),
+        redact_url(raw_url),
+    ];
+    command
+        .arg("--dump-single-json")
+        .arg("--flat-playlist")
+        .arg(raw_url)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    if let Some(proxy_url) = proxy_url {
+        command.arg("--proxy").arg(proxy_url);
+        log_args.push("--proxy".to_string());
+        log_args.push(redact_url(proxy_url));
+    }
+
+    info!(
+        "yt-dlp: run {}",
+        format_command_for_log(ytdl_path, &log_args)
+    );
+
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("yt-dlp failed to start: {error}"))?;
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "yt-dlp stdout pipe is unavailable".to_string())?;
+    let mut stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "yt-dlp stderr pipe is unavailable".to_string())?;
+    let stdout_reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        stdout.read_to_end(&mut bytes).map(|_| bytes)
+    });
+    let stderr_reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        stderr.read_to_end(&mut bytes).map(|_| bytes)
+    });
+    let started_at = Instant::now();
+    let deadline = Instant::now() + YTDLP_TIMEOUT;
+    loop {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|error| format!("yt-dlp wait failed: {error}"))?
+        {
+            let elapsed = started_at.elapsed();
+            info!("yt-dlp: playlist finished in {:.3}s", elapsed.as_secs_f64());
+            let stdout = stdout_reader
+                .join()
+                .map_err(|_| "yt-dlp stdout reader panicked".to_string())?
+                .map_err(|error| format!("yt-dlp stdout read failed: {error}"))?;
+            let stderr = stderr_reader
+                .join()
+                .map_err(|_| "yt-dlp stderr reader panicked".to_string())?
+                .map_err(|error| format!("yt-dlp stderr read failed: {error}"))?;
+            let output = std::process::Output {
+                status,
+                stdout,
+                stderr,
+            };
+            info!(
+                "yt-dlp: playlist exit status={} stdout={}B stderr={}B",
+                output.status,
+                output.stdout.len(),
+                output.stderr.len()
+            );
+            return Ok(output);
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = stdout_reader.join();
+            let _ = stderr_reader.join();
+            warn!(
+                "yt-dlp: playlist timed out after {:.3}s",
+                started_at.elapsed().as_secs_f64()
+            );
+            return Err(format!(
+                "yt-dlp timed out after {}s",
+                YTDLP_TIMEOUT.as_secs()
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn extract_playlist_entries(value: &Value) -> Vec<ResolvedPlaylistEntry> {
+    value
+        .get("entries")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let url = entry
+                .get("url")
+                .and_then(Value::as_str)
+                .or_else(|| entry.get("webpage_url").and_then(Value::as_str))
+                .filter(|url| !url.is_empty())?;
+            let title = entry
+                .get("title")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .map(str::to_string);
+            Some(ResolvedPlaylistEntry {
+                url: url.to_string(),
+                title,
+            })
+        })
+        .collect()
+}
+
 pub(crate) async fn resolve(app: &AppHandle, raw_url: &str) -> Result<Option<ResolvedMedia>, String> {
     if !is_http_url(raw_url) {
         return Ok(None);
