@@ -47,6 +47,7 @@ const props = defineProps<{
     primarySubPos: number;
     secondarySubPos: number;
     showSubMenu: boolean;
+    showSubtitleAdvancedSettings: boolean;
     hasAudioTracks: boolean;
     hasSubTracks: boolean;
     isFullscreen: boolean;
@@ -84,6 +85,7 @@ const emit = defineEmits<{
     (e: "add-external-sub"): void;
     (e: "find-online-sub"): void;
     (e: "toggle-fullscreen"): void;
+    (e: "update:showSubtitleAdvancedSettings", value: boolean): void;
 }>();
 
 const controlsViewportRef = ref<HTMLElement | null>(null);
@@ -275,6 +277,7 @@ onUnmounted(() => {
                         :primary-sub-pos="primarySubPos"
                         :secondary-sub-pos="secondarySubPos"
                         :show-sub-menu="showSubMenu"
+                        :show-subtitle-advanced-settings="showSubtitleAdvancedSettings"
                         :has-audio-tracks="hasAudioTracks"
                         :has-sub-tracks="hasSubTracks"
                         :is-fullscreen="isFullscreen"
@@ -306,6 +309,7 @@ onUnmounted(() => {
                         @add-external-sub="emit('add-external-sub')"
                         @find-online-sub="emit('find-online-sub')"
                         @toggle-fullscreen="emit('toggle-fullscreen')"
+                        @update:show-subtitle-advanced-settings="emit('update:showSubtitleAdvancedSettings', $event)"
                     />
                 </div>
             </div>

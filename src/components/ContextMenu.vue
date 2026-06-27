@@ -1,16 +1,12 @@
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import type { ContextMenuItem } from "../composables/usePlaybackContextMenu";
 
 const props = defineProps<{
     open: boolean;
     x: number;
     y: number;
-    items: {
-        id: string;
-        label: string;
-        icon?: "heart" | "settings" | "subtitle";
-        disabled?: boolean;
-    }[];
+    items: ContextMenuItem[];
 }>();
 
 const emit = defineEmits<{
@@ -22,6 +18,10 @@ const menuRef = ref<HTMLElement | null>(null);
 const menuStyle = ref({ left: "0px", top: "0px" });
 const isMacOsPlatform =
     typeof navigator !== "undefined" && /mac|darwin/i.test(navigator.userAgent);
+
+const openSubmenuId = ref<string | null>(null);
+const submenuStyle = ref({ left: "0px", top: "0px" });
+const submenuRef = ref<HTMLElement | null>(null);
 
 const clampPosition = (value: number, size: number, viewportSize: number) =>
     Math.min(Math.max(8, viewportSize - size - 8), Math.max(8, value));
@@ -45,6 +45,30 @@ const updateMenuPosition = async () => {
     };
 };
 
+const updateSubmenuPosition = async (triggerEl: HTMLElement) => {
+    await nextTick();
+    const submenu = submenuRef.value;
+    if (!submenu) return;
+
+    const triggerRect = triggerEl.getBoundingClientRect();
+    const submenuWidth = submenu.offsetWidth || 160;
+    const submenuHeight = submenu.offsetHeight || 80;
+
+    let left = triggerRect.right + 4;
+    if (left + submenuWidth + 8 > window.innerWidth) {
+        left = triggerRect.left - submenuWidth - 4;
+    }
+    left = Math.max(8, left);
+
+    let top = triggerRect.top;
+    top = clampPosition(top, submenuHeight, window.innerHeight);
+
+    submenuStyle.value = {
+        left: `${left}px`,
+        top: `${top}px`,
+    };
+};
+
 const close = () => {
     if (props.open) {
         emit("close");
@@ -53,19 +77,44 @@ const close = () => {
 
 const onKeydown = (event: KeyboardEvent) => {
     if (event.key === "Escape") {
-        close();
+        if (openSubmenuId.value !== null) {
+            openSubmenuId.value = null;
+        } else {
+            close();
+        }
     }
 };
 
-const onItemClick = (id: string, disabled?: boolean) => {
-    if (disabled) return;
-    emit("select", id);
+const onItemClick = (item: ContextMenuItem, event: MouseEvent) => {
+    if (item.disabled) return;
+    if (item.children?.length) {
+        openSubmenuId.value = openSubmenuId.value === item.id ? null : item.id;
+        void updateSubmenuPosition(event.currentTarget as HTMLElement);
+        return;
+    }
+    emit("select", item.id);
+};
+
+const onItemPointerEnter = (item: ContextMenuItem, event: MouseEvent) => {
+    if (item.disabled) return;
+    if (item.children?.length) {
+        openSubmenuId.value = item.id;
+        void updateSubmenuPosition(event.currentTarget as HTMLElement);
+    } else {
+        openSubmenuId.value = null;
+    }
+};
+
+const onSubmenuItemClick = (child: ContextMenuItem) => {
+    if (child.disabled) return;
+    emit("select", child.id);
 };
 
 watch(
     () => [props.open, props.x, props.y, props.items.length],
     () => {
         void updateMenuPosition();
+        openSubmenuId.value = null;
     },
 );
 
@@ -101,11 +150,16 @@ onUnmounted(() => {
                 v-for="item in props.items"
                 :key="item.id"
                 class="context-menu__item"
-                :class="{ 'context-menu__item--with-icon': item.icon }"
+                :class="{
+                    'context-menu__item--with-icon': item.icon,
+                    'context-menu__item--has-submenu': item.children?.length,
+                    'context-menu__item--submenu-open': openSubmenuId === item.id,
+                }"
                 type="button"
                 role="menuitem"
                 :disabled="item.disabled"
-                @click="onItemClick(item.id, item.disabled)"
+                @click="onItemClick(item, $event)"
+                @pointerenter="onItemPointerEnter(item, $event)"
             >
                 <span
                     v-if="item.icon"
@@ -155,9 +209,129 @@ onUnmounted(() => {
                             d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.4 1.1V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-.4-1.1 1.65 1.65 0 0 0-1-.6 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 0-1.1-.4H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.1-.4 1.65 1.65 0 0 0 .6-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .4-1.1V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 .4 1.1 1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 .6 1 1.65 1.65 0 0 0 1.1.4H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.1.4 1.65 1.65 0 0 0-.6 1Z"
                         />
                     </svg>
+                    <svg
+                        v-else-if="item.icon === 'subtitle-advanced-settings'"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                    >
+                        <path
+                            d="M5 7q-.83 0-1.415-.585Q3 5.83 3 5q0-.83.585-1.415Q4.17 3 5 3q.83 0 1.415.585Q7 4.17 7 5q0 .83-.585 1.415Q5.83 7 5 7Zm0-2ZM2 6V4H1v2h1Zm21 0V4H8v2h15Zm-8 8q-.83 0-1.415-.585Q13 12.83 13 12q0-.83.585-1.415Q14.17 10 15 10q.83 0 1.415.585Q17 11.17 17 12q0 .83-.585 1.415Q15.83 14 15 14Zm0-2ZM12 13v-2H1v2h11Zm11 0v-2h-5v2h5ZM8 21q-.83 0-1.415-.585Q6 19.83 6 19q0-.83.585-1.415Q7.17 17 8 17q.83 0 1.415.585Q10 18.17 10 19q0 .83-.585 1.415Q8.83 21 8 21Zm0-2ZM5 20v-2H1v2h4Zm18 0v-2H11v2h12Z"
+                        />
+                    </svg>
+                    <svg
+                        v-else-if="item.icon === 'subtitle-search'"
+                        viewBox="0 -960 960 960"
+                        fill="currentColor"
+                    >
+                        <path d="M784-120 532-372q-30 24-69 38t-83 14q-109 0-184.5-75.5T120-580q0-109 75.5-184.5T380-840q109 0 184.5 75.5T640-580q0 44-14 83t-38 69l252 252-56 56ZM380-400q75 0 127.5-52.5T560-580q0-75-52.5-127.5T380-760q-75 0-127.5 52.5T200-580q0 75 52.5 127.5T380-400Z" />
+                    </svg>
                 </span>
                 {{ item.label }}
+                <span
+                    v-if="item.children?.length"
+                    class="context-menu__chevron"
+                    aria-hidden="true"
+                >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M9 18l6-6-6-6" />
+                    </svg>
+                </span>
             </button>
+        </div>
+
+        <!-- Submenu -->
+        <div
+            v-if="props.open && openSubmenuId !== null"
+            ref="submenuRef"
+            class="context-menu context-menu--submenu"
+            :class="{ 'context-menu--macos': isMacOsPlatform }"
+            :style="submenuStyle"
+            role="menu"
+            @mousedown.prevent.stop
+            @click.stop
+            @contextmenu.prevent.stop
+        >
+            <template v-for="item in props.items" :key="item.id">
+                <template v-if="item.id === openSubmenuId && item.children">
+                    <button
+                        v-for="child in item.children"
+                        :key="child.id"
+                        class="context-menu__item"
+                        :class="{ 'context-menu__item--with-icon': child.icon }"
+                        type="button"
+                        role="menuitem"
+                        :disabled="child.disabled"
+                        @click="onSubmenuItemClick(child)"
+                    >
+                        <span
+                            v-if="child.icon"
+                            class="context-menu__icon"
+                            aria-hidden="true"
+                        >
+                            <svg
+                                v-if="child.icon === 'heart'"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <path
+                                    d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78Z"
+                                />
+                            </svg>
+                            <svg
+                                v-else-if="child.icon === 'subtitle'"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <path d="M4 5h16" />
+                                <path d="M4 19h16" />
+                                <path d="M7 9h4" />
+                                <path d="M13 9h4" />
+                                <path d="M7 15h2" />
+                                <path d="M11 15h6" />
+                            </svg>
+                            <svg
+                                v-else-if="child.icon === 'settings'"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <circle cx="12" cy="12" r="3" />
+                                <path
+                                    d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.4 1.1V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-.4-1.1 1.65 1.65 0 0 0-1-.6 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 0-1.1-.4H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.1-.4 1.65 1.65 0 0 0 .6-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .4-1.1V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 .4 1.1 1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 .6 1 1.65 1.65 0 0 0 1.1.4H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.1.4 1.65 1.65 0 0 0-.6 1Z"
+                                />
+                            </svg>
+                            <svg
+                                v-else-if="child.icon === 'subtitle-advanced-settings'"
+                                viewBox="0 0 24 24"
+                                fill="currentColor"
+                            >
+                                <path
+                                    d="M5 7q-.83 0-1.415-.585Q3 5.83 3 5q0-.83.585-1.415Q4.17 3 5 3q.83 0 1.415.585Q7 4.17 7 5q0 .83-.585 1.415Q5.83 7 5 7Zm0-2ZM2 6V4H1v2h1Zm21 0V4H8v2h15Zm-8 8q-.83 0-1.415-.585Q13 12.83 13 12q0-.83.585-1.415Q14.17 10 15 10q.83 0 1.415.585Q17 11.17 17 12q0 .83-.585 1.415Q15.83 14 15 14Zm0-2ZM12 13v-2H1v2h11Zm11 0v-2h-5v2h5ZM8 21q-.83 0-1.415-.585Q6 19.83 6 19q0-.83.585-1.415Q7.17 17 8 17q.83 0 1.415.585Q10 18.17 10 19q0 .83-.585 1.415Q8.83 21 8 21Zm0-2ZM5 20v-2H1v2h4Zm18 0v-2H11v2h12Z"
+                                />
+                            </svg>
+                            <svg
+                                v-else-if="child.icon === 'subtitle-search'"
+                                viewBox="0 -960 960 960"
+                                fill="currentColor"
+                            >
+                                <path d="M784-120 532-372q-30 24-69 38t-83 14q-109 0-184.5-75.5T120-580q0-109 75.5-184.5T380-840q109 0 184.5 75.5T640-580q0 44-14 83t-38 69l252 252-56 56ZM380-400q75 0 127.5-52.5T560-580q0-75-52.5-127.5T380-760q-75 0-127.5 52.5T200-580q0 75 52.5 127.5T380-400Z" />
+                            </svg>
+                        </span>
+                        {{ child.label }}
+                    </button>
+                </template>
+            </template>
         </div>
     </Teleport>
 </template>
@@ -264,6 +438,11 @@ onUnmounted(() => {
     -webkit-backdrop-filter: blur(34px) saturate(1.85) brightness(1.04);
 }
 
+.context-menu--submenu {
+    z-index: 2601;
+    animation: context-menu-pop 90ms ease-out;
+}
+
 .context-menu__item {
     width: 100%;
     border: none;
@@ -290,6 +469,10 @@ onUnmounted(() => {
     gap: 8px;
 }
 
+.context-menu__item--has-submenu {
+    grid-template-columns: 16px 1fr 12px;
+}
+
 .context-menu__icon {
     width: 16px;
     height: 16px;
@@ -306,8 +489,23 @@ onUnmounted(() => {
     display: block;
 }
 
+.context-menu__chevron {
+    width: 12px;
+    height: 12px;
+    display: grid;
+    place-items: center;
+    opacity: 0.6;
+}
+
+.context-menu__chevron svg {
+    width: 12px;
+    height: 12px;
+    display: block;
+}
+
 .context-menu__item:not(:disabled):hover,
-.context-menu__item:not(:disabled):focus-visible {
+.context-menu__item:not(:disabled):focus-visible,
+.context-menu__item--submenu-open:not(:disabled) {
     background: var(--context-menu-item-hover-bg);
     color: var(--context-menu-item-hover-color);
     outline: none;

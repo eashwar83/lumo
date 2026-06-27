@@ -44,6 +44,7 @@ const props = defineProps<{
     primarySubPos: number;
     secondarySubPos: number;
     showSubMenu: boolean;
+    showSubtitleAdvancedSettings: boolean;
     hasAudioTracks: boolean;
     hasSubTracks: boolean;
     isFullscreen: boolean;
@@ -74,6 +75,7 @@ const emit = defineEmits<{
     (e: "add-external-sub"): void;
     (e: "find-online-sub"): void;
     (e: "toggle-fullscreen"): void;
+    (e: "update:showSubtitleAdvancedSettings", value: boolean): void;
 }>();
 
 const isNativePipPlatform =
@@ -86,7 +88,6 @@ const isWindowsPlatform =
 
 const isPipEnabled = ref(false);
 const isTogglingPip = ref(false);
-const showSubtitleAdvancedSettings = ref(false);
 const renderedSubtitleTrackCount = ref(0);
 let unlistenNativePipChanged: (() => void) | null = null;
 let subtitleRenderFrame: number | null = null;
@@ -160,7 +161,7 @@ const cancelSubtitleRenderFrame = () => {
 
 const scheduleSubtitleTrackRendering = () => {
     cancelSubtitleRenderFrame();
-    if (!props.showSubMenu || showSubtitleAdvancedSettings.value) return;
+    if (!props.showSubMenu || props.showSubtitleAdvancedSettings) return;
     const total = props.subTracks.length;
     if (!total) {
         renderedSubtitleTrackCount.value = 0;
@@ -171,7 +172,7 @@ const scheduleSubtitleTrackRendering = () => {
         total,
     );
     const renderNextBatch = () => {
-        if (!props.showSubMenu || showSubtitleAdvancedSettings.value) {
+        if (!props.showSubMenu || props.showSubtitleAdvancedSettings) {
             subtitleRenderFrame = null;
             return;
         }
@@ -317,7 +318,7 @@ watch(
     () => props.showSubMenu,
     (showSubMenu) => {
         if (!showSubMenu) {
-            showSubtitleAdvancedSettings.value = false;
+            emit("update:showSubtitleAdvancedSettings", false);
             renderedSubtitleTrackCount.value = 0;
             cancelSubtitleRenderFrame();
             return;
@@ -328,10 +329,10 @@ watch(
 );
 
 watch(
-    () => [props.subTracks.length, showSubtitleAdvancedSettings.value] as const,
+    () => [props.subTracks.length, props.showSubtitleAdvancedSettings] as const,
     () => {
         if (!props.showSubMenu) return;
-        if (showSubtitleAdvancedSettings.value) {
+        if (props.showSubtitleAdvancedSettings) {
             cancelSubtitleRenderFrame();
             return;
         }
@@ -524,19 +525,19 @@ watch(
                     class="track-menu track-menu--wide track-menu--subtitle"
                     :class="{
                         'track-menu--subtitle-advanced':
-                            showSubtitleAdvancedSettings,
+                            props.showSubtitleAdvancedSettings,
                     }"
                 >
                     <div class="track-menu__header">
                         <div class="track-menu__title-group">
                             <button
-                                v-if="showSubtitleAdvancedSettings"
+                                v-if="props.showSubtitleAdvancedSettings"
                                 class="track-menu__back-button"
                                 type="button"
                                 title="Back to subtitle tracks"
                                 aria-label="Back to subtitle tracks"
                                 @click.stop="
-                                    showSubtitleAdvancedSettings = false
+                                    emit('update:showSubtitleAdvancedSettings', false)
                                 "
                             >
                                 <svg
@@ -558,7 +559,7 @@ watch(
                                 type="button"
                                 title="Advanced subtitle settings"
                                 aria-label="Advanced subtitle settings"
-                                @click.stop="showSubtitleAdvancedSettings = true"
+                                @click.stop="emit('update:showSubtitleAdvancedSettings', true)"
                             >
                                 <svg viewBox="0 0 24 24" fill="currentColor">
                                     <path
@@ -568,14 +569,14 @@ watch(
                             </button>
                             <span>
                                 {{
-                                    showSubtitleAdvancedSettings
+                                    props.showSubtitleAdvancedSettings
                                         ? "Advance Settings"
                                         : "Subtitle"
                                 }}
                             </span>
                         </div>
                         <div
-                            v-if="!showSubtitleAdvancedSettings"
+                            v-if="!props.showSubtitleAdvancedSettings"
                             class="track-menu__header-actions"
                         >
                             <button
@@ -606,8 +607,8 @@ watch(
                             <button
                                 class="icon-button track-menu__header-action"
                                 type="button"
-                                title="Find online subtitle"
-                                aria-label="Find online subtitle"
+                                title="Find online subtitles"
+                                aria-label="Find online subtitles"
                                 @click.stop="emit('find-online-sub')"
                             >
                                 <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor"><path d="M784-120 532-372q-30 24-69 38t-83 14q-109 0-184.5-75.5T120-580q0-109 75.5-184.5T380-840q109 0 184.5 75.5T640-580q0 44-14 83t-38 69l252 252-56 56ZM380-400q75 0 127.5-52.5T560-580q0-75-52.5-127.5T380-760q-75 0-127.5 52.5T200-580q0 75 52.5 127.5T380-400Z"/></svg>
@@ -615,7 +616,7 @@ watch(
                         </div>
                     </div>
                     <div
-                        v-if="showSubtitleAdvancedSettings"
+                        v-if="props.showSubtitleAdvancedSettings"
                         class="track-menu__list track-menu__list--subtitle-advanced"
                     >
                         <div class="subtitle-advanced">
@@ -779,7 +780,7 @@ watch(
                         </div>
                     </div>
                     <div
-                        v-if="props.hasSubTracks && !showSubtitleAdvancedSettings"
+                        v-if="props.hasSubTracks && !props.showSubtitleAdvancedSettings"
                         class="track-menu__footer"
                     >
                         <ControlSlider

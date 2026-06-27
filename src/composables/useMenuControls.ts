@@ -3,6 +3,7 @@ import type { Ref } from "vue";
 type MenuRefs = {
     showAudioMenu: Ref<boolean>;
     showSubMenu: Ref<boolean>;
+    showSubtitleAdvancedSettings: Ref<boolean>;
 };
 
 type SpeedRefs = {
@@ -21,6 +22,7 @@ export const useMenuControls = (
     const hideAllMenus = () => {
         tracks.showAudioMenu.value = false;
         tracks.showSubMenu.value = false;
+        tracks.showSubtitleAdvancedSettings.value = false;
         speed.showSpeedMenu.value = false;
         settings.showSettingsMenu.value = false;
     };

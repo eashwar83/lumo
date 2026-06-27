@@ -1,10 +1,11 @@
 import { computed, ref } from "vue";
 
-type ContextMenuItem = {
+export type ContextMenuItem = {
     id: string;
     label: string;
-    icon?: "heart" | "settings" | "subtitle";
+    icon?: "heart" | "settings" | "subtitle" | "subtitle-advanced-settings" | "subtitle-search";
     disabled?: boolean;
+    children?: ContextMenuItem[];
 };
 
 type UsePlaybackContextMenuOptions = {
@@ -13,12 +14,15 @@ type UsePlaybackContextMenuOptions = {
     getCurrentTitle: () => string;
     addToFavorites: (item: { path: string; title?: string }) => void;
     searchOnlineSubtitles: (path: string, title?: string) => void | Promise<void>;
+    openSubtitleAdvancedSettings: () => void;
     openSettings: () => void | Promise<void>;
     hideAllMenus: () => void;
 };
 
 const ADD_TO_FAVORITES_ID = "add-to-favorites";
-const FIND_ONLINE_SUBTITLE_ID = "find-online-subtitle";
+const SUBTITLE_ID = "subtitle";
+const SUBTITLE_FIND_ONLINE_ID = "subtitle/find-online-subtitle";
+const SUBTITLE_ADVANCED_SETTINGS_ID = "subtitle/advanced-settings";
 const OPEN_SETTINGS_ID = "open-settings";
 
 const isInteractiveContextTarget = (target: HTMLElement | null) =>
@@ -46,31 +50,49 @@ export const usePlaybackContextMenu = ({
     getCurrentTitle,
     addToFavorites,
     searchOnlineSubtitles,
+    openSubtitleAdvancedSettings,
     openSettings,
     hideAllMenus,
 }: UsePlaybackContextMenuOptions) => {
     const isOpen = ref(false);
     const position = ref({ x: 0, y: 0 });
 
-    const items = computed<ContextMenuItem[]>(() => [
-        {
-            id: ADD_TO_FAVORITES_ID,
-            label: "Add to Favorites",
-            icon: "heart",
-            disabled: !getCurrentPath().trim(),
-        },
-        {
-            id: FIND_ONLINE_SUBTITLE_ID,
-            label: "Find Online Subtitle",
-            icon: "subtitle",
-            disabled: !getCurrentPath().trim(),
-        },
-        {
-            id: OPEN_SETTINGS_ID,
-            label: "Open Settings",
-            icon: "settings",
-        },
-    ]);
+    const items = computed<ContextMenuItem[]>(() => {
+        const hasPath = !!getCurrentPath().trim();
+        return [
+            {
+                id: ADD_TO_FAVORITES_ID,
+                label: "Add to Favorites",
+                icon: "heart",
+                disabled: !hasPath,
+            },
+            {
+                id: SUBTITLE_ID,
+                label: "Subtitle",
+                icon: "subtitle",
+                disabled: !hasPath,
+                children: [
+                    {
+                        id: SUBTITLE_ADVANCED_SETTINGS_ID,
+                        label: "Advanced Subtitle Settings",
+                        icon: "subtitle-advanced-settings",
+                        disabled: !hasPath,
+                    },
+                    {
+                        id: SUBTITLE_FIND_ONLINE_ID,
+                        label: "Find Online Subtitles",
+                        icon: "subtitle-search",
+                        disabled: !hasPath,
+                    },
+                ],
+            },
+            {
+                id: OPEN_SETTINGS_ID,
+                label: "Open Settings",
+                icon: "settings",
+            },
+        ];
+    });
 
     const close = () => {
         isOpen.value = false;
@@ -104,11 +126,14 @@ export const usePlaybackContextMenu = ({
                 });
             }
         }
-        if (id === FIND_ONLINE_SUBTITLE_ID) {
+        if (id === SUBTITLE_FIND_ONLINE_ID) {
             const path = getCurrentPath().trim();
             if (path) {
                 void searchOnlineSubtitles(path, getCurrentTitle().trim() || undefined);
             }
+        }
+        if (id === SUBTITLE_ADVANCED_SETTINGS_ID) {
+            openSubtitleAdvancedSettings();
         }
         close();
         if (id === OPEN_SETTINGS_ID) {

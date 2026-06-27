@@ -180,6 +180,7 @@ export const useMediaTracks = (
 
     const showAudioMenu = ref(false);
     const showSubMenu = ref(false);
+    const showSubtitleAdvancedSettings = ref(false);
     const subtitleState = useSubtitleState(subTracks);
     let pendingTracksUpdate: { tracks: MediaTrack[] } | null = null;
     let tracksUpdateFrame: number | null = null;
@@ -666,6 +667,7 @@ export const useMediaTracks = (
         subTracks.value = [];
         showAudioMenu.value = false;
         showSubMenu.value = false;
+        showSubtitleAdvancedSettings.value = false;
         activeOnlineSubtitleProviderId.value = DEFAULT_ONLINE_SUBTITLE_PROVIDER_ID;
         onlineSubtitleResultMap.value = {
             opensubtitles: [],
@@ -716,6 +718,7 @@ export const useMediaTracks = (
         handleTracksUpdate,
         showAudioMenu,
         showSubMenu,
+        showSubtitleAdvancedSettings,
         dualSubEnabled: subtitleState.dualSubEnabled,
         secondarySubId: subtitleState.secondarySubId,
         activeSubTarget: subtitleState.activeSubTarget,

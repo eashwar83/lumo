@@ -318,6 +318,10 @@ const playbackContextMenu = usePlaybackContextMenu({
     getCurrentTitle: () => player.state.media.title,
     addToFavorites: playlistState.addToFavorites,
     searchOnlineSubtitles: tracks.searchOnlineSubtitleTracks,
+    openSubtitleAdvancedSettings: () => {
+        tracks.showSubMenu.value = true;
+        tracks.showSubtitleAdvancedSettings.value = true;
+    },
     openSettings: openSettingsFromPlaybackContextMenu,
     hideAllMenus,
 });
@@ -596,6 +600,7 @@ useAppStartupBindings({
             :primary-sub-pos="subtitleAppearance.primarySubPos.value"
             :secondary-sub-pos="subtitleAppearance.secondarySubPos.value"
             :show-sub-menu="tracks.showSubMenu.value"
+            :show-subtitle-advanced-settings="tracks.showSubtitleAdvancedSettings.value"
             :has-audio-tracks="hasAudioTracks"
             :has-sub-tracks="hasSubTracks"
             :is-fullscreen="player.state.window.isFullscreen"
@@ -632,6 +637,7 @@ useAppStartupBindings({
             @add-external-sub="tracks.addExternalSubtitleTrack"
             @find-online-sub="player.state.media.url.trim() && tracks.searchOnlineSubtitleTracks(player.state.media.url, player.state.media.title || undefined)"
             @toggle-fullscreen="onToggleFullscreen"
+            @update:show-subtitle-advanced-settings="tracks.showSubtitleAdvancedSettings.value = $event"
         />
 
         <PlaylistPeekButton
