@@ -5,6 +5,12 @@ import { getPathDisplayName } from "../utils/getPathDisplayName";
 import {
     ENABLE_COMPACT_MODE_SETTING_LABEL,
     ONLINE_SUBTITLES_SETTING_GROUP_TITLE,
+    OPENSUBTITLES_API_KEY_SETTING_LABEL,
+    OPENSUBTITLES_ENABLED_SETTING_LABEL,
+    OPENSUBTITLES_LANGUAGES_SETTING_LABEL,
+    SUBSOURCE_API_KEY_SETTING_LABEL,
+    SUBSOURCE_ENABLED_SETTING_LABEL,
+    SUBSOURCE_LANGUAGES_SETTING_LABEL,
     WALLPAPER_MODE_SETTING_LABEL,
     type SettingItem,
     type SettingGroup,
@@ -67,8 +73,45 @@ const shouldShowSettingItem = (item: SettingItem): boolean =>
 const visibleItems = (group: SettingGroup): SettingItem[] =>
     group.items.filter(shouldShowSettingItem);
 
+const onlineSubtitleTabs = [
+    {
+        id: "opensubtitles",
+        label: "OpenSubtitles",
+        itemLabels: [
+            OPENSUBTITLES_ENABLED_SETTING_LABEL,
+            OPENSUBTITLES_API_KEY_SETTING_LABEL,
+            OPENSUBTITLES_LANGUAGES_SETTING_LABEL,
+        ],
+    },
+    {
+        id: "subsource",
+        label: "SubSource",
+        itemLabels: [
+            SUBSOURCE_ENABLED_SETTING_LABEL,
+            SUBSOURCE_API_KEY_SETTING_LABEL,
+            SUBSOURCE_LANGUAGES_SETTING_LABEL,
+        ],
+    },
+] as const;
+const activeOnlineSubtitleTab = ref<(typeof onlineSubtitleTabs)[number]["id"]>(
+    "opensubtitles",
+);
+
+const visibleOnlineSubtitleItems = (group: SettingGroup): SettingItem[] => {
+    const activeTab =
+        onlineSubtitleTabs.find((tab) => tab.id === activeOnlineSubtitleTab.value) ??
+        onlineSubtitleTabs[0];
+    const labels = new Set<string>(activeTab.itemLabels);
+    return visibleItems(group).filter((item) => labels.has(item.label));
+};
+
+const displayedGroupItems = (group: SettingGroup): SettingItem[] =>
+    group.title === ONLINE_SUBTITLES_SETTING_GROUP_TITLE
+        ? visibleOnlineSubtitleItems(group)
+        : visibleItems(group);
+
 const shouldShowGroup = (group: SettingGroup): boolean =>
-    visibleItems(group).length > 0;
+    displayedGroupItems(group).length > 0;
 
 const getShaderDisplayName = (path: string): string => {
     const name = getPathDisplayName(path, path);
@@ -442,9 +485,51 @@ onBeforeUnmount(() => {
                 <div class="panel__subtitle panel__subtitle--large">
                     {{ group.title }}
                 </div>
+                <div
+                    v-if="group.title === ONLINE_SUBTITLES_SETTING_GROUP_TITLE"
+                    class="panel__section-toolbar"
+                >
+                    <div
+                        class="panel__tabs"
+                        role="tablist"
+                        aria-label="Online subtitle providers"
+                    >
+                        <button
+                            v-for="tab in onlineSubtitleTabs"
+                            :key="tab.id"
+                            class="panel__tab"
+                            :class="{
+                                'panel__tab--active': activeOnlineSubtitleTab === tab.id,
+                            }"
+                            type="button"
+                            role="tab"
+                            :aria-selected="activeOnlineSubtitleTab === tab.id"
+                            @click="activeOnlineSubtitleTab = tab.id"
+                        >
+                            {{ tab.label }}
+                        </button>
+                    </div>
+                    <div class="panel__toolbar-actions">
+                        <div
+                            v-if="onlineSubtitleCacheStatus"
+                            class="panel__cache-status"
+                            role="status"
+                        >
+                            {{ onlineSubtitleCacheStatus }}
+                        </div>
+                        <button
+                            class="panel__action panel__action--ghost panel__action--compact"
+                            type="button"
+                            :disabled="isClearingOnlineSubtitleCache"
+                            @click="clearDownloadedSubtitles"
+                        >
+                            {{ isClearingOnlineSubtitleCache ? "Clearing..." : "Clear Cache" }}
+                        </button>
+                    </div>
+                </div>
                 <div class="panel__table panel__table--card">
                     <div
-                        v-for="item in visibleItems(group)"
+                        v-for="item in displayedGroupItems(group)"
                         :key="item.label"
                         class="panel__row panel__row--card"
                     >
@@ -668,38 +753,6 @@ onBeforeUnmount(() => {
                                     </Teleport>
                                 </div>
                             </template>
-                        </div>
-                    </div>
-                    <div
-                        v-if="group.title === ONLINE_SUBTITLES_SETTING_GROUP_TITLE"
-                        class="panel__row panel__row--card"
-                    >
-                        <div class="panel__card-text">
-                            <div class="panel__card-title">Downloaded Subtitles</div>
-                            <div class="panel__card-subtitle">
-                                Cache is kept under 64 MB.
-                            </div>
-                        </div>
-                        <div class="panel__control panel__control--card panel__control--stack">
-                            <button
-                                class="panel__action panel__action--ghost panel__action--compact"
-                                type="button"
-                                :disabled="isClearingOnlineSubtitleCache"
-                                @click="clearDownloadedSubtitles"
-                            >
-                                {{
-                                    isClearingOnlineSubtitleCache
-                                        ? "Clearing..."
-                                        : "Clear Downloaded Subtitles"
-                                }}
-                            </button>
-                            <div
-                                v-if="onlineSubtitleCacheStatus"
-                                class="panel__cache-status"
-                                role="status"
-                            >
-                                {{ onlineSubtitleCacheStatus }}
-                            </div>
                         </div>
                     </div>
                 </div>

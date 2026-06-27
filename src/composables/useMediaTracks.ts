@@ -1,8 +1,13 @@
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { MediaTrack } from "../types/media";
 import { normalizeLocalPathForCompare } from "../utils/localMediaSiblings";
+import {
+    OPENSUBTITLES_ENABLED_SETTING_LABEL,
+    SUBSOURCE_ENABLED_SETTING_LABEL,
+} from "../mock/settings";
+import { loadUiState } from "./useUiStateStore";
 import { useSubtitleState, type SubtitleTarget } from "./useSubtitleState";
 
 type HistoryApi = {
@@ -35,6 +40,16 @@ export type OnlineSubtitleSearchResult = {
     downloads?: number | null;
 };
 
+export type OnlineSubtitleProviderId = "opensubtitles" | "subsource";
+
+export type OnlineSubtitleProviderTab = {
+    id: OnlineSubtitleProviderId;
+    label: string;
+    count: number;
+    loading: boolean;
+    searched: boolean;
+};
+
 type BackgroundSubtitleItem = {
     path: string;
     title?: string;
@@ -47,9 +62,59 @@ type TrackUpdateWaiter = {
     timeoutId: ReturnType<typeof setTimeout>;
 };
 
+type StoredSettingsState = {
+    settings?: {
+        groups?: Array<{
+            items?: Array<{
+                label?: string;
+                value?: string;
+            }>;
+        }>;
+    };
+};
+
 const TRACK_UPDATE_WAIT_TIMEOUT_MS = 700;
 const BACKGROUND_TRACK_ADD_GAP_MS = 40;
 const VISIBLE_MENU_TRACK_ADD_GAP_MS = 180;
+const DEFAULT_ONLINE_SUBTITLE_PROVIDER_ID: OnlineSubtitleProviderId = "opensubtitles";
+const onlineSubtitleProviderOptions: Array<{
+    id: OnlineSubtitleProviderId;
+    label: string;
+    enabledSettingLabel: string;
+}> = [
+    {
+        id: "opensubtitles",
+        label: "OpenSubtitles",
+        enabledSettingLabel: OPENSUBTITLES_ENABLED_SETTING_LABEL,
+    },
+    {
+        id: "subsource",
+        label: "SubSource",
+        enabledSettingLabel: SUBSOURCE_ENABLED_SETTING_LABEL,
+    },
+];
+
+const isSettingEnabled = (value?: string) => value === "On";
+
+const getStoredSettingValue = (
+    state: StoredSettingsState | null,
+    label: string,
+): string | undefined => {
+    for (const group of state?.settings?.groups ?? []) {
+        const item = group.items?.find((candidate) => candidate.label === label);
+        if (item?.value) return item.value;
+    }
+    return undefined;
+};
+
+const resolveInitialOnlineSubtitleProvider = async (): Promise<OnlineSubtitleProviderId> => {
+    const stored = await loadUiState<StoredSettingsState>();
+    return (
+        onlineSubtitleProviderOptions.find((provider) =>
+            isSettingEnabled(getStoredSettingValue(stored, provider.enabledSettingLabel)),
+        )?.id ?? DEFAULT_ONLINE_SUBTITLE_PROVIDER_ID
+    );
+};
 
 const subtitleExtensions = [
     "srt",
@@ -73,10 +138,44 @@ export const useMediaTracks = (
     const videoTracks = ref<MediaTrack[]>([]);
     const audioTracks = ref<MediaTrack[]>([]);
     const subTracks = ref<MediaTrack[]>([]);
-    const onlineSubtitleResults = ref<OnlineSubtitleSearchResult[]>([]);
-    const onlineSubtitleErrorMessage = ref("");
+    const activeOnlineSubtitleProviderId = ref<OnlineSubtitleProviderId>(
+        DEFAULT_ONLINE_SUBTITLE_PROVIDER_ID,
+    );
+    const onlineSubtitleResultMap = ref<Record<OnlineSubtitleProviderId, OnlineSubtitleSearchResult[]>>({
+        opensubtitles: [],
+        subsource: [],
+    });
+    const onlineSubtitleErrorMap = ref<Record<OnlineSubtitleProviderId, string>>({
+        opensubtitles: "",
+        subsource: "",
+    });
+    const onlineSubtitleLoadingMap = ref<Record<OnlineSubtitleProviderId, boolean>>({
+        opensubtitles: false,
+        subsource: false,
+    });
+    const onlineSubtitleSearchedMap = ref<Record<OnlineSubtitleProviderId, boolean>>({
+        opensubtitles: false,
+        subsource: false,
+    });
+    const onlineSubtitleProviderTabs = computed<OnlineSubtitleProviderTab[]>(() =>
+        onlineSubtitleProviderOptions.map((provider) => ({
+            id: provider.id,
+            label: provider.label,
+            count: onlineSubtitleResultMap.value[provider.id].length,
+            loading: onlineSubtitleLoadingMap.value[provider.id],
+            searched: onlineSubtitleSearchedMap.value[provider.id],
+        })),
+    );
+    const onlineSubtitleResults = computed(
+        () => onlineSubtitleResultMap.value[activeOnlineSubtitleProviderId.value],
+    );
+    const onlineSubtitleErrorMessage = computed(
+        () => onlineSubtitleErrorMap.value[activeOnlineSubtitleProviderId.value],
+    );
+    const isSearchingOnlineSubtitles = computed(
+        () => onlineSubtitleLoadingMap.value[activeOnlineSubtitleProviderId.value],
+    );
     const isOnlineSubtitleDialogOpen = ref(false);
-    const isSearchingOnlineSubtitles = ref(false);
     const isLoadingOnlineSubtitle = ref(false);
 
     const showAudioMenu = ref(false);
@@ -88,6 +187,7 @@ export const useMediaTracks = (
     let isAddingBackgroundSubtitle = false;
     let onlineSubtitleMediaKey = "";
     let onlineSubtitleMediaTitle: string | undefined;
+    let onlineSubtitleSearchGeneration = 0;
     let backgroundSubtitleGeneration = 0;
     let trackUpdateWaiters: TrackUpdateWaiter[] = [];
 
@@ -357,12 +457,59 @@ export const useMediaTracks = (
     ): Promise<void> => {
         const mediaKey = getMediaKey(playbackKey);
         if (!mediaKey) return;
+        onlineSubtitleSearchGeneration += 1;
+        const generation = onlineSubtitleSearchGeneration;
         onlineSubtitleMediaKey = mediaKey;
         onlineSubtitleMediaTitle = mediaTitle;
-        onlineSubtitleResults.value = [];
-        onlineSubtitleErrorMessage.value = "";
+        const initialProviderId = await resolveInitialOnlineSubtitleProvider();
+        if (
+            getMediaKey() !== mediaKey ||
+            generation !== onlineSubtitleSearchGeneration
+        ) return;
+        activeOnlineSubtitleProviderId.value = initialProviderId;
+        onlineSubtitleResultMap.value = {
+            opensubtitles: [],
+            subsource: [],
+        };
+        onlineSubtitleErrorMap.value = {
+            opensubtitles: "",
+            subsource: "",
+        };
+        onlineSubtitleLoadingMap.value = {
+            opensubtitles: false,
+            subsource: false,
+        };
+        onlineSubtitleSearchedMap.value = {
+            opensubtitles: false,
+            subsource: false,
+        };
         isOnlineSubtitleDialogOpen.value = true;
-        isSearchingOnlineSubtitles.value = true;
+        await searchOnlineSubtitleProvider(
+            initialProviderId,
+            mediaKey,
+            mediaTitle,
+            generation,
+        );
+    };
+
+    const searchOnlineSubtitleProvider = async (
+        providerId: OnlineSubtitleProviderId,
+        mediaKey: string,
+        mediaTitle: string | undefined,
+        generation: number,
+    ): Promise<void> => {
+        onlineSubtitleSearchedMap.value = {
+            ...onlineSubtitleSearchedMap.value,
+            [providerId]: true,
+        };
+        onlineSubtitleLoadingMap.value = {
+            ...onlineSubtitleLoadingMap.value,
+            [providerId]: true,
+        };
+        onlineSubtitleErrorMap.value = {
+            ...onlineSubtitleErrorMap.value,
+            [providerId]: "",
+        };
         try {
             const results = await invoke<OnlineSubtitleSearchResult[]>(
                 "search_online_subtitles",
@@ -370,28 +517,57 @@ export const useMediaTracks = (
                     payload: {
                         playbackKey: mediaKey,
                         mediaTitle,
+                        providerId,
                     },
                 },
             );
-            if (getMediaKey() !== mediaKey) return;
-            onlineSubtitleResults.value = results;
-            if (!results.length) {
-                onlineSubtitleErrorMessage.value = "No OpenSubtitles results found.";
-            }
+            if (
+                getMediaKey() !== mediaKey ||
+                generation !== onlineSubtitleSearchGeneration
+            ) return;
+            onlineSubtitleResultMap.value = {
+                ...onlineSubtitleResultMap.value,
+                [providerId]: results,
+            };
         } catch (error) {
-            if (getMediaKey() !== mediaKey) return;
-            onlineSubtitleErrorMessage.value = String(error);
+            if (
+                getMediaKey() !== mediaKey ||
+                generation !== onlineSubtitleSearchGeneration
+            ) return;
+            onlineSubtitleErrorMap.value = {
+                ...onlineSubtitleErrorMap.value,
+                [providerId]: String(error),
+            };
         } finally {
-            if (getMediaKey() === mediaKey) {
-                isSearchingOnlineSubtitles.value = false;
+            if (
+                getMediaKey() === mediaKey &&
+                generation === onlineSubtitleSearchGeneration
+            ) {
+                onlineSubtitleLoadingMap.value = {
+                    ...onlineSubtitleLoadingMap.value,
+                    [providerId]: false,
+                };
             }
         }
+    };
+
+    const setOnlineSubtitleProvider = (providerId: OnlineSubtitleProviderId) => {
+        if (activeOnlineSubtitleProviderId.value === providerId) return;
+        activeOnlineSubtitleProviderId.value = providerId;
+        const mediaKey = onlineSubtitleMediaKey;
+        if (!mediaKey) return;
+        if (onlineSubtitleSearchedMap.value[providerId]) return;
+        void searchOnlineSubtitleProvider(
+            providerId,
+            mediaKey,
+            onlineSubtitleMediaTitle,
+            onlineSubtitleSearchGeneration,
+        );
     };
 
     const closeOnlineSubtitleDialog = () => {
         if (isLoadingOnlineSubtitle.value) return;
         isOnlineSubtitleDialogOpen.value = false;
-        onlineSubtitleErrorMessage.value = "";
     };
 
     const addSelectedOnlineSubtitleTrack = async (
@@ -400,7 +576,10 @@ export const useMediaTracks = (
         const mediaKey = onlineSubtitleMediaKey;
         if (!mediaKey || getMediaKey() !== mediaKey) return false;
         isLoadingOnlineSubtitle.value = true;
-        onlineSubtitleErrorMessage.value = "";
+        onlineSubtitleErrorMap.value = {
+            ...onlineSubtitleErrorMap.value,
+            [result.providerId as OnlineSubtitleProviderId]: "",
+        };
         try {
             const subtitle = await invoke<OnlineSubtitleDownload>(
                 "download_online_subtitle",
@@ -427,7 +606,10 @@ export const useMediaTracks = (
             }
             return added;
         } catch (error) {
-            onlineSubtitleErrorMessage.value = String(error);
+            onlineSubtitleErrorMap.value = {
+                ...onlineSubtitleErrorMap.value,
+                [result.providerId as OnlineSubtitleProviderId]: String(error),
+            };
             return false;
         } finally {
             isLoadingOnlineSubtitle.value = false;
@@ -485,13 +667,28 @@ export const useMediaTracks = (
         subTracks.value = [];
         showAudioMenu.value = false;
         showSubMenu.value = false;
-        onlineSubtitleResults.value = [];
-        onlineSubtitleErrorMessage.value = "";
+        activeOnlineSubtitleProviderId.value = DEFAULT_ONLINE_SUBTITLE_PROVIDER_ID;
+        onlineSubtitleResultMap.value = {
+            opensubtitles: [],
+            subsource: [],
+        };
+        onlineSubtitleErrorMap.value = {
+            opensubtitles: "",
+            subsource: "",
+        };
+        onlineSubtitleLoadingMap.value = {
+            opensubtitles: false,
+            subsource: false,
+        };
+        onlineSubtitleSearchedMap.value = {
+            opensubtitles: false,
+            subsource: false,
+        };
         isOnlineSubtitleDialogOpen.value = false;
-        isSearchingOnlineSubtitles.value = false;
         isLoadingOnlineSubtitle.value = false;
         onlineSubtitleMediaKey = "";
         onlineSubtitleMediaTitle = undefined;
+        onlineSubtitleSearchGeneration += 1;
         subtitleState.resetSubtitleState();
     };
 
@@ -510,6 +707,8 @@ export const useMediaTracks = (
         videoTracks,
         audioTracks,
         subTracks,
+        activeOnlineSubtitleProviderId,
+        onlineSubtitleProviderTabs,
         onlineSubtitleResults,
         onlineSubtitleErrorMessage,
         isOnlineSubtitleDialogOpen,
@@ -528,6 +727,7 @@ export const useMediaTracks = (
         addExternalAudioTrack,
         addExternalSubtitleTrack,
         searchOnlineSubtitleTracks,
+        setOnlineSubtitleProvider,
         addSelectedOnlineSubtitleTrack,
         closeOnlineSubtitleDialog,
         applyExternalTracksForUrl,

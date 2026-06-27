@@ -80,6 +80,9 @@ export const DISABLE_SUBTITLES_SETTING_LABEL = "DISABLE_SUBTITLES";
 export const OPENSUBTITLES_ENABLED_SETTING_LABEL = "OPENSUBTITLES_ENABLED";
 export const OPENSUBTITLES_API_KEY_SETTING_LABEL = "OPENSUBTITLES_API_KEY";
 export const OPENSUBTITLES_LANGUAGES_SETTING_LABEL = "OPENSUBTITLES_LANGUAGES";
+export const SUBSOURCE_ENABLED_SETTING_LABEL = "SUBSOURCE_ENABLED";
+export const SUBSOURCE_API_KEY_SETTING_LABEL = "SUBSOURCE_API_KEY";
+export const SUBSOURCE_LANGUAGES_SETTING_LABEL = "SUBSOURCE_LANGUAGES";
 export const NETWORK_START_AT_ROOT_SETTING_LABEL = "NETWORK_START_AT_ROOT";
 export const NETWORK_PARALLEL_DOWNLOAD_SETTING_LABEL =
     "NETWORK_PARALLEL_DOWNLOAD";
@@ -230,6 +233,28 @@ export const defaultSettingGroups: SettingGroup[] = [
                 value: "en",
                 type: "text",
                 placeholder: "en,zh",
+            },
+            {
+                label: SUBSOURCE_ENABLED_SETTING_LABEL,
+                displayLabel: "SubSource",
+                value: "Off",
+                type: "toggle",
+                onValue: "On",
+                offValue: "Off",
+            },
+            {
+                label: SUBSOURCE_API_KEY_SETTING_LABEL,
+                displayLabel: "SubSource API Key",
+                value: "",
+                type: "text",
+                placeholder: "Create a free key from your SubSource profile",
+            },
+            {
+                label: SUBSOURCE_LANGUAGES_SETTING_LABEL,
+                displayLabel: "Subtitle Languages",
+                value: "english",
+                type: "text",
+                placeholder: "english,arabic,persian",
             },
         ],
     },

@@ -1190,6 +1190,7 @@ watch(
 
 .track-menu__item--subtitle {
     align-items: center;
+    min-width: 0;
 }
 
 .track-menu__text--subtitle {
@@ -1300,6 +1301,8 @@ watch(
 
 .track-menu--subtitle {
     min-width: 320px;
+    width: min(360px, calc(100vw - 24px));
+    max-width: calc(100vw - 24px);
 }
 
 .track-menu--subtitle-advanced {

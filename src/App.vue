@@ -540,11 +540,14 @@ useAppStartupBindings({
 
         <OnlineSubtitleDialog
             :open="tracks.isOnlineSubtitleDialogOpen.value"
+            :provider-tabs="tracks.onlineSubtitleProviderTabs.value"
+            :active-provider-id="tracks.activeOnlineSubtitleProviderId.value"
             :results="tracks.onlineSubtitleResults.value"
             :loading="tracks.isSearchingOnlineSubtitles.value"
             :applying="tracks.isLoadingOnlineSubtitle.value"
             :error-message="tracks.onlineSubtitleErrorMessage.value"
             @close="tracks.closeOnlineSubtitleDialog"
+            @provider-change="tracks.setOnlineSubtitleProvider"
             @select="tracks.addSelectedOnlineSubtitleTrack"
         />
 

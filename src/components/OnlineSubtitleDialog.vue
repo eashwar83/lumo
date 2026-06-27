@@ -1,9 +1,14 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import type { OnlineSubtitleSearchResult } from "../composables/useMediaTracks";
+import type {
+    OnlineSubtitleProviderId,
+    OnlineSubtitleProviderTab,
+    OnlineSubtitleSearchResult,
+} from "../composables/useMediaTracks";
 
 const props = defineProps<{
     open: boolean;
+    providerTabs: OnlineSubtitleProviderTab[];
+    activeProviderId: OnlineSubtitleProviderId;
     results: OnlineSubtitleSearchResult[];
     loading: boolean;
     applying: boolean;
@@ -12,14 +17,9 @@ const props = defineProps<{
 
 const emit = defineEmits<{
     (e: "close"): void;
+    (e: "providerChange", providerId: OnlineSubtitleProviderId): void;
     (e: "select", result: OnlineSubtitleSearchResult): void;
 }>();
-
-const resultTitle = computed(() => {
-    if (props.loading) return "Searching subtitles...";
-    const count = props.results.length;
-    return `${count} Subtitle${count === 1 ? "" : "s"} Found.`;
-});
 
 const formatDownloads = (downloads?: number | null) => {
     if (downloads === null || downloads === undefined) return "";
@@ -33,14 +33,38 @@ const formatDownloads = (downloads?: number | null) => {
             <div class="online-subtitle-dialog__backdrop" @click="emit('close')"></div>
             <div class="online-subtitle-dialog__panel ui-surface" role="dialog" aria-modal="true">
                 <div class="online-subtitle-dialog__header">
-                    <div class="online-subtitle-dialog__heading">
-                        <div class="online-subtitle-dialog__title">{{ resultTitle }}</div>
-                        <div
-                            v-if="!props.loading && props.results.length"
-                            class="online-subtitle-dialog__subtitle"
+                    <div
+                        class="online-subtitle-dialog__tabs"
+                        role="tablist"
+                        aria-label="Online subtitle source"
+                    >
+                        <button
+                            v-for="provider in props.providerTabs"
+                            :key="provider.id"
+                            class="online-subtitle-dialog__tab"
+                            :class="{
+                                'online-subtitle-dialog__tab--active':
+                                    provider.id === props.activeProviderId,
+                            }"
+                            type="button"
+                            role="tab"
+                            :aria-selected="provider.id === props.activeProviderId"
+                            :disabled="props.applying"
+                            @click="emit('providerChange', provider.id)"
                         >
-                            Select a subtitle to download and load.
-                        </div>
+                            <span>{{ provider.label }}</span>
+                            <span
+                                v-if="provider.loading"
+                                class="online-subtitle-dialog__tab-spinner"
+                                aria-hidden="true"
+                            ></span>
+                            <span
+                                v-else-if="provider.searched"
+                                class="online-subtitle-dialog__tab-count"
+                            >
+                                {{ provider.count }}
+                            </span>
+                        </button>
                     </div>
                     <button
                         class="online-subtitle-dialog__close"
@@ -54,9 +78,11 @@ const formatDownloads = (downloads?: number | null) => {
                         </svg>
                     </button>
                 </div>
-
                 <div v-if="props.loading" class="online-subtitle-dialog__state">
-                    Searching OpenSubtitles...
+                    <span
+                        class="online-subtitle-dialog__content-spinner"
+                        aria-label="Searching"
+                    ></span>
                 </div>
                 <div v-else-if="props.errorMessage" class="online-subtitle-dialog__error">
                     {{ props.errorMessage }}
@@ -129,34 +155,23 @@ const formatDownloads = (downloads?: number | null) => {
 }
 
 .online-subtitle-dialog__header {
+    position: relative;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 16px 16px 12px;
+    justify-content: center;
+    padding: 10px 50px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.online-subtitle-dialog__heading {
-    min-width: 0;
-}
-
-.online-subtitle-dialog__title {
-    font-size: 16px;
-    font-weight: 650;
-}
-
-.online-subtitle-dialog__subtitle {
-    margin-top: 5px;
-    color: rgba(255, 255, 255, 0.62);
-    font-size: 12px;
-}
-
 .online-subtitle-dialog__close {
+    position: absolute;
+    top: 50%;
+    right: 16px;
     display: grid;
     width: 30px;
     height: 30px;
     place-items: center;
+    transform: translateY(-50%);
     border: none;
     border-radius: 8px;
     background: rgba(255, 255, 255, 0.08);
@@ -174,6 +189,93 @@ const formatDownloads = (downloads?: number | null) => {
 
 .online-subtitle-dialog__close:disabled {
     opacity: 0.48;
+}
+
+.online-subtitle-dialog__tabs {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    min-width: 0;
+    max-width: 100%;
+    padding: 2px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 12px;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.035)),
+        rgba(10, 15, 18, 0.28);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    overflow-x: auto;
+}
+
+.online-subtitle-dialog__tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 26px;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.58);
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 1.2;
+    white-space: nowrap;
+    transition:
+        background-color 0.18s ease,
+        border-color 0.18s ease,
+        box-shadow 0.18s ease,
+        color 0.18s ease;
+}
+
+.online-subtitle-dialog__tab:hover:not(:disabled) {
+    color: rgba(255, 255, 255, 0.82);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.online-subtitle-dialog__tab--active {
+    border-color: rgba(116, 166, 255, 0.66);
+    background:
+        linear-gradient(180deg, rgba(116, 166, 255, 0.19), rgba(116, 166, 255, 0.1)),
+        rgba(255, 255, 255, 0.055);
+    color: #f6f6f6;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.12),
+        0 0 0 1px rgba(116, 166, 255, 0.14);
+}
+
+.online-subtitle-dialog__tab:disabled {
+    opacity: 0.56;
+}
+
+.online-subtitle-dialog__tab-count {
+    min-width: 16px;
+    padding: 1px 4px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.68);
+    font-size: 10px;
+    text-align: center;
+}
+
+.online-subtitle-dialog__tab--active .online-subtitle-dialog__tab-count {
+    background: rgba(116, 166, 255, 0.18);
+    color: rgba(255, 255, 255, 0.88);
+}
+
+.online-subtitle-dialog__tab-spinner {
+    width: 9px;
+    height: 9px;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-top-color: rgba(255, 255, 255, 0.78);
+    border-radius: 999px;
+    animation: online-subtitle-dialog-spin 0.7s linear infinite;
+}
+
+@keyframes online-subtitle-dialog-spin {
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 .online-subtitle-dialog__list {
@@ -247,6 +349,16 @@ const formatDownloads = (downloads?: number | null) => {
     padding: 20px 16px;
     color: rgba(255, 255, 255, 0.72);
     font-size: 13px;
+}
+
+.online-subtitle-dialog__content-spinner {
+    display: block;
+    width: 18px;
+    height: 18px;
+    border: 2px solid rgba(255, 255, 255, 0.18);
+    border-top-color: rgba(255, 255, 255, 0.78);
+    border-radius: 999px;
+    animation: online-subtitle-dialog-spin 0.7s linear infinite;
 }
 
 .online-subtitle-dialog__error {

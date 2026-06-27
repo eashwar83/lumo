@@ -4,14 +4,19 @@ use reqwest::blocking::{Client, RequestBuilder, Response};
 use reqwest::header::{ACCEPT, CONTENT_TYPE, REFERER, USER_AGENT};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::time::Duration;
 
 const OPENSUBTITLES_API_KEY_SETTING_LABEL: &str = "OPENSUBTITLES_API_KEY";
 const OPENSUBTITLES_ENABLED_SETTING_LABEL: &str = "OPENSUBTITLES_ENABLED";
 const OPENSUBTITLES_LANGUAGES_SETTING_LABEL: &str = "OPENSUBTITLES_LANGUAGES";
+const SUBSOURCE_ENABLED_SETTING_LABEL: &str = "SUBSOURCE_ENABLED";
+const SUBSOURCE_API_KEY_SETTING_LABEL: &str = "SUBSOURCE_API_KEY";
+const SUBSOURCE_LANGUAGES_SETTING_LABEL: &str = "SUBSOURCE_LANGUAGES";
 const OPENSUBTITLES_API_BASE: &str = "https://api.opensubtitles.com/api/v1";
+const SUBSOURCE_API_BASE: &str = "https://api.subsource.net/api/v1";
+const SUBSOURCE_AUTH_HEADER: &str = "X-API-Key";
 const SOIA_OPENSUBTITLES_API_KEY: &str = "XicSbb1oRkv5A7ZIaHRacIYrSZwsuYUF";
 const SOIA_USER_AGENT: &str = "Soia/0.2.6";
 const BROWSER_DOWNLOAD_USER_AGENT: &str =
@@ -25,6 +30,8 @@ const ONLINE_SUBTITLE_CACHE_LIMIT_BYTES: u64 = 64 * 1024 * 1024;
 pub(crate) struct OnlineSubtitlePayload {
     playback_key: String,
     media_title: Option<String>,
+    #[serde(default = "default_opensubtitles_provider_id")]
+    provider_id: String,
 }
 
 #[derive(Deserialize)]
@@ -109,6 +116,51 @@ struct OpenSubtitlesConfig {
     languages: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SubSourceMovieSearchResponse {
+    data: Vec<SubSourceMovie>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SubSourceMovie {
+    movie_id: i64,
+    title: String,
+    #[serde(default)]
+    alternate_title: Option<String>,
+    #[serde(default)]
+    release_year: Option<i64>,
+    #[serde(default)]
+    subtitle_count: Option<i64>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SubSourceSubtitlesResponse {
+    data: Vec<SubSourceSubtitle>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SubSourceSubtitle {
+    subtitle_id: i64,
+    language: String,
+    #[serde(default)]
+    release_info: Vec<String>,
+    #[serde(default)]
+    production_type: Option<String>,
+    #[serde(default)]
+    release_type: Option<String>,
+    #[serde(default)]
+    downloads: Option<i64>,
+}
+
+struct SubSourceConfig {
+    api_key: String,
+    languages: Vec<String>,
+}
+
 struct SubtitleSearchContext<'a> {
     app: &'a tauri::AppHandle,
     client: &'a Client,
@@ -121,7 +173,6 @@ struct SubtitleDownloadContext<'a> {
 
 trait SubtitleProvider {
     fn id(&self) -> &'static str;
-    fn display_name(&self) -> &'static str;
 
     fn search(
         &self,
@@ -137,6 +188,7 @@ trait SubtitleProvider {
 }
 
 struct OpenSubtitlesProvider;
+struct SubSourceProvider;
 
 fn default_opensubtitles_provider_id() -> String {
     "opensubtitles".to_string()
@@ -346,6 +398,52 @@ fn maybe_decompress_gzip(bytes: Vec<u8>, file_name: &str) -> Result<(Vec<u8>, St
     Ok((decoded, normalized_name))
 }
 
+fn is_subtitle_archive_entry(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    [
+        ".srt", ".ass", ".ssa", ".vtt", ".sub", ".idx", ".sup", ".smi", ".ttml",
+    ]
+    .iter()
+    .any(|extension| lower.ends_with(extension))
+}
+
+fn extract_subtitle_from_zip(
+    bytes: Vec<u8>,
+    fallback_name: &str,
+    source_name: &str,
+) -> Result<(Vec<u8>, String), String> {
+    let cursor = Cursor::new(bytes);
+    let mut archive = zip::ZipArchive::new(cursor)
+        .map_err(|error| format!("{source_name} subtitle archive is invalid: {error}"))?;
+    let mut selected_index = None;
+    for index in 0..archive.len() {
+        let file = archive
+            .by_index(index)
+            .map_err(|error| format!("{source_name} subtitle archive entry is invalid: {error}"))?;
+        if file.is_file() && is_subtitle_archive_entry(file.name()) {
+            selected_index = Some(index);
+            break;
+        }
+    }
+    let index = selected_index.ok_or_else(|| {
+        format!("{source_name} subtitle archive did not contain a supported subtitle file.")
+    })?;
+    let mut file = archive
+        .by_index(index)
+        .map_err(|error| format!("{source_name} subtitle archive entry is invalid: {error}"))?;
+    let file_name = file
+        .name()
+        .rsplit('/')
+        .next()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(fallback_name)
+        .to_string();
+    let mut extracted = Vec::new();
+    file.read_to_end(&mut extracted)
+        .map_err(|error| format!("Failed to read {source_name} subtitle archive: {error}"))?;
+    Ok((extracted, file_name))
+}
+
 fn resolve_opensubtitles_config(app: &tauri::AppHandle) -> Result<OpenSubtitlesConfig, String> {
     let enabled = persisted_setting(app, OPENSUBTITLES_ENABLED_SETTING_LABEL)
         .map(|value| value == "On")
@@ -362,6 +460,36 @@ fn resolve_opensubtitles_config(app: &tauri::AppHandle) -> Result<OpenSubtitlesC
     Ok(OpenSubtitlesConfig {
         api_key,
         use_default_api_key,
+        languages,
+    })
+}
+
+fn split_subtitle_languages(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn resolve_subsource_config(app: &tauri::AppHandle) -> Result<SubSourceConfig, String> {
+    let enabled = persisted_setting(app, SUBSOURCE_ENABLED_SETTING_LABEL)
+        .map(|value| value == "On")
+        .unwrap_or(false);
+    if !enabled {
+        return Err("SubSource is disabled in Settings.".to_string());
+    }
+
+    let api_key = persisted_setting(app, SUBSOURCE_API_KEY_SETTING_LABEL)
+        .ok_or_else(|| "Add a SubSource API key in Settings and try again.".to_string())?;
+    let languages = split_subtitle_languages(
+        &persisted_setting(app, SUBSOURCE_LANGUAGES_SETTING_LABEL)
+            .unwrap_or_else(|| "english".to_string()),
+    );
+
+    Ok(SubSourceConfig {
+        api_key,
         languages,
     })
 }
@@ -411,6 +539,10 @@ fn with_api_key(request: RequestBuilder, api_key: &str) -> RequestBuilder {
     request.header("Api-Key", api_key)
 }
 
+fn with_subsource_api_key(request: RequestBuilder, config: &SubSourceConfig) -> RequestBuilder {
+    request.header(SUBSOURCE_AUTH_HEADER, config.api_key.as_str())
+}
+
 fn send_with_retry(request: RequestBuilder, context: &str) -> Result<Response, String> {
     let mut last_error = None;
     for attempt in 0..3 {
@@ -449,10 +581,6 @@ fn send_with_retry(request: RequestBuilder, context: &str) -> Result<Response, S
 impl SubtitleProvider for OpenSubtitlesProvider {
     fn id(&self) -> &'static str {
         "opensubtitles"
-    }
-
-    fn display_name(&self) -> &'static str {
-        "OpenSubtitles"
     }
 
     fn search(
@@ -609,13 +737,183 @@ impl SubtitleProvider for OpenSubtitlesProvider {
 
         Ok(OnlineSubtitleDownload {
             path: path.to_string_lossy().to_string(),
-            title: format!("{}: {file_name}", self.display_name()),
+            title: file_name,
+        })
+    }
+}
+
+impl SubtitleProvider for SubSourceProvider {
+    fn id(&self) -> &'static str {
+        "subsource"
+    }
+
+    fn search(
+        &self,
+        context: &SubtitleSearchContext<'_>,
+        payload: &OnlineSubtitlePayload,
+    ) -> Result<Vec<OnlineSubtitleSearchResult>, String> {
+        let config = resolve_subsource_config(context.app)?;
+        let query = query_from_payload(payload);
+        if query.is_empty() {
+            return Err("No media title or path is available for subtitle search.".to_string());
+        }
+
+        let search_request = with_subsource_api_key(
+            context
+                .client
+                .get(format!("{SUBSOURCE_API_BASE}/movies/search"))
+                .header(USER_AGENT, SOIA_USER_AGENT)
+                .header(ACCEPT, "application/json")
+                .query(&[
+                    ("searchType", "text"),
+                    ("q", query.as_str()),
+                    ("type", "all"),
+                ]),
+            &config,
+        );
+        let movies: SubSourceMovieSearchResponse =
+            send_with_retry(search_request, "SubSource search failed")?
+                .json()
+                .map_err(|error| format!("SubSource search response is invalid: {error}"))?;
+
+        let languages: Vec<Option<&str>> = if config.languages.is_empty() {
+            vec![None]
+        } else {
+            config
+                .languages
+                .iter()
+                .map(|language| Some(language.as_str()))
+                .collect()
+        };
+        let mut results = Vec::new();
+        for movie in movies
+            .data
+            .iter()
+            .filter(|movie| movie.subtitle_count.unwrap_or(1) > 0)
+            .take(6)
+        {
+            for language in &languages {
+                let movie_id = movie.movie_id.to_string();
+                let mut params = vec![
+                    ("movieId", movie_id.as_str()),
+                    ("limit", "30"),
+                    ("sort", "rating"),
+                ];
+                if let Some(language) = language {
+                    params.push(("language", language));
+                }
+
+                let subtitles_request = with_subsource_api_key(
+                    context
+                        .client
+                        .get(format!("{SUBSOURCE_API_BASE}/subtitles"))
+                        .header(USER_AGENT, SOIA_USER_AGENT)
+                        .header(ACCEPT, "application/json")
+                        .query(&params),
+                    &config,
+                );
+                let subtitles: SubSourceSubtitlesResponse =
+                    send_with_retry(subtitles_request, "SubSource subtitles search failed")?
+                        .json()
+                        .map_err(|error| {
+                            format!("SubSource subtitles response is invalid: {error}")
+                        })?;
+
+                for subtitle in subtitles.data {
+                    let year = movie
+                        .release_year
+                        .map(|year| year.to_string())
+                        .unwrap_or_default();
+                    let release = if subtitle.release_info.is_empty() {
+                        [
+                            subtitle.production_type.as_deref(),
+                            subtitle.release_type.as_deref(),
+                        ]
+                        .into_iter()
+                        .flatten()
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                    } else {
+                        subtitle.release_info.join(" ")
+                    };
+                    let title = [
+                        movie.title.as_str(),
+                        movie.alternate_title.as_deref().unwrap_or(""),
+                        year.as_str(),
+                        release.as_str(),
+                    ]
+                    .into_iter()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" · ");
+                    let file_name = format!(
+                        "{}_{}.zip",
+                        safe_file_part(&movie.title),
+                        subtitle.subtitle_id
+                    );
+
+                    results.push(OnlineSubtitleSearchResult {
+                        id: format!("{}-{}", self.id(), subtitle.subtitle_id),
+                        provider_id: self.id().to_string(),
+                        download_id: subtitle.subtitle_id.to_string(),
+                        file_id: Some(subtitle.subtitle_id),
+                        title,
+                        file_name,
+                        language: subtitle.language,
+                        downloads: subtitle.downloads,
+                    });
+                    if results.len() >= 50 {
+                        return Ok(results);
+                    }
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
+    fn download(
+        &self,
+        context: &SubtitleDownloadContext<'_>,
+        payload: &DownloadOnlineSubtitlePayload,
+    ) -> Result<OnlineSubtitleDownload, String> {
+        let config = resolve_subsource_config(context.app)?;
+        let subtitle_id = payload
+            .file_id
+            .or_else(|| payload.download_id.parse::<i64>().ok())
+            .ok_or_else(|| "SubSource download id is invalid.".to_string())?;
+        let download_request = with_subsource_api_key(
+            context
+                .client
+                .get(format!("{SUBSOURCE_API_BASE}/subtitles/{subtitle_id}/download"))
+                .header(USER_AGENT, SOIA_USER_AGENT)
+                .header(ACCEPT, "application/zip, application/octet-stream, */*"),
+            &config,
+        );
+        let bytes = send_with_retry(download_request, "SubSource download failed")?
+            .bytes()
+            .map_err(|error| format!("SubSource subtitle body is invalid: {error}"))?
+            .to_vec();
+        let (bytes, file_name) = extract_subtitle_from_zip(bytes, &payload.file_name, "SubSource")?;
+        let cache_name = format!(
+            "{}_{}",
+            safe_file_part(&payload.title),
+            safe_file_part(&file_name),
+        );
+        let path = subtitle_cache_dir(context.app)?.join(cache_name);
+        std::fs::write(&path, bytes).map_err(|error| error.to_string())?;
+        prune_subtitle_cache(context.app)?;
+
+        Ok(OnlineSubtitleDownload {
+            path: path.to_string_lossy().to_string(),
+            title: file_name,
         })
     }
 }
 
 fn subtitle_providers() -> Vec<Box<dyn SubtitleProvider>> {
-    vec![Box::new(OpenSubtitlesProvider)]
+    vec![Box::new(OpenSubtitlesProvider), Box::new(SubSourceProvider)]
 }
 
 fn search_online_subtitles_blocking(
@@ -628,18 +926,11 @@ fn search_online_subtitles_blocking(
         client: &client,
     };
     let providers = subtitle_providers();
-    let mut results = Vec::new();
-    let mut errors = Vec::new();
-    for provider in providers {
-        match provider.search(&context, &payload) {
-            Ok(mut provider_results) => results.append(&mut provider_results),
-            Err(error) => errors.push(format!("{}: {error}", provider.display_name())),
-        }
-    }
-    if results.is_empty() && !errors.is_empty() {
-        return Err(errors.join("\n"));
-    }
-    Ok(results)
+    let provider = providers
+        .iter()
+        .find(|provider| provider.id() == payload.provider_id)
+        .ok_or_else(|| format!("Unsupported subtitle provider: {}", payload.provider_id))?;
+    provider.search(&context, &payload)
 }
 
 fn download_online_subtitle_blocking(
