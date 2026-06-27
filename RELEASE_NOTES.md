@@ -19,14 +19,19 @@ You can also go to System Settings > Privacy & Security and click "Open Anyway" 
 
 The app is open-source and its code is publicly available for anyone to inspect.
 
-## [0.2.6] - 2026-06-13
+## [0.2.7] - 2026-06-27
 
 ### Highlights
 
-- macOS now uses a vibrancy effect with a transparent glass background for a more native desktop look.
-- Added a built-in Favorites Playlist that stays at the top of the playlist drawer, with an Add to Favorites action in the playback right-click menu.
-- Added right-click actions to the URL field for copy, cut, paste, delete, and select all.
+* **YouTube Playlist Support**
+  Paste a YouTube playlist URL and Soia will automatically load all videos into a playable playlist.
+
+* **Built-in Online Subtitle Search**
+  Search subtitles directly from the subtitle menu using OpenSubtitles and SubSource. Results are cached locally for faster access, and the cache can be cleared anytime from Settings.
 
 ### Fixes
 
-- Fixed excessive playback progress disk writes while media is playing.
+* Fixed an issue on macOS where the window chrome did not update correctly when switching between light and dark appearance modes.
+
+* Fixed playback control hover states that could occasionally block mouse interactions and prevent clicks from registering.
+

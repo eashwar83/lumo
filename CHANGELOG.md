@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.2.7] - 2026-06-27
+
+### Features
+
+- Added YouTube playlist support via yt-dlp: opening a YouTube playlist URL now resolves all entries and queues them as a playback playlist.
+- Added online subtitle search via OpenSubtitles and SubSource providers, with search results cache and cache-clear controls in Settings.
+- Added an online subtitle search button in the subtitle track menu header to trigger a provider search from the current file context.
+- Routed SMB and WebDAV media streams through a local proxy to improve compatibility and buffering reliability.
+
+### Fixes
+
+- Improved pointer-event detection in playback controls to prevent ghost hover states from blocking interactions.
+- Decoupled context menu close from track selection so the menu dismisses at the correct moment.
+- Fixed macOS window appearance to stay in sync with the active app theme (light/dark).
+- Fixed Android build to source runtime libs from the correct mpv Android directory.
+
 ## [0.2.6] - 2026-06-13
 
 ### Features

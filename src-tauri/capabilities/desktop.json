@@ -4,7 +4,8 @@
   "description": "Desktop capability for the main window",
   "platforms": [
     "macOS",
-    "windows"
+    "windows",
+    "linux"
   ],
   "windows": [
     "main"

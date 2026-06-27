@@ -447,7 +447,7 @@ fn extract_subtitle_from_zip(
 fn resolve_opensubtitles_config(app: &tauri::AppHandle) -> Result<OpenSubtitlesConfig, String> {
     let enabled = persisted_setting(app, OPENSUBTITLES_ENABLED_SETTING_LABEL)
         .map(|value| value == "On")
-        .unwrap_or(false);
+        .unwrap_or(true);
     if !enabled {
         return Err("OpenSubtitles is disabled in Settings.".to_string());
     }

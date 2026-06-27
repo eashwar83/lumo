@@ -26,6 +26,7 @@
 - Picture in Picture (PiP) on macOS and Windows
 - Dual subtitles for bilingual viewing
 - Fuzzy subtitle matching for both local and network media
+- Online subtitle search via OpenSubtitles and SubSource
 - Advanced subtitle appearance controls for font, color, size, and position
 - Custom shaders for high-quality scaling and rendering
 - Anime mode with auto-detection and shader auto-apply

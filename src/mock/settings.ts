@@ -215,7 +215,7 @@ export const defaultSettingGroups: SettingGroup[] = [
             {
                 label: OPENSUBTITLES_ENABLED_SETTING_LABEL,
                 displayLabel: "OpenSubtitles",
-                value: "Off",
+                value: "On",
                 type: "toggle",
                 onValue: "On",
                 offValue: "Off",
