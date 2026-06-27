@@ -630,6 +630,7 @@ useAppStartupBindings({
             @toggle-dual-sub="tracks.setDualSubEnabled"
             @add-external-audio="tracks.addExternalAudioTrack"
             @add-external-sub="tracks.addExternalSubtitleTrack"
+            @find-online-sub="player.state.media.url.trim() && tracks.searchOnlineSubtitleTracks(player.state.media.url, player.state.media.title || undefined)"
             @toggle-fullscreen="onToggleFullscreen"
         />
 

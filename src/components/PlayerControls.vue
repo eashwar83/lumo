@@ -82,6 +82,7 @@ const emit = defineEmits<{
     (e: "toggle-dual-sub", enabled: boolean): void;
     (e: "add-external-audio"): void;
     (e: "add-external-sub"): void;
+    (e: "find-online-sub"): void;
     (e: "toggle-fullscreen"): void;
 }>();
 
@@ -303,6 +304,7 @@ onUnmounted(() => {
                         @toggle-dual-sub="emit('toggle-dual-sub', $event)"
                         @add-external-audio="emit('add-external-audio')"
                         @add-external-sub="emit('add-external-sub')"
+                        @find-online-sub="emit('find-online-sub')"
                         @toggle-fullscreen="emit('toggle-fullscreen')"
                     />
                 </div>
