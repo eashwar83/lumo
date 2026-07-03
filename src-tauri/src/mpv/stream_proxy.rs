@@ -19,6 +19,8 @@ use url::Url;
 
 const HTTP_USER_AGENT: &str = "Lavf/61.7.100";
 const MAX_REQUEST_HEADER_BYTES: usize = 128 * 1024;
+const FETCH_REMOTE_MAX_RETRIES: usize = 2;
+const FETCH_REMOTE_RETRY_DELAY: Duration = Duration::from_millis(500);
 const PARALLEL_RANGE_MIN_BYTES: u64 = 16 * 1024 * 1024;
 const PARALLEL_RANGE_CHUNK_BYTES: u64 = 2 * 1024 * 1024;
 const PARALLEL_RANGE_CONNECTIONS: usize = 3;
@@ -833,17 +835,38 @@ async fn fetch_remote(
     remote_url: &str,
     range: Option<&str>,
 ) -> Result<Response, String> {
-    let client = build_client(app_handle)?;
-    let mut request = client
-        .get(remote_url)
-        .header(ACCEPT_ENCODING, "identity")
-        .header(USER_AGENT, HTTP_USER_AGENT);
-    if let Some(range) = range {
-        request = request.header(RANGE, range);
+    let mut last_error = String::new();
+    for attempt in 0..=FETCH_REMOTE_MAX_RETRIES {
+        if attempt > 0 {
+            debug!(
+                "stream proxy: retrying fetch attempt={} url={}",
+                attempt,
+                redact_url(remote_url)
+            );
+            tokio::time::sleep(FETCH_REMOTE_RETRY_DELAY).await;
+        }
+        let client = build_client(app_handle)?;
+        let mut request = client
+            .get(remote_url)
+            .header(ACCEPT_ENCODING, "identity")
+            .header(USER_AGENT, HTTP_USER_AGENT);
+        if let Some(range) = range {
+            request = request.header(RANGE, range);
+        }
+        request = apply_basic_auth(request, remote_url);
+        request = apply_headers(request, remote_url);
+        match request.send().await {
+            Ok(response) => return Ok(response),
+            Err(error) => {
+                last_error = error.to_string();
+                // Only retry on connection-level errors, not on HTTP-level errors.
+                if !error.is_connect() && !error.is_request() {
+                    break;
+                }
+            }
+        }
     }
-    request = apply_basic_auth(request, remote_url);
-    request = apply_headers(request, remote_url);
-    request.send().await.map_err(|error| error.to_string())
+    Err(last_error)
 }
 
 fn build_client(app_handle: &AppHandle) -> Result<Client, String> {
@@ -1097,12 +1120,8 @@ fn is_parallel_range_excluded_url(remote_url: &str) -> bool {
     let Ok(url) = Url::parse(remote_url) else {
         return true;
     };
-    let host = url.host_str().unwrap_or_default().to_ascii_lowercase();
     let path = url.path().to_ascii_lowercase();
     path.ends_with(".m3u8")
-        || host.contains("googlevideo.com")
-        || host.contains("youtube.com")
-        || host.contains("youtu.be")
 }
 
 fn parallel_range_plan(
