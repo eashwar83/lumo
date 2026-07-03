@@ -11,6 +11,7 @@ import {
     PROXY_ADDRESS_SETTING_LABEL,
     PROXY_MODE_SETTING_LABEL,
     WALLPAPER_MODE_SETTING_LABEL,
+    YTDL_COOKIES_FROM_BROWSER_SETTING_LABEL,
     YTDL_PATH_SETTING_LABEL,
     type SettingGroup,
     type SettingItem,
@@ -147,6 +148,17 @@ const findYtdlPathItem = (groups: SettingGroup[]) => {
                 candidate.label === YTDL_PATH_SETTING_LABEL,
         );
     return item?.type === "path" ? item : undefined;
+};
+
+const findYtdlCookiesFromBrowserItem = (groups: SettingGroup[]) => {
+    const item = groups
+        .flatMap((group) => group.items)
+        .find(
+            (candidate) =>
+                candidate.type === "select" &&
+                candidate.label === YTDL_COOKIES_FROM_BROWSER_SETTING_LABEL,
+        );
+    return item?.type === "select" ? item : undefined;
 };
 
 const findProxyModeItem = (groups: SettingGroup[]) => {
@@ -294,14 +306,17 @@ export const useGeneralSettingsSection = (isWindowsPlatform: boolean) => {
 
     const buildYtdlRequestKey = (
         ytdlPathItem: ReturnType<typeof findYtdlPathItem>,
+        ytdlCookiesItem: ReturnType<typeof findYtdlCookiesFromBrowserItem>,
     ): string =>
         JSON.stringify({
             ytdlPath: ytdlPathItem ? ytdlPathItem.value.trim() : null,
+            ytdlCookiesFromBrowser: ytdlCookiesItem ? ytdlCookiesItem.value : null,
         });
 
     const applyYtdlOptions = async (groups: SettingGroup[]) => {
         const ytdlPathItem = findYtdlPathItem(groups);
-        const requestKey = buildYtdlRequestKey(ytdlPathItem);
+        const ytdlCookiesItem = findYtdlCookiesFromBrowserItem(groups);
+        const requestKey = buildYtdlRequestKey(ytdlPathItem, ytdlCookiesItem);
 
         if (requestKey === lastAppliedYtdlRequestKey) {
             return;
@@ -309,11 +324,17 @@ export const useGeneralSettingsSection = (isWindowsPlatform: boolean) => {
 
         const inputYtdlPath = ytdlPathItem?.value.trim();
         const requestedYtdlPath = inputYtdlPath ? inputYtdlPath : undefined;
-        const applied = await applyYtdlSettings(requestedYtdlPath);
+        const cookiesValue = ytdlCookiesItem?.value;
+        const requestedCookiesFromBrowser =
+            cookiesValue && cookiesValue !== "Off" ? cookiesValue : undefined;
+        const applied = await applyYtdlSettings(
+            requestedYtdlPath,
+            requestedCookiesFromBrowser,
+        );
         if (!applied) {
             if (requestedYtdlPath) {
                 markYtdlPathUnavailable(ytdlPathItem);
-                lastAppliedYtdlRequestKey = buildYtdlRequestKey(ytdlPathItem);
+                lastAppliedYtdlRequestKey = buildYtdlRequestKey(ytdlPathItem, ytdlCookiesItem);
             }
             return;
         }
@@ -321,7 +342,7 @@ export const useGeneralSettingsSection = (isWindowsPlatform: boolean) => {
         if (ytdlPathItem) {
             if (requestedYtdlPath && !applied.ytdlPath) {
                 markYtdlPathUnavailable(ytdlPathItem);
-                lastAppliedYtdlRequestKey = buildYtdlRequestKey(ytdlPathItem);
+                lastAppliedYtdlRequestKey = buildYtdlRequestKey(ytdlPathItem, ytdlCookiesItem);
                 return;
             }
 
@@ -332,7 +353,7 @@ export const useGeneralSettingsSection = (isWindowsPlatform: boolean) => {
             }
         }
 
-        lastAppliedYtdlRequestKey = buildYtdlRequestKey(ytdlPathItem);
+        lastAppliedYtdlRequestKey = buildYtdlRequestKey(ytdlPathItem, ytdlCookiesItem);
     };
 
     const scheduleApplyLoggingOptions = () => {

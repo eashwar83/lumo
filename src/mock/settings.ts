@@ -61,6 +61,19 @@ export type SettingItem =
 export type SettingGroup = { title: string; items: SettingItem[] };
 
 export const YTDL_PATH_SETTING_LABEL = "SOIA_YTDL_PATH";
+export const YTDL_COOKIES_FROM_BROWSER_SETTING_LABEL =
+    "SOIA_YTDL_COOKIES_FROM_BROWSER";
+export const YTDL_COOKIES_FROM_BROWSER_OPTIONS = [
+    "Off",
+    "chrome",
+    "firefox",
+    "safari",
+    "edge",
+    "chromium",
+    "brave",
+    "opera",
+    "vivaldi",
+] as const;
 export const LOG_PATH_SETTING_LABEL = "SOIA_LOG_PATH";
 export const LOG_LEVEL_SETTING_LABEL = "SOIA_LOG_LEVEL";
 export const PROXY_MODE_SETTING_LABEL = "SOIA_PROXY_MODE";
@@ -358,6 +371,13 @@ export const defaultSettingGroups: SettingGroup[] = [
                 type: "path",
                 placeholder: "Select the yt-dlp executable...",
                 browseTitle: "Select yt-dlp executable",
+            },
+            {
+                label: YTDL_COOKIES_FROM_BROWSER_SETTING_LABEL,
+                displayLabel: "Browser Cookies",
+                value: "Off",
+                type: "select",
+                options: [...YTDL_COOKIES_FROM_BROWSER_OPTIONS],
             },
             {
                 label: PROXY_MODE_SETTING_LABEL,

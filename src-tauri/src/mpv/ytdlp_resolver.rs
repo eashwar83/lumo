@@ -8,7 +8,8 @@ use url::Url;
 
 const YTDLP_TIMEOUT: Duration = Duration::from_secs(60);
 // const YTDLP_FORMAT: &str = "bv*[height<=1080][vcodec^=avc1]+ba/bv*[height<=1080][vcodec^=h264]+ba/bv*[height<=1080][vcodec^=hev1]+ba/bv*[height<=1080][vcodec^=hvc1]+ba/bv*[height<=1080][vcodec^=vp9]+ba/b[height<=1080]/bv*[height<=1080]+ba/bv*+ba/b";
-const YTDLP_FORMAT: &str = "bv*[height<=1080][vcodec^=vp9]+ba/bv*[height<=1080][vcodec^=h264]+ba/bv*[height<=720][vcodec^=hev1]+ba/bv*[height<=720][vcodec^=hvc1]+ba/bv*[height<=720][vcodec^=vp9]+ba/b[height<=720]/bv*[height<=720]+ba/bv*+ba/b";
+// const YTDLP_FORMAT: &str = "bv*[height<=1080][vcodec^=vp9]+ba/bv*[height<=1080][vcodec^=h264]+ba/bv*[height<=720][vcodec^=hev1]+ba/bv*[height<=720][vcodec^=hvc1]+ba/bv*[height<=720][vcodec^=vp9]+ba/b[height<=720]/bv*[height<=720]+ba/bv*+ba/b";
+const YTDLP_FORMAT: &str = "bv*[height<=1600][vcodec^=vp9]+ba/bv*[height<=1600][vcodec^=h264]+ba/bv*[height<=1600][vcodec^=hev1]+ba/bv*[height<=1600][vcodec^=hvc1]+ba/bv*[height<=1600][vcodec^=vp9]+ba/b[height<=1600]/bv*[height<=1600]+ba/bv*+ba/b";
 // const YTDLP_FORMAT: &str = "bv*[height<=1080]+ba/b[height<=1080]/bv*+ba/b";
 // const YTDLP_FORMAT: &str = "bv*[height<=720]+ba/b[height<=720]/bv*+ba/b";
 const DIRECT_STREAM_EXTENSIONS: &[&str] = &[
@@ -51,9 +52,10 @@ pub(crate) async fn resolve_playlist(
     };
 
     let proxy_url = crate::network::proxy::current_proxy_key(app)?;
+    let cookies_from_browser = resolve_cookies_from_browser(app);
     let raw_url = raw_url.to_string();
     let output = tauri::async_runtime::spawn_blocking(move || {
-        run_ytdlp_playlist_command(&ytdl_path, proxy_url.as_deref(), &raw_url)
+        run_ytdlp_playlist_command(&ytdl_path, proxy_url.as_deref(), cookies_from_browser.as_deref(), &raw_url)
     })
     .await
     .map_err(|error| format!("yt-dlp worker failed: {error}"))??;
@@ -87,6 +89,7 @@ pub(crate) async fn resolve_playlist(
 fn run_ytdlp_playlist_command(
     ytdl_path: &str,
     proxy_url: Option<&str>,
+    cookies_from_browser: Option<&str>,
     raw_url: &str,
 ) -> Result<std::process::Output, String> {
     let mut command = Command::new(ytdl_path);
@@ -106,6 +109,12 @@ fn run_ytdlp_playlist_command(
         command.arg("--proxy").arg(proxy_url);
         log_args.push("--proxy".to_string());
         log_args.push(redact_url(proxy_url));
+    }
+
+    if let Some(browser) = cookies_from_browser {
+        command.arg("--cookies-from-browser").arg(browser);
+        log_args.push("--cookies-from-browser".to_string());
+        log_args.push(browser.to_string());
     }
 
     info!(
@@ -219,9 +228,10 @@ pub(crate) async fn resolve(app: &AppHandle, raw_url: &str) -> Result<Option<Res
     };
 
     let proxy_url = crate::network::proxy::current_proxy_key(app)?;
+    let cookies_from_browser = resolve_cookies_from_browser(app);
     let raw_url = raw_url.to_string();
     let output = tauri::async_runtime::spawn_blocking(move || {
-        run_ytdlp_command(&ytdl_path, proxy_url.as_deref(), &raw_url)
+        run_ytdlp_command(&ytdl_path, proxy_url.as_deref(), cookies_from_browser.as_deref(), &raw_url)
     })
     .await
     .map_err(|error| format!("yt-dlp worker failed: {error}"))??;
@@ -262,9 +272,17 @@ pub(crate) async fn try_resolve(app: &AppHandle, raw_url: &str) -> Option<Resolv
     }
 }
 
+fn resolve_cookies_from_browser(app: &AppHandle) -> Option<String> {
+    crate::store::ui_state_store::load_setting_value(app, "SOIA_YTDL_COOKIES_FROM_BROWSER")
+        .ok()
+        .flatten()
+        .filter(|v| !v.is_empty() && v != "Off")
+}
+
 fn run_ytdlp_command(
     ytdl_path: &str,
     proxy_url: Option<&str>,
+    cookies_from_browser: Option<&str>,
     raw_url: &str,
 ) -> Result<std::process::Output, String> {
     let mut command = Command::new(ytdl_path);
@@ -288,6 +306,12 @@ fn run_ytdlp_command(
         command.arg("--proxy").arg(proxy_url);
         log_args.push("--proxy".to_string());
         log_args.push(redact_url(proxy_url));
+    }
+
+    if let Some(browser) = cookies_from_browser {
+        command.arg("--cookies-from-browser").arg(browser);
+        log_args.push("--cookies-from-browser".to_string());
+        log_args.push(browser.to_string());
     }
 
     info!(

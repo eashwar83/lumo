@@ -294,6 +294,12 @@ fn configure_mpv_startup(app: &tauri::App) -> Result<(), Box<dyn Error>> {
             // "bv+ba/b",
             "bv[height<=1080]+ba/b",
         );
+
+        let cookies_raw_option = load_setting_value(&app.handle(), "SOIA_YTDL_COOKIES_FROM_BROWSER")
+            .filter(|v| !v.is_empty() && v != "Off")
+            .map(|browser| format!("cookies-from-browser={browser}"))
+            .unwrap_or_default();
+        mpv_guard.set_option_string("ytdl-raw-options", &cookies_raw_option);
         // mpv_guard.set_option_string(
         //     "ytdl-raw-options",
         //     // "format-sort=+codec:avc:m4a"

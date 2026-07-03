@@ -12,6 +12,7 @@ use tauri::Manager;
 
 const LOG_LEVEL_SETTING_LABEL: &str = "SOIA_LOG_LEVEL";
 const YTDL_PATH_SETTING_LABEL: &str = "SOIA_YTDL_PATH";
+const YTDL_COOKIES_FROM_BROWSER_SETTING_LABEL: &str = "SOIA_YTDL_COOKIES_FROM_BROWSER";
 const DEFAULT_LOG_LEVEL: &str = "Info";
 const DEFAULT_SOIA_BUNDLE_IDENTIFIER: &str = "com.soia.player";
 
@@ -154,6 +155,20 @@ fn persisted_ytdl_path(app: &tauri::AppHandle) -> Option<String> {
         .flatten()
 }
 
+fn persisted_ytdl_cookies_from_browser(app: &tauri::AppHandle) -> Option<String> {
+    let value = crate::store::ui_state_store::load_setting_value(
+        app,
+        YTDL_COOKIES_FROM_BROWSER_SETTING_LABEL,
+    )
+    .ok()
+    .flatten()?;
+    if value.is_empty() || value == "Off" {
+        None
+    } else {
+        Some(value)
+    }
+}
+
 fn default_log_path(app: &tauri::AppHandle) -> Option<PathBuf> {
     app.path()
         .app_log_dir()
@@ -191,6 +206,30 @@ fn resolve_current_ytdl_path(
             configured_ytdl_path(std::env::var("SOIA_YTDL_PATH").ok()).or_else(default_ytdl_path)
         }
     }
+}
+
+fn resolve_current_ytdl_cookies_from_browser(
+    app: &tauri::AppHandle,
+    configured: Option<String>,
+) -> Option<String> {
+    match configured {
+        Some(value) => {
+            let value = value.trim().to_string();
+            if value.is_empty() || value == "Off" { None } else { Some(value) }
+        }
+        None => persisted_ytdl_cookies_from_browser(app),
+    }
+}
+
+fn apply_ytdl_cookies_from_browser(
+    mpv_guard: &crate::mpv::MpvHandle,
+    browser: Option<&str>,
+) {
+    let raw_option = match browser {
+        Some(b) => format!("cookies-from-browser={b}"),
+        None => String::new(),
+    };
+    mpv_guard.set_option_string("ytdl-raw-options", &raw_option);
 }
 
 fn is_existing_ytdl_path(path: &str) -> bool {
@@ -270,6 +309,7 @@ pub(crate) struct LoggingSettingsState {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct YtdlSettingsState {
     ytdl_path: Option<String>,
+    ytdl_cookies_from_browser: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -600,8 +640,10 @@ pub(crate) fn apply_ytdl_settings(
     state: tauri::State<'_, AppState>,
     app: tauri::AppHandle,
     ytdl_path: Option<String>,
+    ytdl_cookies_from_browser: Option<String>,
 ) -> Result<YtdlSettingsState, String> {
     let resolved_ytdl_path = resolve_current_ytdl_path(&app, ytdl_path);
+    let resolved_cookies = resolve_current_ytdl_cookies_from_browser(&app, ytdl_cookies_from_browser);
 
     with_mpv(&state, |mpv_guard| {
         if let Some(path) = resolved_ytdl_path.as_deref() {
@@ -609,11 +651,13 @@ pub(crate) fn apply_ytdl_settings(
         } else {
             clear_ytdl_path(mpv_guard)?;
         }
+        apply_ytdl_cookies_from_browser(mpv_guard, resolved_cookies.as_deref());
         Ok(())
     })?;
 
     Ok(YtdlSettingsState {
         ytdl_path: resolved_ytdl_path,
+        ytdl_cookies_from_browser: resolved_cookies,
     })
 }
 
