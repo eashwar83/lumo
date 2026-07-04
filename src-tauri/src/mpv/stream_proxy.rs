@@ -194,7 +194,7 @@ impl StreamBackend for HttpStreamBackend {
 struct SmbStreamBackend {
     url: String,
     open_url: String,
-    file: Mutex<Option<Arc<Mutex<crate::network::protocols::smb::SmbPlaybackFile>>>>,
+    file: Arc<Mutex<Option<crate::network::protocols::smb::SmbPlaybackFile>>>,
 }
 
 impl SmbStreamBackend {
@@ -202,44 +202,45 @@ impl SmbStreamBackend {
         Self {
             url,
             open_url,
-            file: Mutex::new(None),
+            file: Arc::new(Mutex::new(None)),
         }
     }
 
-    async fn playback_file(
-        &self,
-    ) -> Result<Arc<Mutex<crate::network::protocols::smb::SmbPlaybackFile>>, String> {
-        if let Some(file) = self.file.lock().map_err(|error| error.to_string())?.clone() {
-            return Ok(file);
+    async fn ensure_open(&self) -> Result<(), String> {
+        {
+            let guard = self.file.lock().map_err(|error| error.to_string())?;
+            if guard.is_some() {
+                return Ok(());
+            }
         }
-
-        let opened = crate::network::protocols::smb::open_playback_url(self.open_url.clone()).await?;
-        let opened = Arc::new(Mutex::new(opened));
-        let mut slot = self.file.lock().map_err(|error| error.to_string())?;
-        if let Some(file) = slot.as_ref() {
-            return Ok(file.clone());
+        let opened =
+            crate::network::protocols::smb::open_playback_url(self.open_url.clone()).await?;
+        let mut guard = self.file.lock().map_err(|error| error.to_string())?;
+        if guard.is_none() {
+            *guard = Some(opened);
         }
-        *slot = Some(opened.clone());
-        Ok(opened)
+        Ok(())
     }
 
     fn clear_playback_file(&self) {
-        if let Ok(mut slot) = self.file.lock() {
-            *slot = None;
+        if let Ok(mut guard) = self.file.lock() {
+            *guard = None;
         }
     }
 
     async fn file_size(&self) -> Result<Option<u64>, String> {
-        let file = self.playback_file().await?;
-        let guard = file.lock().map_err(|error| error.to_string())?;
-        Ok(guard.file_size())
+        self.ensure_open().await?;
+        let guard = self.file.lock().map_err(|error| error.to_string())?;
+        Ok(guard.as_ref().and_then(|f| f.file_size()))
     }
 
-    fn smb_chunk_size(file: &Arc<Mutex<crate::network::protocols::smb::SmbPlaybackFile>>) -> u64 {
+    fn smb_chunk_size(
+        file: &Arc<Mutex<Option<crate::network::protocols::smb::SmbPlaybackFile>>>,
+    ) -> u64 {
         let negotiated = file
             .lock()
             .ok()
-            .and_then(|guard| guard.max_read_size())
+            .and_then(|guard| guard.as_ref()?.max_read_size())
             .map(u64::from)
             .unwrap_or(SMB_STREAM_CHUNK_BYTES);
         let chunk_size = negotiated.min(SMB_STREAM_CHUNK_BYTES).max(64 * 1024);
@@ -272,10 +273,14 @@ impl SmbStreamBackend {
         offset: u64,
         length: usize,
     ) -> Result<crate::network::protocols::smb::SmbReadRangeResult, String> {
-        let file = self.playback_file().await?;
+        self.ensure_open().await?;
+        let file = self.file.clone();
         tauri::async_runtime::spawn_blocking(move || {
             let mut guard = file.lock().map_err(|error| error.to_string())?;
-            guard.read_range(offset, length)
+            let f = guard
+                .as_mut()
+                .ok_or_else(|| "SMB file is not open".to_string())?;
+            f.read_range(offset, length)
         })
         .await
         .map_err(|error| format!("SMB read task failed: {error}"))?
@@ -746,8 +751,8 @@ async fn handle_smb_stream_source(
     }
 
     let chunk_size = {
-        let file = backend.playback_file().await?;
-        SmbStreamBackend::smb_chunk_size(&file)
+        backend.ensure_open().await?;
+        SmbStreamBackend::smb_chunk_size(&backend.file)
     };
     let mut next = response_start;
     while next <= response_end {
