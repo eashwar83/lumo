@@ -102,6 +102,7 @@ const playbackFlow = usePlaybackFlow({
     nowPlaying,
     hideAllMenus,
     isInfoOpen,
+    currentSpeed: speed.currentSpeed,
     loadingState: playbackLoadingState,
     onPlaybackIntent: async () => {
         await persistCurrentManualWindow();
