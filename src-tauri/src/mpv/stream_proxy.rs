@@ -235,6 +235,18 @@ impl SmbStreamBackend {
         Ok(guard.file_size())
     }
 
+    fn smb_chunk_size(file: &Arc<Mutex<crate::network::protocols::smb::SmbPlaybackFile>>) -> u64 {
+        let negotiated = file
+            .lock()
+            .ok()
+            .and_then(|guard| guard.max_read_size())
+            .map(u64::from)
+            .unwrap_or(SMB_STREAM_CHUNK_BYTES);
+        let chunk_size = negotiated.min(SMB_STREAM_CHUNK_BYTES).max(64 * 1024);
+        debug!("stream proxy: SMB chunk size negotiated={negotiated} effective={chunk_size}");
+        chunk_size
+    }
+
     async fn read_range(
         &self,
         offset: u64,
@@ -733,12 +745,16 @@ async fn handle_smb_stream_source(
         return Ok(());
     }
 
+    let chunk_size = {
+        let file = backend.playback_file().await?;
+        SmbStreamBackend::smb_chunk_size(&file)
+    };
     let mut next = response_start;
     while next <= response_end {
         let length = response_end
             .saturating_sub(next)
             .saturating_add(1)
-            .min(SMB_STREAM_CHUNK_BYTES) as usize;
+            .min(chunk_size) as usize;
         let chunk = match backend.read_range(next, length).await {
             Ok(chunk) => chunk,
             Err(error) => {

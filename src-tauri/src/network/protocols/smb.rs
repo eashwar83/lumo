@@ -99,6 +99,7 @@ struct SoiaSmbOpenResult {
     file: *mut SoiaSmbFile,
     file_size: u64,
     has_file_size: c_int,
+    max_read_size: u32,
     error: *mut c_char,
 }
 
@@ -432,6 +433,7 @@ pub struct SmbReadRangeResult {
 pub struct SmbPlaybackFile {
     file: *mut SoiaSmbFile,
     file_size: Option<u64>,
+    max_read_size: Option<u32>,
 }
 
 unsafe impl Send for SmbPlaybackFile {}
@@ -439,6 +441,10 @@ unsafe impl Send for SmbPlaybackFile {}
 impl SmbPlaybackFile {
     pub fn file_size(&self) -> Option<u64> {
         self.file_size
+    }
+
+    pub fn max_read_size(&self) -> Option<u32> {
+        self.max_read_size
     }
 
     pub fn read_range(&mut self, offset: u64, length: usize) -> Result<SmbReadRangeResult, String> {
@@ -482,6 +488,7 @@ fn open_playback_url_blocking(playback_url: &str) -> Result<SmbPlaybackFile, Str
         file: std::ptr::null_mut(),
         file_size: 0,
         has_file_size: 0,
+        max_read_size: 0,
         error: std::ptr::null_mut(),
     };
     let status = unsafe { soia_smb_file_open(uri.as_ptr(), &mut result) };
@@ -494,10 +501,15 @@ fn open_playback_url_blocking(playback_url: &str) -> Result<SmbPlaybackFile, Str
     }
     let file = result.file;
     let file_size = (result.has_file_size != 0).then_some(result.file_size);
+    let max_read_size = (result.max_read_size > 0).then_some(result.max_read_size);
     unsafe {
         soia_smb_open_result_free(&mut result);
     }
-    Ok(SmbPlaybackFile { file, file_size })
+    Ok(SmbPlaybackFile {
+        file,
+        file_size,
+        max_read_size,
+    })
 }
 
 fn read_result_from_ffi(
