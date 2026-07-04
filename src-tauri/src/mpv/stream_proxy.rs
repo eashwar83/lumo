@@ -102,6 +102,18 @@ impl StreamBackendRegistry {
         Some(entry.backend.clone())
     }
 
+    fn find_token_by_origin(&mut self, origin: &str) -> Option<String> {
+        let now = Instant::now();
+        self.cleanup_if_due(now);
+        for (token, entry) in self.entries.iter_mut() {
+            if entry.backend.origin() == origin {
+                entry.last_access = now;
+                return Some(token.clone());
+            }
+        }
+        None
+    }
+
     fn cleanup_if_due(&mut self, now: Instant) {
         if now.duration_since(self.last_cleanup) < STREAM_BACKEND_CLEANUP_INTERVAL
             && self.entries.len() <= STREAM_BACKEND_MAX_ENTRIES
@@ -495,6 +507,11 @@ pub(crate) fn rewrite_smb_stream_url(url: &str) -> Option<String> {
     if !is_smb_url(url) {
         return None;
     }
+    // Reuse an existing backend for the same origin URL if available
+    if let Some(proxied) = proxy_url_for_existing_origin(url) {
+        info!("stream proxy: reused SMB backend url={}", redact_url(url));
+        return Some(proxied);
+    }
     let open_url = lookup_basic_auth(url)
         .and_then(|(username, password)| {
             crate::network::protocols::smb::playback_url_with_credentials(
@@ -546,6 +563,12 @@ fn proxy_url_for_backend(backend: Arc<dyn StreamBackend>) -> Option<String> {
     let base = STREAM_PROXY_BASE_URL.get()?;
     let token = uuid::Uuid::now_v7().to_string();
     stream_backends().lock().ok()?.insert(token.clone(), backend);
+    Some(format!("{base}/stream/{token}"))
+}
+
+fn proxy_url_for_existing_origin(origin: &str) -> Option<String> {
+    let base = STREAM_PROXY_BASE_URL.get()?;
+    let token = stream_backends().lock().ok()?.find_token_by_origin(origin)?;
     Some(format!("{base}/stream/{token}"))
 }
 
