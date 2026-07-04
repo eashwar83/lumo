@@ -26,6 +26,7 @@ const PARALLEL_RANGE_CHUNK_BYTES: u64 = 2 * 1024 * 1024;
 const PARALLEL_RANGE_CONNECTIONS: usize = 3;
 const PARALLEL_RANGE_SETTING_LABEL: &str = "NETWORK_PARALLEL_DOWNLOAD";
 const SMB_STREAM_CHUNK_BYTES: u64 = 4 * 1024 * 1024;
+const SMB_PIPELINE_DEPTH: usize = 4;
 const STREAM_BACKEND_IDLE_TIMEOUT: Duration = Duration::from_secs(2 * 60 * 60);
 const STREAM_BACKEND_CLEANUP_INTERVAL: Duration = Duration::from_secs(60);
 const STREAM_BACKEND_MAX_ENTRIES: usize = 4096;
@@ -284,6 +285,41 @@ impl SmbStreamBackend {
         })
         .await
         .map_err(|error| format!("SMB read task failed: {error}"))?
+    }
+
+    async fn read_pipeline(
+        &self,
+        requests: &[(u64, u32)],
+    ) -> Result<crate::network::protocols::smb::SmbReadRangeResult, String> {
+        match self.read_pipeline_once(requests).await {
+            Ok(result) => Ok(result),
+            Err(first_error) => {
+                warn!(
+                    "stream proxy: SMB pipeline read failed, reconnecting url={} error={first_error}",
+                    redact_url(&self.url),
+                );
+                self.clear_playback_file();
+                self.read_pipeline_once(requests).await
+            }
+        }
+    }
+
+    async fn read_pipeline_once(
+        &self,
+        requests: &[(u64, u32)],
+    ) -> Result<crate::network::protocols::smb::SmbReadRangeResult, String> {
+        self.ensure_open().await?;
+        let file = self.file.clone();
+        let requests = requests.to_vec();
+        tauri::async_runtime::spawn_blocking(move || {
+            let mut guard = file.lock().map_err(|error| error.to_string())?;
+            let f = guard
+                .as_mut()
+                .ok_or_else(|| "SMB file is not open".to_string())?;
+            f.read_pipeline(&requests)
+        })
+        .await
+        .map_err(|error| format!("SMB pipeline task failed: {error}"))?
     }
 
     async fn handle_smb_stream_source(
@@ -756,30 +792,67 @@ async fn handle_smb_stream_source(
     };
     let mut next = response_start;
     while next <= response_end {
-        let length = response_end
-            .saturating_sub(next)
-            .saturating_add(1)
-            .min(chunk_size) as usize;
-        let chunk = match backend.read_range(next, length).await {
-            Ok(chunk) => chunk,
-            Err(error) => {
-                warn!(
-                    "stream proxy: SMB read failed url={} offset={} length={} error={error}",
-                    redact_url(remote_url),
-                    next,
-                    length
-                );
-                return Err(error);
+        // Build a batch of pipeline requests (up to SMB_PIPELINE_DEPTH chunks)
+        let mut requests: Vec<(u64, u32)> = Vec::with_capacity(SMB_PIPELINE_DEPTH);
+        let mut batch_next = next;
+        for _ in 0..SMB_PIPELINE_DEPTH {
+            if batch_next > response_end {
+                break;
             }
-        };
-        if chunk.data.is_empty() {
-            break;
+            let length = response_end
+                .saturating_sub(batch_next)
+                .saturating_add(1)
+                .min(chunk_size) as u32;
+            requests.push((batch_next, length));
+            batch_next = batch_next.saturating_add(length as u64);
         }
-        stream
-            .write_all(&chunk.data)
-            .await
-            .map_err(|error| error.to_string())?;
-        next = next.saturating_add(chunk.data.len() as u64);
+
+        if requests.len() <= 1 {
+            // Single chunk: use the simpler read_range path
+            let length = requests.first().map(|r| r.1 as usize).unwrap_or(0);
+            let chunk = match backend.read_range(next, length).await {
+                Ok(chunk) => chunk,
+                Err(error) => {
+                    warn!(
+                        "stream proxy: SMB read failed url={} offset={} length={} error={error}",
+                        redact_url(remote_url),
+                        next,
+                        length
+                    );
+                    return Err(error);
+                }
+            };
+            if chunk.data.is_empty() {
+                break;
+            }
+            stream
+                .write_all(&chunk.data)
+                .await
+                .map_err(|error| error.to_string())?;
+            next = next.saturating_add(chunk.data.len() as u64);
+        } else {
+            // Multiple chunks: use pipeline read for better throughput
+            let batch = match backend.read_pipeline(&requests).await {
+                Ok(batch) => batch,
+                Err(error) => {
+                    warn!(
+                        "stream proxy: SMB pipeline read failed url={} offset={} count={} error={error}",
+                        redact_url(remote_url),
+                        next,
+                        requests.len()
+                    );
+                    return Err(error);
+                }
+            };
+            if batch.data.is_empty() {
+                break;
+            }
+            stream
+                .write_all(&batch.data)
+                .await
+                .map_err(|error| error.to_string())?;
+            next = next.saturating_add(batch.data.len() as u64);
+        }
     }
 
     Ok(())

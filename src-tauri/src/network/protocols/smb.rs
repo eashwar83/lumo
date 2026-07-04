@@ -108,6 +108,19 @@ struct SoiaSmbFile {
     _private: [u8; 0],
 }
 
+#[repr(C)]
+struct SoiaSmbPipelineRequest {
+    offset: u64,
+    length: u32,
+}
+
+#[repr(C)]
+struct SoiaSmbPipelineResult {
+    data: *mut u8,
+    data_len: usize,
+    error: *mut c_char,
+}
+
 #[link(name = "soia_utils")]
 unsafe extern "C" {
     fn soia_smb_browse_directory(
@@ -130,6 +143,13 @@ unsafe extern "C" {
         result: *mut SoiaSmbReadResult,
     ) -> c_int;
     fn soia_smb_file_close(file: *mut SoiaSmbFile);
+    fn soia_smb_file_read_pipeline(
+        file: *mut SoiaSmbFile,
+        requests: *const SoiaSmbPipelineRequest,
+        request_count: usize,
+        result: *mut SoiaSmbPipelineResult,
+    ) -> c_int;
+    fn soia_smb_pipeline_result_free(result: *mut SoiaSmbPipelineResult);
 }
 
 struct ParsedSmbConnection {
@@ -462,6 +482,52 @@ impl SmbPlaybackFile {
             soia_smb_file_read_at(self.file, offset, length, &mut result)
         };
         read_result_from_ffi(status, result)
+    }
+
+    pub fn read_pipeline(
+        &mut self,
+        requests: &[(u64, u32)],
+    ) -> Result<SmbReadRangeResult, String> {
+        if self.file.is_null() {
+            return Err("SMB file is closed".to_string());
+        }
+        if requests.is_empty() {
+            return Ok(SmbReadRangeResult { data: Vec::new() });
+        }
+        let ffi_requests: Vec<SoiaSmbPipelineRequest> = requests
+            .iter()
+            .map(|&(offset, length)| SoiaSmbPipelineRequest { offset, length })
+            .collect();
+        let mut result = SoiaSmbPipelineResult {
+            data: std::ptr::null_mut(),
+            data_len: 0,
+            error: std::ptr::null_mut(),
+        };
+        let status = unsafe {
+            soia_smb_file_read_pipeline(
+                self.file,
+                ffi_requests.as_ptr(),
+                ffi_requests.len(),
+                &mut result,
+            )
+        };
+        if status != 0 {
+            let error = c_string_lossy(result.error)
+                .unwrap_or_else(|| "SMB pipeline read failed".to_string());
+            unsafe {
+                soia_smb_pipeline_result_free(&mut result);
+            }
+            return Err(error);
+        }
+        let data = if result.data.is_null() || result.data_len == 0 {
+            Vec::new()
+        } else {
+            unsafe { std::slice::from_raw_parts(result.data, result.data_len).to_vec() }
+        };
+        unsafe {
+            soia_smb_pipeline_result_free(&mut result);
+        }
+        Ok(SmbReadRangeResult { data })
     }
 }
 
