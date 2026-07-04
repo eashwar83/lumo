@@ -2,6 +2,7 @@ mod event_loop;
 mod ffi;
 mod handle;
 mod ytdlp_resolver;
+mod ytdlp_settings;
 mod stream_https;
 mod stream_proxy;
 
@@ -10,6 +11,9 @@ pub(crate) use ffi::SoiaUtils;
 pub(crate) use handle::MpvHandle;
 pub(crate) use ytdlp_resolver::try_resolve as try_resolve_with_ytdlp;
 pub(crate) use ytdlp_resolver::resolve_playlist as resolve_ytdlp_playlist;
+pub(crate) use ytdlp_settings::store_runtime_settings as store_runtime_ytdlp_settings;
+pub(crate) use ytdlp_settings::YtdlpFormatSettings;
+pub(crate) use ytdlp_settings::YtdlpSettings;
 pub(crate) use stream_proxy::rewrite_http_stream_url;
 pub(crate) use stream_proxy::rewrite_https_stream_url;
 pub(crate) use stream_proxy::rewrite_smb_stream_url;

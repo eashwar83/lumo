@@ -160,13 +160,6 @@ pub(crate) fn apply_to_mpv(
 ) -> Result<(), String> {
     let proxy = settings.proxy_url.as_deref().unwrap_or("no");
     mpv_set_option_string_checked(mpv_guard, "http-proxy", proxy)?;
-
-    let ytdl_proxy = settings
-        .proxy_url
-        .as_deref()
-        .map(|value| format!("proxy={value}"))
-        .unwrap_or_default();
-    mpv_set_option_string_checked(mpv_guard, "ytdl-raw-options", &ytdl_proxy)?;
     Ok(())
 }
 

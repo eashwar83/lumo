@@ -97,6 +97,18 @@ export const SUBSOURCE_ENABLED_SETTING_LABEL = "SUBSOURCE_ENABLED";
 export const SUBSOURCE_API_KEY_SETTING_LABEL = "SUBSOURCE_API_KEY";
 export const SUBSOURCE_LANGUAGES_SETTING_LABEL = "SUBSOURCE_LANGUAGES";
 export const NETWORK_START_AT_ROOT_SETTING_LABEL = "NETWORK_START_AT_ROOT";
+export const YTDL_MAX_RESOLUTION_SETTING_LABEL = "SOIA_YTDL_MAX_RESOLUTION";
+export const YTDL_MAX_RESOLUTION_OPTIONS = [
+    "4320p",
+    "2160p",
+    "1440p",
+    "1080p",
+    "720p",
+    "480p",
+    "360p",
+    "240p",
+    "144p",
+] as const;
 export const NETWORK_PARALLEL_DOWNLOAD_SETTING_LABEL =
     "NETWORK_PARALLEL_DOWNLOAD";
 export const ONLINE_SUBTITLES_SETTING_GROUP_TITLE = "Online Subtitles";
@@ -378,6 +390,13 @@ export const defaultSettingGroups: SettingGroup[] = [
                 value: "Off",
                 type: "select",
                 options: [...YTDL_COOKIES_FROM_BROWSER_OPTIONS],
+            },
+            {
+                label: YTDL_MAX_RESOLUTION_SETTING_LABEL,
+                displayLabel: "Max Stream Resolution",
+                value: "1080p",
+                type: "select",
+                options: [...YTDL_MAX_RESOLUTION_OPTIONS],
             },
             {
                 label: PROXY_MODE_SETTING_LABEL,

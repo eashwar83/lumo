@@ -8,6 +8,7 @@ type LoggingSettingsState = {
 type YtdlSettingsState = {
     ytdlPath: string | null;
     ytdlCookiesFromBrowser: string | null;
+    ytdlMaxHeight: number | null;
 };
 type ProxySettingsState = {
     proxyMode: string;
@@ -97,11 +98,13 @@ export const applyLoggingSettings = async (
 export const applyYtdlSettings = async (
     ytdlPath?: string,
     ytdlCookiesFromBrowser?: string,
+    ytdlMaxHeight?: number,
 ): Promise<YtdlSettingsState | null> => {
     try {
         return await invoke<YtdlSettingsState>("apply_ytdl_settings", {
             ytdlPath,
             ytdlCookiesFromBrowser,
+            ytdlMaxHeight,
         });
     } catch {
         return null;

@@ -10,6 +10,7 @@ node_modules
 dist
 dist-ssr
 *.local
+.pnpm-store
 
 # OS / editor files
 .DS_Store

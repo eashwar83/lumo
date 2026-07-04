@@ -85,7 +85,7 @@ pub(crate) fn load_network_file(
         payload.protocol.as_deref(),
         &payload.file_path,
     )?;
-    let mut load_options: Vec<String> = Vec::new();
+    let load_options: Vec<String> = Vec::new();
     let protocol = payload
         .protocol
         .as_deref()
@@ -101,8 +101,6 @@ pub(crate) fn load_network_file(
     if let Some(rewritten) = crate::mpv::rewrite_network_stream_url(&protocol, &playback_url) {
         playback_url = rewritten;
     }
-    // Network URLs should not trigger yt-dlp probing on failure.
-    load_options.push("ytdl=no".to_string());
     let resume_position = payload.resume_position.unwrap_or(0.0);
     let auto_play = payload.auto_play.unwrap_or(true);
     let command_args =

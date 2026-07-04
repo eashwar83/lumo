@@ -7,11 +7,6 @@ use tauri::AppHandle;
 use url::Url;
 
 const YTDLP_TIMEOUT: Duration = Duration::from_secs(60);
-// const YTDLP_FORMAT: &str = "bv*[height<=1080][vcodec^=avc1]+ba/bv*[height<=1080][vcodec^=h264]+ba/bv*[height<=1080][vcodec^=hev1]+ba/bv*[height<=1080][vcodec^=hvc1]+ba/bv*[height<=1080][vcodec^=vp9]+ba/b[height<=1080]/bv*[height<=1080]+ba/bv*+ba/b";
-// const YTDLP_FORMAT: &str = "bv*[height<=1080][vcodec^=vp9]+ba/bv*[height<=1080][vcodec^=h264]+ba/bv*[height<=720][vcodec^=hev1]+ba/bv*[height<=720][vcodec^=hvc1]+ba/bv*[height<=720][vcodec^=vp9]+ba/b[height<=720]/bv*[height<=720]+ba/bv*+ba/b";
-const YTDLP_FORMAT: &str = "bv*[height<=1600][vcodec^=vp9]+ba/bv*[height<=1600][vcodec^=h264]+ba/bv*[height<=1600][vcodec^=hev1]+ba/bv*[height<=1600][vcodec^=hvc1]+ba/bv*[height<=1600][vcodec^=vp9]+ba/b[height<=1600]/bv*[height<=1600]+ba/bv*+ba/b";
-// const YTDLP_FORMAT: &str = "bv*[height<=1080]+ba/b[height<=1080]/bv*+ba/b";
-// const YTDLP_FORMAT: &str = "bv*[height<=720]+ba/b[height<=720]/bv*+ba/b";
 const DIRECT_STREAM_EXTENSIONS: &[&str] = &[
     "m3u8", "mp4", "m4v", "mov", "mkv", "webm", "flv", "avi", "ts", "mp3", "m4a", "aac", "flac",
     "wav", "ogg", "opus",
@@ -47,12 +42,13 @@ pub(crate) async fn resolve_playlist(
     app: &AppHandle,
     raw_url: &str,
 ) -> Result<ResolvedPlaylist, String> {
-    let Some(ytdl_path) = crate::app_bootstrap::resolve_ytdl_path(app) else {
+    let settings = super::ytdlp_settings::resolve(app);
+    let Some(ytdl_path) = settings.binary.path else {
         return Err("yt-dlp is not configured".to_string());
     };
 
     let proxy_url = crate::network::proxy::current_proxy_key(app)?;
-    let cookies_from_browser = resolve_cookies_from_browser(app);
+    let cookies_from_browser = settings.cookies.browser;
     let raw_url = raw_url.to_string();
     let output = tauri::async_runtime::spawn_blocking(move || {
         run_ytdlp_playlist_command(&ytdl_path, proxy_url.as_deref(), cookies_from_browser.as_deref(), &raw_url)
@@ -223,15 +219,23 @@ pub(crate) async fn resolve(app: &AppHandle, raw_url: &str) -> Result<Option<Res
         return Ok(None);
     }
 
-    let Some(ytdl_path) = crate::app_bootstrap::resolve_ytdl_path(app) else {
+    let settings = super::ytdlp_settings::resolve(app);
+    let Some(ytdl_path) = settings.binary.path else {
         return Ok(None);
     };
 
     let proxy_url = crate::network::proxy::current_proxy_key(app)?;
-    let cookies_from_browser = resolve_cookies_from_browser(app);
+    let cookies_from_browser = settings.cookies.browser;
+    let format_selector = settings.format.selector();
     let raw_url = raw_url.to_string();
     let output = tauri::async_runtime::spawn_blocking(move || {
-        run_ytdlp_command(&ytdl_path, proxy_url.as_deref(), cookies_from_browser.as_deref(), &raw_url)
+        run_ytdlp_command(
+            &ytdl_path,
+            proxy_url.as_deref(),
+            cookies_from_browser.as_deref(),
+            &format_selector,
+            &raw_url,
+        )
     })
     .await
     .map_err(|error| format!("yt-dlp worker failed: {error}"))??;
@@ -272,17 +276,11 @@ pub(crate) async fn try_resolve(app: &AppHandle, raw_url: &str) -> Option<Resolv
     }
 }
 
-fn resolve_cookies_from_browser(app: &AppHandle) -> Option<String> {
-    crate::store::ui_state_store::load_setting_value(app, "SOIA_YTDL_COOKIES_FROM_BROWSER")
-        .ok()
-        .flatten()
-        .filter(|v| !v.is_empty() && v != "Off")
-}
-
 fn run_ytdlp_command(
     ytdl_path: &str,
     proxy_url: Option<&str>,
     cookies_from_browser: Option<&str>,
+    format_selector: &str,
     raw_url: &str,
 ) -> Result<std::process::Output, String> {
     let mut command = Command::new(ytdl_path);
@@ -290,14 +288,14 @@ fn run_ytdlp_command(
         "--dump-single-json".to_string(),
         "--no-playlist".to_string(),
         "-f".to_string(),
-        YTDLP_FORMAT.to_string(),
+        format_selector.to_string(),
         redact_url(raw_url),
     ];
     command
         .arg("--dump-single-json")
         .arg("--no-playlist")
         .arg("-f")
-        .arg(YTDLP_FORMAT)
+        .arg(format_selector)
         .arg(raw_url)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

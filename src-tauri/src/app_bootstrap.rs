@@ -1,8 +1,6 @@
 use crate::mpv::MpvHandle;
 use crate::store::ui_state_store;
 use crate::AppState;
-#[cfg(debug_assertions)]
-use log::info;
 use log::warn;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
 use std::error::Error;
@@ -266,51 +264,6 @@ fn configure_mpv_startup(app: &tauri::App) -> Result<(), Box<dyn Error>> {
     .map(|value| !value.eq_ignore_ascii_case("off"))
     .unwrap_or(false);
     crate::mpv::set_parallel_range_enabled(parallel_download_enabled);
-
-    let ytdl_path = resolve_ytdl_path(&app.handle());
-    if let Some(ytdl_path) = ytdl_path {
-        mpv_guard.set_option_string("ytdl", "yes");
-
-        #[cfg(debug_assertions)]
-        info!("Using yt-dlp search path(s): {}", ytdl_path);
-
-        let script_opts = format!("ytdl_hook-ytdl_path={ytdl_path}");
-        let script_opts_result = mpv_guard.set_option_string("script-opts", &script_opts);
-        if script_opts_result < 0 {
-            let append_result = mpv_guard.set_option_string("script-opts-append", &script_opts);
-            if append_result < 0 {
-                let legacy_result = mpv_guard.set_option_string("ytdl-path", &ytdl_path);
-                if legacy_result < 0 {
-                    warn!(
-                        "Failed to set ytdl path via script-opts ({script_opts_result}), \
-                         script-opts-append ({append_result}), and legacy ytdl-path ({legacy_result})",
-                    );
-                }
-            }
-        }
-        mpv_guard.set_option_string(
-            "ytdl-format",
-            // "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
-            // "bv+ba/b",
-            "bv[height<=1080]+ba/b",
-        );
-
-        let cookies_raw_option = load_setting_value(&app.handle(), "SOIA_YTDL_COOKIES_FROM_BROWSER")
-            .filter(|v| !v.is_empty() && v != "Off")
-            .map(|browser| format!("cookies-from-browser={browser}"))
-            .unwrap_or_default();
-        mpv_guard.set_option_string("ytdl-raw-options", &cookies_raw_option);
-        // mpv_guard.set_option_string(
-        //     "ytdl-raw-options",
-        //     // "format-sort=+codec:avc:m4a"
-        //     "format-sort=vcodec:h265+acodec:opus/best",
-        // );
-
-        // mpv_guard.set_option_string(
-        //     "ytdl-raw-options",
-        //     "write-auto-subs",
-        // );
-    }
 
     mpv_guard.set_option_string("cache", "auto");
     mpv_guard.set_option_string("cache-pause", "yes");

@@ -2,9 +2,6 @@ use crate::store::installation_store::{DailyActionResult, InstallationState};
 use crate::store::play_history::PlayHistoryEntry;
 use crate::store::ui_state_store::UiState;
 use crate::{mpv_command_checked, mpv_set_option_string_checked, with_mpv, AppState};
-#[cfg(debug_assertions)]
-use log::info;
-use log::warn;
 use std::path::{Path, PathBuf};
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 use std::process::Command;
@@ -12,7 +9,6 @@ use tauri::Manager;
 
 const LOG_LEVEL_SETTING_LABEL: &str = "SOIA_LOG_LEVEL";
 const YTDL_PATH_SETTING_LABEL: &str = "SOIA_YTDL_PATH";
-const YTDL_COOKIES_FROM_BROWSER_SETTING_LABEL: &str = "SOIA_YTDL_COOKIES_FROM_BROWSER";
 const DEFAULT_LOG_LEVEL: &str = "Info";
 const DEFAULT_SOIA_BUNDLE_IDENTIFIER: &str = "com.soia.player";
 
@@ -156,17 +152,7 @@ fn persisted_ytdl_path(app: &tauri::AppHandle) -> Option<String> {
 }
 
 fn persisted_ytdl_cookies_from_browser(app: &tauri::AppHandle) -> Option<String> {
-    let value = crate::store::ui_state_store::load_setting_value(
-        app,
-        YTDL_COOKIES_FROM_BROWSER_SETTING_LABEL,
-    )
-    .ok()
-    .flatten()?;
-    if value.is_empty() || value == "Off" {
-        None
-    } else {
-        Some(value)
-    }
+    crate::store::ui_state_store::load_ytdl_cookies_from_browser(app)
 }
 
 fn default_log_path(app: &tauri::AppHandle) -> Option<PathBuf> {
@@ -221,15 +207,20 @@ fn resolve_current_ytdl_cookies_from_browser(
     }
 }
 
-fn apply_ytdl_cookies_from_browser(
-    mpv_guard: &crate::mpv::MpvHandle,
-    browser: Option<&str>,
-) {
-    let raw_option = match browser {
-        Some(b) => format!("cookies-from-browser={b}"),
-        None => String::new(),
-    };
-    mpv_guard.set_option_string("ytdl-raw-options", &raw_option);
+fn resolve_current_ytdlp_settings(
+    app: &tauri::AppHandle,
+    configured_path: Option<String>,
+    configured_cookies_from_browser: Option<String>,
+    configured_max_height: Option<u32>,
+) -> crate::mpv::YtdlpSettings {
+    let max_height = configured_max_height.unwrap_or_else(|| {
+        crate::store::ui_state_store::load_ytdl_max_height(app)
+    });
+    crate::mpv::YtdlpSettings::new(
+        resolve_current_ytdl_path(app, configured_path),
+        resolve_current_ytdl_cookies_from_browser(app, configured_cookies_from_browser),
+        crate::mpv::YtdlpFormatSettings { max_height },
+    )
 }
 
 fn is_existing_ytdl_path(path: &str) -> bool {
@@ -310,6 +301,7 @@ pub(crate) struct LoggingSettingsState {
 pub(crate) struct YtdlSettingsState {
     ytdl_path: Option<String>,
     ytdl_cookies_from_browser: Option<String>,
+    ytdl_max_height: Option<u32>,
 }
 
 #[derive(serde::Serialize)]
@@ -461,45 +453,6 @@ fn resolve_target_bundle_id(app: &tauri::AppHandle) -> String {
     }
 }
 
-fn apply_ytdl_path(mpv_guard: &crate::mpv::MpvHandle, ytdl_path: &str) -> Result<(), String> {
-    mpv_set_option_string_checked(mpv_guard, "ytdl", "yes")?;
-
-    #[cfg(debug_assertions)]
-    info!("Using yt-dlp search path(s): {}", ytdl_path);
-    let script_opts = format!("ytdl_hook-ytdl_path={ytdl_path}");
-    let script_opts_result = mpv_guard.set_option_string("script-opts", &script_opts);
-    if script_opts_result >= 0 {
-        return Ok(());
-    }
-
-    let append_result = mpv_guard.set_option_string("script-opts-append", &script_opts);
-    if append_result >= 0 {
-        return Ok(());
-    }
-
-    let legacy_result = mpv_guard.set_option_string("ytdl-path", ytdl_path);
-    if legacy_result >= 0 {
-        return Ok(());
-    }
-
-    Err(format!(
-        "Failed to set ytdl path via script-opts ({script_opts_result}), \
-         script-opts-append ({append_result}), and legacy ytdl-path ({legacy_result})"
-    ))
-}
-
-fn clear_ytdl_path(mpv_guard: &crate::mpv::MpvHandle) -> Result<(), String> {
-    mpv_set_option_string_checked(mpv_guard, "ytdl", "no")?;
-    let script_opts = mpv_guard.set_option_string("script-opts", "ytdl_hook-ytdl_path=");
-    let clear_result = mpv_guard.set_option_string("ytdl-path", "");
-    if script_opts < 0 || clear_result < 0 {
-        warn!(
-            "Disabled ytdl, but failed to clear ytdl path completely; script-opts result ({script_opts}), ytdl-path empty ({clear_result})"
-        );
-    }
-    Ok(())
-}
-
 fn normalized_shader_file_list(input: Vec<String>) -> Vec<String> {
     input
         .into_iter()
@@ -637,27 +590,19 @@ pub(crate) fn apply_logging_settings(
 
 #[tauri::command]
 pub(crate) fn apply_ytdl_settings(
-    state: tauri::State<'_, AppState>,
     app: tauri::AppHandle,
     ytdl_path: Option<String>,
     ytdl_cookies_from_browser: Option<String>,
+    ytdl_max_height: Option<u32>,
 ) -> Result<YtdlSettingsState, String> {
-    let resolved_ytdl_path = resolve_current_ytdl_path(&app, ytdl_path);
-    let resolved_cookies = resolve_current_ytdl_cookies_from_browser(&app, ytdl_cookies_from_browser);
+    let settings = resolve_current_ytdlp_settings(&app, ytdl_path, ytdl_cookies_from_browser, ytdl_max_height);
 
-    with_mpv(&state, |mpv_guard| {
-        if let Some(path) = resolved_ytdl_path.as_deref() {
-            apply_ytdl_path(mpv_guard, path)?;
-        } else {
-            clear_ytdl_path(mpv_guard)?;
-        }
-        apply_ytdl_cookies_from_browser(mpv_guard, resolved_cookies.as_deref());
-        Ok(())
-    })?;
+    crate::mpv::store_runtime_ytdlp_settings(settings.clone());
 
     Ok(YtdlSettingsState {
-        ytdl_path: resolved_ytdl_path,
-        ytdl_cookies_from_browser: resolved_cookies,
+        ytdl_path: settings.binary.path,
+        ytdl_cookies_from_browser: settings.cookies.browser,
+        ytdl_max_height: Some(settings.format.max_height),
     })
 }
 

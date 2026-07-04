@@ -12,6 +12,7 @@ import {
     PROXY_MODE_SETTING_LABEL,
     WALLPAPER_MODE_SETTING_LABEL,
     YTDL_COOKIES_FROM_BROWSER_SETTING_LABEL,
+    YTDL_MAX_RESOLUTION_SETTING_LABEL,
     YTDL_PATH_SETTING_LABEL,
     type SettingGroup,
     type SettingItem,
@@ -161,6 +162,25 @@ const findYtdlCookiesFromBrowserItem = (groups: SettingGroup[]) => {
     return item?.type === "select" ? item : undefined;
 };
 
+const findYtdlMaxResolutionItem = (groups: SettingGroup[]) => {
+    const item = groups
+        .flatMap((group) => group.items)
+        .find(
+            (candidate) =>
+                candidate.type === "select" &&
+                candidate.label === YTDL_MAX_RESOLUTION_SETTING_LABEL,
+        );
+    return item?.type === "select" ? item : undefined;
+};
+
+const parseMaxHeight = (value: string | undefined): number | undefined => {
+    if (!value) return undefined;
+    const match = value.match(/^(\d+)p$/);
+    if (!match) return undefined;
+    const height = Number.parseInt(match[1], 10);
+    return Number.isFinite(height) && height > 0 ? height : undefined;
+};
+
 const findProxyModeItem = (groups: SettingGroup[]) => {
     const item = groups
         .flatMap((group) => group.items)
@@ -307,16 +327,19 @@ export const useGeneralSettingsSection = (isWindowsPlatform: boolean) => {
     const buildYtdlRequestKey = (
         ytdlPathItem: ReturnType<typeof findYtdlPathItem>,
         ytdlCookiesItem: ReturnType<typeof findYtdlCookiesFromBrowserItem>,
+        ytdlMaxResolutionItem: ReturnType<typeof findYtdlMaxResolutionItem>,
     ): string =>
         JSON.stringify({
             ytdlPath: ytdlPathItem ? ytdlPathItem.value.trim() : null,
             ytdlCookiesFromBrowser: ytdlCookiesItem ? ytdlCookiesItem.value : null,
+            ytdlMaxResolution: ytdlMaxResolutionItem ? ytdlMaxResolutionItem.value : null,
         });
 
     const applyYtdlOptions = async (groups: SettingGroup[]) => {
         const ytdlPathItem = findYtdlPathItem(groups);
         const ytdlCookiesItem = findYtdlCookiesFromBrowserItem(groups);
-        const requestKey = buildYtdlRequestKey(ytdlPathItem, ytdlCookiesItem);
+        const ytdlMaxResolutionItem = findYtdlMaxResolutionItem(groups);
+        const requestKey = buildYtdlRequestKey(ytdlPathItem, ytdlCookiesItem, ytdlMaxResolutionItem);
 
         if (requestKey === lastAppliedYtdlRequestKey) {
             return;
@@ -327,14 +350,16 @@ export const useGeneralSettingsSection = (isWindowsPlatform: boolean) => {
         const cookiesValue = ytdlCookiesItem?.value;
         const requestedCookiesFromBrowser =
             cookiesValue && cookiesValue !== "Off" ? cookiesValue : undefined;
+        const requestedMaxHeight = parseMaxHeight(ytdlMaxResolutionItem?.value);
         const applied = await applyYtdlSettings(
             requestedYtdlPath,
             requestedCookiesFromBrowser,
+            requestedMaxHeight,
         );
         if (!applied) {
             if (requestedYtdlPath) {
                 markYtdlPathUnavailable(ytdlPathItem);
-                lastAppliedYtdlRequestKey = buildYtdlRequestKey(ytdlPathItem, ytdlCookiesItem);
+                lastAppliedYtdlRequestKey = buildYtdlRequestKey(ytdlPathItem, ytdlCookiesItem, ytdlMaxResolutionItem);
             }
             return;
         }
@@ -342,7 +367,7 @@ export const useGeneralSettingsSection = (isWindowsPlatform: boolean) => {
         if (ytdlPathItem) {
             if (requestedYtdlPath && !applied.ytdlPath) {
                 markYtdlPathUnavailable(ytdlPathItem);
-                lastAppliedYtdlRequestKey = buildYtdlRequestKey(ytdlPathItem, ytdlCookiesItem);
+                lastAppliedYtdlRequestKey = buildYtdlRequestKey(ytdlPathItem, ytdlCookiesItem, ytdlMaxResolutionItem);
                 return;
             }
 
@@ -353,7 +378,7 @@ export const useGeneralSettingsSection = (isWindowsPlatform: boolean) => {
             }
         }
 
-        lastAppliedYtdlRequestKey = buildYtdlRequestKey(ytdlPathItem, ytdlCookiesItem);
+        lastAppliedYtdlRequestKey = buildYtdlRequestKey(ytdlPathItem, ytdlCookiesItem, ytdlMaxResolutionItem);
     };
 
     const scheduleApplyLoggingOptions = () => {

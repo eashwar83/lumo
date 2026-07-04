@@ -324,6 +324,30 @@ pub fn load_setting_value(app: &tauri::AppHandle, label: &str) -> Result<Option<
     Ok(value)
 }
 
+const YTDL_COOKIES_FROM_BROWSER_LABEL: &str = "SOIA_YTDL_COOKIES_FROM_BROWSER";
+
+pub fn load_ytdl_cookies_from_browser(app: &tauri::AppHandle) -> Option<String> {
+    load_setting_value(app, YTDL_COOKIES_FROM_BROWSER_LABEL)
+        .ok()
+        .flatten()
+        .filter(|v| v != "Off")
+}
+
+const YTDL_MAX_RESOLUTION_LABEL: &str = "SOIA_YTDL_MAX_RESOLUTION";
+
+pub fn load_ytdl_max_height(app: &tauri::AppHandle) -> u32 {
+    load_setting_value(app, YTDL_MAX_RESOLUTION_LABEL)
+        .ok()
+        .flatten()
+        .and_then(|v| {
+            v.trim_end_matches('p')
+                .parse::<u32>()
+                .ok()
+                .filter(|&h| h > 0)
+        })
+        .unwrap_or(1080)
+}
+
 pub fn save_ui_state(app: &tauri::AppHandle, state: UiState) -> Result<(), String> {
     let path = ui_state_file_path(app)?;
     let legacy_path = legacy_ui_state_file_path(app)?;

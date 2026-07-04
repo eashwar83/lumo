@@ -76,7 +76,7 @@ pub(crate) async fn load_file(
         .as_ref()
         .map(|resolved| resolved.url.as_str())
         .unwrap_or(&payload.url);
-    let mut load_options = vec!["ytdl=no".to_string()];
+    let mut load_options = vec![];
     if let Some(title) = resolved_media
         .as_ref()
         .and_then(|resolved| resolved.title.as_deref())
