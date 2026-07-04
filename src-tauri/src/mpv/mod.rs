@@ -19,7 +19,7 @@ pub(crate) use stream_proxy::rewrite_https_stream_url;
 pub(crate) use stream_proxy::rewrite_smb_stream_url;
 pub(crate) use stream_proxy::set_parallel_range_enabled;
 
-pub(crate) const USE_SMB_STREAM_PROXY: bool = false;
+pub(crate) const USE_SMB_STREAM_PROXY: bool = true;
 pub(crate) const USE_WEBDAV_STREAM_PROXY: bool = true;
 
 pub(crate) fn register_stream_basic_auth(playback_url: &str, username: &str, password: &str) {

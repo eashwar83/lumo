@@ -682,9 +682,7 @@ async fn handle_smb_stream_source(
         let parsed_range = parse_open_ended_range(Some(range))
             .and_then(|start| {
                 (start < total_size).then(|| {
-                    let end = start
-                        .saturating_add(SMB_STREAM_CHUNK_BYTES - 1)
-                        .min(total_size.saturating_sub(1));
+                    let end = total_size.saturating_sub(1);
                     (start, end)
                 })
             })
