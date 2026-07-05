@@ -50,11 +50,31 @@ pub(crate) async fn resolve_playlist(
     let proxy_url = crate::network::proxy::current_proxy_key(app)?;
     let cookies_from_browser = settings.cookies.browser;
     let raw_url = raw_url.to_string();
+    let cookies_clone = cookies_from_browser.clone();
+    let proxy_clone = proxy_url.clone();
+    let url_clone = raw_url.clone();
+    let ytdl_clone = ytdl_path.clone();
     let output = tauri::async_runtime::spawn_blocking(move || {
         run_ytdlp_playlist_command(&ytdl_path, proxy_url.as_deref(), cookies_from_browser.as_deref(), &raw_url)
     })
     .await
     .map_err(|error| format!("yt-dlp worker failed: {error}"))??;
+
+    let output = if !output.status.success()
+        && cookies_clone.is_some()
+        && is_cookie_permission_error(&output.stderr)
+    {
+        warn!(
+            "yt-dlp: cookies-from-browser failed due to permission error, retrying without cookies"
+        );
+        tauri::async_runtime::spawn_blocking(move || {
+            run_ytdlp_playlist_command(&ytdl_clone, proxy_clone.as_deref(), None, &url_clone)
+        })
+        .await
+        .map_err(|error| format!("yt-dlp worker failed: {error}"))??
+    } else {
+        output
+    };
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -228,6 +248,11 @@ pub(crate) async fn resolve(app: &AppHandle, raw_url: &str) -> Result<Option<Res
     let cookies_from_browser = settings.cookies.browser;
     let format_selector = settings.format.selector();
     let raw_url = raw_url.to_string();
+    let cookies_clone = cookies_from_browser.clone();
+    let proxy_clone = proxy_url.clone();
+    let format_clone = format_selector.clone();
+    let url_clone = raw_url.clone();
+    let ytdl_clone = ytdl_path.clone();
     let output = tauri::async_runtime::spawn_blocking(move || {
         run_ytdlp_command(
             &ytdl_path,
@@ -239,6 +264,27 @@ pub(crate) async fn resolve(app: &AppHandle, raw_url: &str) -> Result<Option<Res
     })
     .await
     .map_err(|error| format!("yt-dlp worker failed: {error}"))??;
+    let output = if !output.status.success()
+        && cookies_clone.is_some()
+        && is_cookie_permission_error(&output.stderr)
+    {
+        warn!(
+            "yt-dlp: cookies-from-browser failed due to permission error, retrying without cookies"
+        );
+        tauri::async_runtime::spawn_blocking(move || {
+            run_ytdlp_command(
+                &ytdl_clone,
+                proxy_clone.as_deref(),
+                None,
+                &format_clone,
+                &url_clone,
+            )
+        })
+        .await
+        .map_err(|error| format!("yt-dlp worker failed: {error}"))??
+    } else {
+        output
+    };
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!(
@@ -700,6 +746,16 @@ fn is_likely_direct_stream_url(raw: &str) -> bool {
     DIRECT_STREAM_EXTENSIONS
         .iter()
         .any(|extension| path.ends_with(&format!(".{extension}")))
+}
+
+fn is_cookie_permission_error(stderr: &[u8]) -> bool {
+    let text = String::from_utf8_lossy(stderr).to_ascii_lowercase();
+    text.contains("could not copy cookies")
+        || text.contains("permission denied")
+        || text.contains("failed to decrypt")
+        || text.contains("could not read cookies")
+        || text.contains("unable to get cookies")
+        || (text.contains("cookie") && text.contains("error"))
 }
 
 fn redact_url(raw: &str) -> String {

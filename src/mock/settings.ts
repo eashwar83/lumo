@@ -67,12 +67,8 @@ export const YTDL_COOKIES_FROM_BROWSER_OPTIONS = [
     "Off",
     "chrome",
     "firefox",
-    "safari",
     "edge",
-    "chromium",
-    "brave",
     "opera",
-    "vivaldi",
 ] as const;
 export const LOG_PATH_SETTING_LABEL = "SOIA_LOG_PATH";
 export const LOG_LEVEL_SETTING_LABEL = "SOIA_LOG_LEVEL";
