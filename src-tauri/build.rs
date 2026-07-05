@@ -214,6 +214,7 @@ fn main() {
             }
             println!("cargo:rustc-link-search=native={}", mpv_lib_dir.display());
             println!("cargo:rustc-link-lib=dylib=soia_utils");
+            println!("cargo:rustc-link-lib=dylib=avutil");
         }
         "windows" => {
             if !has_windows_soia_utils_runtime(&mpv_lib_dir) {

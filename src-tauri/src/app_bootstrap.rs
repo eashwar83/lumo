@@ -2,6 +2,8 @@ use crate::mpv::MpvHandle;
 use crate::store::ui_state_store;
 use crate::AppState;
 use log::warn;
+#[cfg(target_os = "android")]
+use log::{info, error};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
 use std::error::Error;
 use std::ffi::c_void;
@@ -42,6 +44,18 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
 
     let initial_scale_factor = window.scale_factor()?;
     let (render_target, display) = resolve_render_target(&window)?;
+
+    #[cfg(target_os = "android")]
+    {
+        let ctx = ndk_context::android_context();
+        let vm = ctx.vm();
+        info!("register_java_vm: obtained JavaVM pointer: {:?}", vm);
+        if let Err(e) = crate::mpv::register_java_vm(vm as *mut c_void) {
+            error!("{e}");
+        } else {
+            info!("register_java_vm succeeded");
+        }
+    }
 
     let mpv_player_handle = MpvHandle::new(
         render_target,

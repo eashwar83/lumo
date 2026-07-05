@@ -316,6 +316,12 @@ pub(crate) unsafe fn soia_utils_register_stream_protocol(
         .map(|register| unsafe { register(utils, protocol, userdata, open_fn) })
 }
 
+#[cfg(target_os = "android")]
+#[link(name = "avutil")]
+unsafe extern "C" {
+    pub(crate) fn av_jni_set_java_vm(vm: *mut c_void, log_ctx: *mut c_void) -> c_int;
+}
+
 #[link(name = "soia_utils")]
 unsafe extern "C" {
     pub(super) fn soia_utils_create(

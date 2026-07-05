@@ -78,3 +78,13 @@ pub(crate) fn rewrite_network_stream_url(protocol: &str, url: &str) -> Option<St
 pub(crate) fn rewrite_https_callback_url(url: &str) -> Option<String> {
     stream_https::rewrite_https_callback_url(url)
 }
+
+#[cfg(target_os = "android")]
+pub(crate) fn register_java_vm(vm: *mut std::ffi::c_void) -> Result<(), String> {
+    let ret = unsafe { ffi::av_jni_set_java_vm(vm, std::ptr::null_mut()) };
+    if ret < 0 {
+        Err(format!("av_jni_set_java_vm failed with error code: {ret}"))
+    } else {
+        Ok(())
+    }
+}
