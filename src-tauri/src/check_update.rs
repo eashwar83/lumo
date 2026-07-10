@@ -336,6 +336,7 @@ fn run_daily_update_check(app_handle: &tauri::AppHandle) {
         Ok(result) if result.should_run => {
             #[cfg(desktop)]
             {
+                set_update_available_state(false);
                 let app_handle = app_handle.clone();
                 tauri::async_runtime::spawn(async move {
                     run_tauri_updater_check(app_handle).await;
@@ -422,7 +423,6 @@ fn maybe_show_update_note_prompt(
 }
 
 pub(crate) fn check_update(app_handle: tauri::AppHandle) -> Option<SoiaAuthToken> {
-    set_update_available_state(false);
     let result = run_daily_signal_ping(&app_handle);
     run_daily_update_check(&app_handle);
     result

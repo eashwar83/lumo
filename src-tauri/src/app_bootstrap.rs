@@ -19,7 +19,7 @@ const LOG_LEVEL_SETTING_LABEL: &str = "SOIA_LOG_LEVEL";
 const YTDL_PATH_SETTING_LABEL: &str = "SOIA_YTDL_PATH";
 const NETWORK_PARALLEL_DOWNLOAD_SETTING_LABEL: &str = "NETWORK_PARALLEL_DOWNLOAD";
 const DEFAULT_LOG_LEVEL: &str = "Info";
-const UPDATE_CHECK_INTERVAL_SECS: u64 = 24 * 60 * 60;
+const UPDATE_POLL_INTERVAL_SECS: u64 = 60 * 60;
 
 pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
     let window = app
@@ -34,11 +34,14 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
     let app_handle = app.handle().clone();
     let auth_token = crate::check_update::check_update(app_handle.clone());
     tauri::async_runtime::spawn(async move {
-        let mut interval = interval(Duration::from_secs(UPDATE_CHECK_INTERVAL_SECS));
-        interval.tick().await;
+        let mut poll_interval = interval(Duration::from_secs(UPDATE_POLL_INTERVAL_SECS));
+        poll_interval.tick().await;
         loop {
-            interval.tick().await;
-            let _ = crate::check_update::check_update(app_handle.clone());
+            poll_interval.tick().await;
+            let handle = app_handle.clone();
+            let _ = tokio::task::spawn_blocking(move || {
+                crate::check_update::check_update(handle)
+            }).await;
         }
     });
 
