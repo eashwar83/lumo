@@ -53,11 +53,13 @@ impl YtdlpFormatSettings {
     pub(crate) fn selector(&self) -> String {
         let max_height = self.max_height;
         format!(
-            "bv*[height<={max_height}][vcodec^=vp9]+ba/\
+            "bv*[height<={max_height}][vcodec^=avc1]+ba/\
              bv*[height<={max_height}][vcodec^=h264]+ba/\
+             bv*[height<={max_height}][vcodec^=vp9.2]+ba/\
+             bv*[height<={max_height}][vcodec^=vp9]+ba/\
+             bv*[height<={max_height}][vcodec^=av01]+ba/\
              bv*[height<={max_height}][vcodec^=hev1]+ba/\
              bv*[height<={max_height}][vcodec^=hvc1]+ba/\
-             bv*[height<={max_height}][vcodec^=vp9]+ba/\
              b[height<={max_height}]/\
              bv*[height<={max_height}]+ba/\
              bv*+ba/b"
