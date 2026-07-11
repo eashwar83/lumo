@@ -120,6 +120,8 @@ function isExcludedRuntimeSharedObject(name) {
     /^libgbm\.so(\..+)?$/,
     /^libdrm\.so(\..+)?$/,
     /^libwayland.*\.so(\..+)?$/,
+    /^libpulse\.so(\..+)?$/,
+    /^libpulsecommon-.*\.so$/,
   ].some((pattern) => pattern.test(name));
 }
 

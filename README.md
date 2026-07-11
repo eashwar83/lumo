@@ -163,7 +163,7 @@ pnpm setup:libs
 ```
 
 - If `pnpm setup:libs` fails, confirm release access to:
-  - `https://github.com/FengZeng/mpv/releases/tag/v0.41.0-r14`
+  - `https://github.com/FengZeng/mpv/releases/tag/v0.41.0-r15`
   - or set `MPV_RELEASE_ASSET_URL` to a direct asset URL and retry.
 
 - If Linux/Windows bundle scripts report missing runtime manifest, generate it on the target platform:

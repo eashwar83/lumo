@@ -341,18 +341,32 @@ EXCLUDE_LIBRARIES=(
     "libxcb-shape.so.0"
     "libxcb-shm.so.0"
     "libxcb-xfixes.so.0"
+    "libpulse.so.0"
+    "libpulsecommon-16.1.so"
 )
 EXCLUDE_ARGS=()
 for library in "${EXCLUDE_LIBRARIES[@]}"; do
     EXCLUDE_ARGS+=( "--exclude-library=$library" )
 done
 
-echo "Removing excluded Wayland libraries from AppDir before linuxdeploy"
+echo "Removing excluded libraries from AppDir before linuxdeploy"
 for library in "${EXCLUDE_LIBRARIES[@]}"; do
     while IFS= read -r -d '' file; do
         rm -f "$file"
         echo "Removed: $file"
     done < <(find "$APPDIR" \( -type f -o -type l \) -name "$library" -print0 2>/dev/null)
+done
+
+echo "Removing leftover doc/metadata dirs for excluded libraries"
+EXCLUDE_DOC_DIRS=(
+    "libpulse0"
+)
+for pkg in "${EXCLUDE_DOC_DIRS[@]}"; do
+    doc_dir="$APPDIR/usr/share/doc/$pkg"
+    if [ -d "$doc_dir" ]; then
+        rm -rf "$doc_dir"
+        echo "Removed doc dir: $doc_dir"
+    fi
 done
 
 jack_library="$(find /usr/lib* \( -type f -o -type l \) -name 'libjack.so.0' 2>/dev/null | head -n 1)"
