@@ -199,11 +199,16 @@ const isYoutubePlaylistUrl = (value: string) => {
     if (!trimmed) return false;
     try {
         const parsed = new URL(trimmed);
-        return (
-            (parsed.hostname === "www.youtube.com" ||
-                parsed.hostname === "youtube.com") &&
-            parsed.pathname === "/playlist"
-        );
+        if (
+            parsed.hostname !== "www.youtube.com" &&
+            parsed.hostname !== "youtube.com" &&
+            parsed.hostname !== "music.youtube.com"
+        ) {
+            return false;
+        }
+        if (parsed.pathname === "/playlist") return true;
+        if (parsed.pathname.startsWith("/show/")) return true;
+        return false;
     } catch {
         return false;
     }
