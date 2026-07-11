@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.2.8] - 2026-07-11
+
+### Features
+
+- Rewrote SMB stream proxy to use async pipeline reads with server-negotiated max_read_size for improved throughput.
+- Added configurable max stream resolution setting for yt-dlp.
+- Added cookies-from-browser setting for yt-dlp with automatic retry on permission errors.
+- Added support for YouTube `/show/` playlist URLs.
+- Preferred avc1 codec over vp9 in yt-dlp format selection for broader hardware decoding compatibility.
+
+### Fixes
+
+- Fixed video aspect ratio distortion when resizing the window while paused on macOS.
+- Fixed AppImage failing to launch on Fedora by excluding bundled libpulse from the Linux package.
+- Fixed playback speed resetting when switching between videos.
+- Fixed playback history not being saved before switching tracks.
+- Fixed stream proxy not honoring user-registered User-Agent header.
+- Fixed SMB stream backend creating duplicate connections on repeated URL rewrites.
+
 ## [0.2.7] - 2026-06-27
 
 ### Features

@@ -19,19 +19,22 @@ You can also go to System Settings > Privacy & Security and click "Open Anyway" 
 
 The app is open-source and its code is publicly available for anyone to inspect.
 
-## [0.2.7] - 2026-06-27
+## [0.2.8] - 2026-07-11
 
 ### Highlights
 
-* **YouTube Playlist Support**
-  Paste a YouTube playlist URL and Soia will automatically load all videos into a playable playlist.
+* **Improved SMB Browsing & Playback**
+  SMB stream proxy now uses async pipeline reads and respects server-negotiated max read size, resulting in smoother browsing and more reliable playback over SMB shares.
 
-* **Built-in Online Subtitle Search**
-  Search subtitles directly from the subtitle menu using OpenSubtitles and SubSource. Results are cached locally for faster access, and the cache can be cleared anytime from Settings.
+* **More yt-dlp Configuration Options**
+  Added configurable max stream resolution, cookies-from-browser support, and improved format selection (preferring avc1 over vp9). YouTube `/show/` playlist URLs are now recognized as playlists.
 
 ### Fixes
 
-* Fixed an issue on macOS where the window chrome did not update correctly when switching between light and dark appearance modes.
+* Fixed video aspect ratio distortion when resizing the window while paused on macOS.
 
-* Fixed playback control hover states that could occasionally block mouse interactions and prevent clicks from registering.
+* Fixed AppImage failing to launch on Fedora by excluding bundled libpulse.
 
+* Fixed playback speed resetting when switching between videos.
+
+* Fixed playback history not being saved before switching tracks.
