@@ -963,8 +963,7 @@ async fn fetch_remote(
         let client = build_client(app_handle)?;
         let mut request = client
             .get(remote_url)
-            .header(ACCEPT_ENCODING, "identity")
-            .header(USER_AGENT, HTTP_USER_AGENT);
+            .header(ACCEPT_ENCODING, "identity");
         if let Some(range) = range {
             request = request.header(RANGE, range);
         }
@@ -1057,12 +1056,28 @@ fn normalize_headers(headers: &[(String, String)]) -> ProxyHeaders {
 fn should_forward_registered_header(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
-        "user-agent" | "referer" | "cookie" | "origin" | "accept-language"
+        "user-agent"
+            | "referer"
+            | "cookie"
+            | "origin"
+            | "accept"
+            | "accept-language"
+            | "sec-fetch-mode"
+            | "sec-fetch-site"
+            | "sec-fetch-dest"
     )
 }
 
 fn apply_headers(mut request: RequestBuilder, remote_url: &str) -> RequestBuilder {
-    let Some(headers) = lookup_headers(remote_url) else {
+    let headers = lookup_headers(remote_url);
+    let has_registered_ua = headers
+        .as_ref()
+        .map(|h| h.iter().any(|(n, _)| n.eq_ignore_ascii_case("user-agent")))
+        .unwrap_or(false);
+    if !has_registered_ua {
+        request = request.header(USER_AGENT, HTTP_USER_AGENT);
+    }
+    let Some(headers) = headers else {
         return request;
     };
     for (name, value) in headers {
@@ -1313,7 +1328,6 @@ async fn fetch_range_bytes(
     let mut request = client
         .get(remote_url)
         .header(ACCEPT_ENCODING, "identity")
-        .header(USER_AGENT, HTTP_USER_AGENT)
         .header(RANGE, format!("bytes={}-{}", range.start, range.end));
     request = apply_basic_auth(request, remote_url);
     request = apply_headers(request, remote_url);
