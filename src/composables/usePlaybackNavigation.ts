@@ -36,6 +36,7 @@ export const usePlaybackNavigation = ({
     const playTrack = async (direction: PlaybackDirection) => {
         const nextPath = await resolveTrackPath(direction);
         if (!nextPath) return;
+        await player.stopPlayback();
         await playPath(nextPath, playlistState.getTitleForPath(nextPath));
     };
 

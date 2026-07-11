@@ -17,6 +17,7 @@ type PlayerApi = {
         media: {
             url: string;
             title: string;
+            isFileLoaded: boolean;
             isLivePlayback: boolean;
         };
         playback: {
@@ -139,6 +140,7 @@ export const useAppPlaybackEvents = ({
     };
 
     const onProgress = (payload: ProgressPayload) => {
+        if (!player.state.media.isFileLoaded) return;
         history.recordProgress(
             player.state.media.url,
             payload.time_pos,

@@ -290,6 +290,19 @@ export const usePlaybackFlow = ({
         player.state.playback.bufferedTime = 0;
     };
 
+    const finalizeCurrentPlayback = async () => {
+        const currentUrl = player.state.media.url;
+        if (!currentUrl) return;
+        await history.recordStop(
+            currentUrl,
+            player.state.playback.currentTime,
+            player.state.playback.duration,
+            player.state.media.title,
+            player.state.media.isLivePlayback,
+        );
+        resetPlaybackTimeline();
+    };
+
     const rememberLivePlaybackEntries = (entries: ParsedPlaylistEntry[]) => {
         const paths = entries
             .map((entry) => entry.path?.trim() ?? "")
@@ -402,13 +415,13 @@ export const usePlaybackFlow = ({
     ) => {
         if (!path) return;
         await triggerPlaybackIntent();
+        await finalizeCurrentPlayback();
         hideHistory.value = true;
         nowPlaying.clearArtwork();
         tracks.resetTracks();
         player.state.media.url = path;
         player.state.media.isLivePlayback = shouldTreatAsLivePlayback(path, options);
         player.state.media.title = rememberPreferredTitle(path, preferredTitle);
-        resetPlaybackTimeline();
         player.state.playback.isBuffering = false;
         player.state.playback.downloadSpeedBps = 0;
         player.state.playback.hwdecCurrent = "";
@@ -434,6 +447,7 @@ export const usePlaybackFlow = ({
         options?: PlaybackRequestOptions,
     ) => {
         await triggerPlaybackIntent();
+        await finalizeCurrentPlayback();
         hideHistory.value = true;
         nowPlaying.clearArtwork();
         tracks.resetTracks();
@@ -446,7 +460,6 @@ export const usePlaybackFlow = ({
             playbackKey,
             preferredTitle,
         );
-        resetPlaybackTimeline();
         player.state.playback.isBuffering = false;
         player.state.playback.downloadSpeedBps = 0;
         player.state.playback.hwdecCurrent = "";
@@ -479,6 +492,7 @@ export const usePlaybackFlow = ({
         options?: PlaybackRequestOptions,
     ) => {
         await triggerPlaybackIntent();
+        await finalizeCurrentPlayback();
         hideHistory.value = true;
         nowPlaying.clearArtwork();
         tracks.resetTracks();
@@ -491,7 +505,6 @@ export const usePlaybackFlow = ({
             playbackKey,
             preferredTitle,
         );
-        resetPlaybackTimeline();
         player.state.playback.isBuffering = false;
         player.state.playback.downloadSpeedBps = 0;
         player.state.playback.hwdecCurrent = "";
@@ -525,13 +538,13 @@ export const usePlaybackFlow = ({
         options?: PlaybackRequestOptions,
     ) => {
         await triggerPlaybackIntent();
+        await finalizeCurrentPlayback();
         hideHistory.value = true;
         nowPlaying.clearArtwork();
         tracks.resetTracks();
         player.state.media.url = url;
         player.state.media.isLivePlayback = shouldTreatAsLivePlayback(url, options);
         player.state.media.title = rememberPreferredTitle(url, preferredTitle);
-        resetPlaybackTimeline();
         player.state.playback.isBuffering = false;
         player.state.playback.downloadSpeedBps = 0;
         player.state.playback.hwdecCurrent = "";
@@ -567,6 +580,7 @@ export const usePlaybackFlow = ({
         options?: PlaybackRequestOptions,
     ) => {
         await triggerPlaybackIntent();
+        await finalizeCurrentPlayback();
         hideHistory.value = true;
         nowPlaying.clearArtwork();
         tracks.resetTracks();
@@ -579,7 +593,6 @@ export const usePlaybackFlow = ({
             playbackKey,
             preferredTitle,
         );
-        resetPlaybackTimeline();
         player.state.playback.isBuffering = false;
         player.state.playback.downloadSpeedBps = 0;
         player.state.playback.hwdecCurrent = "";
