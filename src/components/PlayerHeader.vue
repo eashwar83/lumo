@@ -50,9 +50,12 @@ const emit = defineEmits<{
 
 const isWindowsPlatform =
     typeof navigator !== "undefined" && /\bwindows\b/i.test(navigator.userAgent);
+const isAndroidPlatform =
+    typeof navigator !== "undefined" && /\bandroid\b/i.test(navigator.userAgent);
 const isLinuxPlatform =
     typeof navigator !== "undefined" && /\blinux\b/i.test(navigator.userAgent);
-const isDesktopCompactControlsPlatform = isWindowsPlatform || isLinuxPlatform;
+const isDesktopCompactControlsPlatform =
+    isWindowsPlatform || (isLinuxPlatform && !isAndroidPlatform);
 const isMacPlatform =
     typeof navigator !== "undefined" && /mac|darwin/i.test(navigator.userAgent);
 const shouldReserveMacTrafficLightsSpace = computed(
@@ -1654,6 +1657,47 @@ watch(
     font-size: 12px;
     color: rgba(255, 255, 255, 0.85);
     word-break: break-word;
+}
+
+:root[data-platform="android"] .top-bar__info-panel {
+    width: min(400px, 72vw);
+    max-height: min(62vh, 440px);
+    padding: 9px 11px;
+    border-radius: 10px;
+}
+
+:root[data-platform="android"] .info-panel__title {
+    font-size: 12px;
+}
+
+:root[data-platform="android"] .info-panel__meta {
+    margin-top: 2px;
+    font-size: 10px;
+}
+
+:root[data-platform="android"] .info-panel__section {
+    margin-top: 7px;
+    gap: 2px;
+}
+
+:root[data-platform="android"] .info-panel__label,
+:root[data-platform="android"] .info-panel__kv-key {
+    font-size: 9px;
+}
+
+:root[data-platform="android"] .info-panel__value,
+:root[data-platform="android"] .info-panel__kv-value {
+    font-size: 10px;
+    line-height: 1.35;
+}
+
+:root[data-platform="android"] .info-panel__kv {
+    grid-template-columns: 58px 1fr;
+    gap: 2px 6px;
+}
+
+:root[data-platform="android"] .info-panel__track-tag {
+    margin-right: 6px;
 }
 
 :root[data-theme="light"] .top-bar__action,

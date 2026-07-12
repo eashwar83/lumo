@@ -1,4 +1,7 @@
 <script setup lang="ts">
+const isAndroidPlatform =
+    typeof navigator !== "undefined" && /\bandroid\b/i.test(navigator.userAgent);
+
 const props = defineProps<{
     isFileLoaded: boolean;
     hover: boolean;
@@ -28,15 +31,22 @@ const emit = defineEmits<{
             >
 
                 <h2 class="home-panel__headline">
-                    Drag &amp; drop videos to play, or click to browse files
+                    {{
+                        isAndroidPlatform
+                            ? "Tap to choose videos to play"
+                            : "Drag & drop videos to play, or click to browse files"
+                    }}
                 </h2>
                 <p class="home-panel__subtext">
                     Select one or multiple videos from your device.
                 </p>
                 <p class="home-panel__subtext home-panel__subtext--muted">
                     Selecting multiple files creates a Playlist automatically.
-                    Move your cursor to the right side of the window and click
-                    to view or edit it.
+                    {{
+                        isAndroidPlatform
+                            ? "Use the Playlist button in the top-left corner to view or edit it."
+                            : "Move your cursor to the right side of the window and click to view or edit it."
+                    }}
                 </p>
 
                 <span class="home-panel__cta">Choose Files</span>
@@ -162,6 +172,42 @@ const emit = defineEmits<{
     border-color: rgba(180, 198, 221, 0.72);
     color: #e8eef8;
     box-shadow: 0 12px 24px rgba(0, 0, 0, 0.24);
+}
+
+:root[data-platform="android"] .home-panel__dropzone {
+    width: min(420px, calc(100% - 24px));
+    max-width: calc(100% - 24px);
+    box-sizing: border-box;
+    min-height: 150px;
+    max-height: min(44vh, 230px);
+    gap: 7px;
+    padding: 11px 15px;
+    border-width: 1px;
+    border-radius: 10px;
+}
+
+:root[data-platform="android"] .home-panel__headline {
+    margin-top: 2px;
+    max-width: 34ch;
+    font-size: 14px;
+    line-height: 1.24;
+}
+
+:root[data-platform="android"] .home-panel__subtext {
+    width: 100%;
+    max-width: none;
+    box-sizing: border-box;
+    font-size: 11px;
+    line-height: 1.35;
+}
+
+:root[data-platform="android"] .home-panel__subtext--muted {
+    font-size: 10px;
+}
+
+:root[data-platform="android"] .home-panel__cta {
+    padding: 5px 10px;
+    font-size: 10px;
 }
 
 @media (max-width: 820px) {

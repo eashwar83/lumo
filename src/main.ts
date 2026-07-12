@@ -1,10 +1,13 @@
 import { createApp } from "vue";
 import App from "./App.vue";
+import "./styles/android.css";
 // import "./styles.css";
 
 const userAgent = window.navigator.userAgent;
 
-if (/\bwindows\b/i.test(userAgent)) {
+if (/\bandroid\b/i.test(userAgent)) {
+    document.documentElement.setAttribute("data-platform", "android");
+} else if (/\bwindows\b/i.test(userAgent)) {
     document.documentElement.setAttribute("data-platform", "windows");
 } else if (/\blinux\b/i.test(userAgent)) {
     document.documentElement.setAttribute("data-platform", "linux");

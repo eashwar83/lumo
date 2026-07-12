@@ -184,6 +184,69 @@
     font-weight: 400;
 }
 
+:root[data-platform="android"] .track-menu {
+    min-width: 150px;
+    max-height: min(260px, calc(100vh - 90px));
+    border-radius: 9px;
+}
+
+:root[data-platform="android"] .track-menu--wide {
+    min-width: 200px;
+}
+
+:root[data-platform="android"] .track-menu--audio,
+:root[data-platform="android"] .track-menu--subtitle {
+    min-width: 200px;
+    max-width: 280px;
+}
+
+:root[data-platform="android"] .track-menu--settings,
+:root[data-platform="android"] .track-menu--subtitle-advanced {
+    min-width: 220px;
+    width: 220px;
+}
+
+:root[data-platform="android"] .track-menu__header {
+    padding: 8px 12px;
+    font-size: 12px;
+    border-radius: 9px 9px 0 0;
+    gap: 8px;
+}
+
+:root[data-platform="android"] .track-menu__item {
+    min-height: 44px;
+    padding: 7px 12px;
+    font-size: 12px;
+}
+
+:root[data-platform="android"] .track-menu__check {
+    width: 20px;
+    height: 20px;
+    margin-right: 8px;
+}
+
+:root[data-platform="android"] .track-menu__check svg {
+    width: 16px;
+    height: 16px;
+}
+
+:root[data-platform="android"] .track-menu__footer {
+    padding: 5px 10px 6px;
+}
+
+:root[data-platform="android"] .track-menu__header-action,
+:root[data-platform="android"] .track-menu__back-button {
+    width: 44px;
+    height: 44px;
+}
+
+:root[data-platform="android"] .track-menu__dual-button,
+:root[data-platform="android"] .track-menu__sub-target,
+:root[data-platform="android"] .track-menu__mode-toggle,
+:root[data-platform="android"] .subtitle-advanced__reset {
+    min-height: 44px;
+}
+
 *::-webkit-scrollbar {
     width: 6px;
     height: 6px;

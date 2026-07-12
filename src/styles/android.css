@@ -1,0 +1,221 @@
+:root[data-platform="android"] .playlist-drawer {
+    width: min(280px, 72vw) !important;
+    max-width: 72vw !important;
+    border-radius: 10px 0 0 10px;
+}
+
+:root[data-platform="android"] .playlist-drawer__resize {
+    display: none;
+}
+
+:root[data-platform="android"] .playlist-drawer__header {
+    padding: 10px 10px 7px 12px;
+    gap: 8px;
+}
+
+:root[data-platform="android"] .playlist-drawer__header-main,
+:root[data-platform="android"] .playlist-drawer__actions {
+    gap: 6px;
+}
+
+:root[data-platform="android"] .playlist-drawer__back,
+:root[data-platform="android"] .playlist-drawer__tool {
+    width: 44px;
+    height: 44px;
+}
+
+:root[data-platform="android"] .playlist-drawer__back svg,
+:root[data-platform="android"] .playlist-drawer__tool svg {
+    width: 16px;
+    height: 16px;
+}
+
+:root[data-platform="android"] .playlist-drawer__title {
+    font-size: 13px;
+}
+
+:root[data-platform="android"] .playlist-drawer__active-name,
+:root[data-platform="android"] .playlist-drawer__meta {
+    font-size: 10px;
+}
+
+:root[data-platform="android"] .playlist-drawer__content {
+    padding: 4px 8px 10px 12px;
+    gap: 7px;
+}
+
+:root[data-platform="android"] .playlist-drawer__list {
+    gap: 5px;
+}
+
+:root[data-platform="android"] .playlist-drawer__playlist,
+:root[data-platform="android"] .playlist-drawer__item {
+    padding: 7px 9px;
+    border-radius: 9px;
+}
+
+:root[data-platform="android"] .playlist-drawer__playlist {
+    padding-right: 36px;
+}
+
+:root[data-platform="android"] .playlist-drawer__playlist-name,
+:root[data-platform="android"] .playlist-drawer__item-title {
+    font-size: 11px;
+}
+
+:root[data-platform="android"] .playlist-drawer__playlist-meta,
+:root[data-platform="android"] .playlist-drawer__item-sub {
+    font-size: 9px;
+}
+
+:root[data-platform="android"] .playlist-drawer__remove {
+    width: 44px;
+    height: 44px;
+}
+
+:root[data-platform="android"] .playlist-drawer__playlist-more,
+:root[data-platform="android"] .playlist-drawer__playlist-menu-item {
+    min-width: 44px;
+    min-height: 44px;
+}
+
+:root[data-platform="android"] .confirm-dialog__panel {
+    width: min(360px, 72vw);
+    max-height: calc(100% - 28px);
+    padding: 12px;
+    border-radius: 11px;
+}
+
+:root[data-platform="android"] .confirm-dialog__panel--wide {
+    width: min(420px, 78vw);
+}
+
+:root[data-platform="android"] .confirm-dialog__title {
+    margin-bottom: 9px;
+    font-size: 13px;
+}
+
+:root[data-platform="android"] .confirm-dialog__body {
+    font-size: 11px;
+    line-height: 1.4;
+}
+
+:root[data-platform="android"] .confirm-dialog__actions {
+    margin-top: 10px;
+    padding-top: 8px;
+}
+
+:root[data-platform="android"] .confirm-dialog__btn {
+    min-width: 76px;
+    min-height: 44px;
+    padding: 6px 10px;
+    font-size: 11px;
+}
+
+:root[data-platform="android"] .playlist-create-prompt {
+    gap: 8px;
+}
+
+:root[data-platform="android"] .playlist-create-prompt__input {
+    padding: 7px 9px;
+    font-size: 11px;
+}
+
+:root[data-platform="android"] .online-subtitle-dialog__panel {
+    width: min(480px, 78vw);
+    max-height: min(78vh, 440px);
+    border-radius: 11px;
+}
+
+:root[data-platform="android"] .online-subtitle-dialog__header {
+    padding: 7px 40px;
+}
+
+:root[data-platform="android"] .online-subtitle-dialog__close {
+    width: 44px;
+    height: 44px;
+}
+
+:root[data-platform="android"] .online-subtitle-dialog__tab {
+    min-height: 44px;
+    padding: 3px 7px;
+    font-size: 10px;
+}
+
+:root[data-platform="android"] .online-subtitle-dialog__list {
+    gap: 5px;
+    padding: 8px;
+}
+
+:root[data-platform="android"] .online-subtitle-dialog__item {
+    min-height: 50px;
+    padding: 7px 9px;
+    gap: 9px;
+}
+
+:root[data-platform="android"] .online-subtitle-dialog__item-title {
+    font-size: 11px;
+}
+
+:root[data-platform="android"] .online-subtitle-dialog__item-file,
+:root[data-platform="android"] .online-subtitle-dialog__item-meta {
+    font-size: 9px;
+}
+
+:root[data-platform="android"] .network-modal {
+    width: min(420px, 76vw);
+    max-height: calc(100% - 28px);
+    padding: 12px;
+    border-radius: 11px;
+}
+
+:root[data-platform="android"] .network-modal__title {
+    margin-bottom: 9px;
+    font-size: 13px;
+}
+
+:root[data-platform="android"] .network-modal__form {
+    gap: 8px;
+}
+
+:root[data-platform="android"] .network-modal__field {
+    gap: 4px;
+}
+
+:root[data-platform="android"] .network-modal__input,
+:root[data-platform="android"] .network-modal__custom-select-trigger {
+    height: 44px;
+    min-height: 44px;
+    padding: 6px 8px;
+    font-size: 11px;
+}
+
+:root[data-platform="android"] .network-modal__actions {
+    margin-top: 10px;
+    padding-top: 8px;
+}
+
+:root[data-platform="android"] .network-modal__btn {
+    min-width: 76px;
+    min-height: 44px;
+}
+
+:root[data-platform="android"] .network-modal .panel__custom-select-option {
+    min-height: 44px;
+}
+
+:root[data-platform="android"] .context-menu {
+    min-width: 132px;
+    padding: 4px;
+    border-radius: 8px;
+}
+
+:root[data-platform="android"] .context-menu__item {
+    min-height: 44px;
+    padding: 4px 8px;
+    font-size: 11px;
+}
+
+:root[data-platform="android"] .volume-control__popover {
+    width: 96px;
+}
