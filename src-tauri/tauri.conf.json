@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Soia",
+  "productName": "Lumo",
   "version": "0.2.9",
-  "identifier": "com.soia.player",
+  "identifier": "com.lumo.player",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -14,7 +14,7 @@
     "macOSPrivateApi": true,
     "windows": [
       {
-        "title": "Soia",
+        "title": "Lumo",
         "width": 1280,
         "height": 720,
         "decorations": true,
@@ -40,12 +40,5 @@
       "minimumSystemVersion": "10.13"
     }
   },
-  "plugins": {
-    "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDMxQ0I1Mzg2Q0MwOUE4MkUKUldRdXFBbk1obFBMTVIxOFM5cnJ1bkNLU09ieGZZdDNyeUNRKzdDTUNieVVsK1g3TGNMVEJNNXEK",
-      "endpoints": [
-        "https://github.com/FengZeng/soia/releases/latest/download/latest.json"
-      ]
-    }
-  }
+  "plugins": {}
 }

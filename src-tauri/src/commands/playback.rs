@@ -199,7 +199,7 @@ pub(crate) async fn take_screenshot(
     let target_dir = app
         .path()
         .picture_dir()
-        .map(|dir| dir.join("Soia Screenshots"))
+        .map(|dir| dir.join("Lumo Screenshots"))
         .or_else(|_| {
             app.path()
                 .app_local_data_dir()

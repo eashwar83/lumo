@@ -1,7 +1,7 @@
 <h1 align="center">
-  <img src="./src-tauri/icons/icon.png" alt="Soia" width="128" />
+  <img src="./src-tauri/icons/icon.png" alt="Lumo" width="128" />
   <br>
-  Soia
+  Lumo
   <br>
 </h1>
 
@@ -10,13 +10,14 @@
 </p>
 
 <p align="center">
-<b><a href="https://github.com/FengZeng/soia/releases">⬇️ Download Latest Release</a> · <a href="https://github.com/FengZeng/soia/issues">🐞 Report a Bug</a></b>
+<b><a href="https://github.com/eashwar83/lumo/releases">⬇️ Download Latest Release</a> · <a href="https://github.com/eashwar83/lumo/issues">🐞 Report a Bug</a></b>
 </p>
 
-![Soia App Preview](https://github.com/user-attachments/assets/9896ae38-d082-413e-8a01-bdb28e687bf7)
 > A modern mpv frontend focused on performance and clean design.
 
-**Soia** is a high-performance video player built on mpv, designed for smooth playback of everything from local Dolby Vision content to remote WebDAV, DLNA, and SMB streams — all in one fast, elegant, cross-platform experience.
+**Lumo** is a high-performance video player built on mpv, designed for smooth playback of everything from local Dolby Vision content to remote WebDAV, DLNA, and SMB streams — all in one fast, elegant, cross-platform experience.
+
+> Lumo is a fork of **[Soia](https://github.com/FengZeng/soia)** by [@FengZeng](https://github.com/FengZeng), licensed under GPL-3.0. See [Credits](#credits) below.
 
 ## ✨ Key Features
 
@@ -48,27 +49,43 @@
 - Experimental Wallpaper Mode (Windows)
 - Flexible playback preferences (speed, seek, auto-play, skip intro)
 
+## 🚀 What's new in Lumo
+
+Lumo adds a set of enhancements on top of the upstream Soia player:
+
+- **Configurable keyboard shortcuts** — every player action is rebindable from
+  Settings → Keyboard Shortcuts (chord capture with modifiers, conflict
+  handling, and a live help overlay).
+- **Auto-Crop Black Bars** — mpv `cropdetect` → `video-crop`, with fit-window-to-
+  video and manual crop shortcuts (`C` / `Shift+C`).
+- **Auto-Load Folder to Playlist** — playing a local file loads its whole folder
+  into the playlist so prev/next walk the folder sequence.
+- **Faster cold start** — the startup auth/update ping is non-blocking and
+  network discovery is deferred, cutting launch time dramatically.
+- **No phone-home** — the upstream startup telemetry ping and auto-updater have
+  been removed.
+
 ## Install
 
-Download from the [release page](https://github.com/FengZeng/soia/releases).
+Download from the [release page](https://github.com/eashwar83/lumo/releases).
 
-Or you can build it yourself. Support macOS 13+, Windows, and Linux(Ubuntu).
+Or you can build it yourself. Supports macOS 13+, Windows, and Linux (Ubuntu).
 Current Linux builds target Ubuntu Wayland sessions only (`X11` is not supported at this time).
 
 ## FAQ
 
-Q: macOS says "Soia is damaged and can't be opened" or cannot verify it is free of malware.
+Q: macOS says the app "is damaged and can't be opened" or cannot verify it is free of malware.
 
-A: This happens because the app is not yet signed with an Apple Developer ID certificate, so macOS may block it on first launch.
+A: This happens because the app is not signed with an Apple Developer ID certificate, so macOS may block it on first launch.
 
 Easy fix (recommended):
-1. Right-click Soia.app
+1. Right-click Lumo.app
 2. Click "Open"
 3. Click "Open" again in the dialog
 
 If that doesn't work, run:
 ```bash
-sudo xattr -r -d com.apple.quarantine /Applications/Soia.app
+sudo xattr -r -d com.apple.quarantine /Applications/Lumo.app
 ```
 
 You can also go to System Settings -> Privacy & Security and click "Open Anyway" (it appears after a blocked launch attempt).
@@ -106,6 +123,7 @@ The app is open-source and its code is publicly available for anyone to inspect.
    # Launches with auto-injected library paths
    pnpm tauri dev
    ```
+
 ## Build and Bundle
 
 Common release build commands:
@@ -116,19 +134,12 @@ pnpm bundle:linux:release
 pnpm bundle:win:release
 ```
 
-## Keyboard Shortcuts
-
-- `Space`: play/pause
-- `Left / Right`: seek backward/forward (step from settings)
-- `I`: toggle playback info panel
-- Double-click video area: toggle fullscreen
-
 ## Data Storage
 
-App data is stored in Tauri's local app data directory and includes:
+App data is stored in Tauri's local app data directory (under `com.lumo.player`) and includes:
 
-- `media.db`: default playlist entries, playback history, and local installation/device/sync metadata
-- `state.json`: UI state and settings (for example active panel, multiple-playlist metadata, and preferences)
+- `media.db`: default playlist entries, playback history, and local installation/device metadata
+- `state.json`: UI state and settings (for example active panel, playlist metadata, and preferences)
 - `network_connections.json`: saved network connections
 - `thumbnails/`: captured artwork for Now Playing
 
@@ -173,23 +184,22 @@ pnpm sync:runtime:linux
 pnpm sync:runtime:win
 ```
 
-- If you have a local bundled `mpv + dependencies` directory for dev testing, use:
-
-```bash
-pnpm setup:libs /absolute/path/to/mpv-bundle
-```
-
 ---
 
-## Author & Maintainer
+## Credits
 
-**Soia** is an independent project developed and maintained by **[@FengZeng](https://github.com/FengZeng)**.
+**Lumo** is a fork of **[Soia](https://github.com/FengZeng/soia)**, an independent
+project created and maintained by **[@FengZeng](https://github.com/FengZeng)**.
+All credit for the original player goes to the upstream author. Lumo continues
+to build on that work under the same license.
 
-While development is driven independently, issues and feedback are actively reviewed and addressed whenever possible.
-
-If you find Soia useful, consider giving it a ⭐ Star — it helps the project grow and reach more users.
+The prebuilt `libmpv` runtime is sourced from the upstream
+[FengZeng/mpv](https://github.com/FengZeng/mpv) release builds.
 
 ## License
 
-This project is licensed under the GNU General Public License v3.0 only (`GPL-3.0-only`).
-See [`LICENSE`](LICENSE) for the full text.
+This project is licensed under the GNU General Public License v3.0 only (`GPL-3.0-only`),
+the same license as the upstream project. See [`LICENSE`](LICENSE) for the full text.
+
+As required by the GPL, the original copyright notices are retained and the
+complete corresponding source code remains available under GPL-3.0.

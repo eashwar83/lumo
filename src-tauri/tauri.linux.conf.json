@@ -2,7 +2,7 @@
   "app": {
     "windows": [
       {
-        "title": "Soia",
+        "title": "Lumo",
         "width": 1280,
         "height": 720,
         "decorations": true,

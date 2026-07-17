@@ -11,9 +11,9 @@ const targetPlatform = process.platform;
 const sourcePath = path.join(root, "src", "constants", "mediaExtensions.json");
 const tauriRuntimeMacPath = path.join(root, "src-tauri", "tauri.runtime.macos.json");
 const tauriWindowsConfigPath = path.join(root, "src-tauri", "tauri.windows.conf.json");
-const associationName = "Soia Media";
+const associationName = "Lumo Media";
 const defaultAssociation = {
-  name: "Soia Media",
+  name: "Lumo Media",
   description: "Media file",
   role: "Viewer",
 };

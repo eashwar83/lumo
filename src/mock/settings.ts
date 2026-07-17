@@ -279,7 +279,7 @@ export const defaultSettingGroups: SettingGroup[] = [
                 displayLabel: "OpenSubtitles API Key (Optional)",
                 value: "",
                 type: "text",
-                placeholder: "Leave empty to use Soia's shared API key",
+                placeholder: "Leave empty to use the built-in shared API key",
             },
             {
                 label: OPENSUBTITLES_LANGUAGES_SETTING_LABEL,

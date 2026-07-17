@@ -2,8 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ref } from "vue";
 
-const PROJECT_GITHUB_URL = "https://github.com/FengZeng/soia";
-const PROJECT_SUBREDDIT_URL = "https://www.reddit.com/r/soia/";
+const PROJECT_GITHUB_URL = "https://github.com/eashwar83/lumo";
+const PROJECT_SUBREDDIT_URL = "https://github.com/eashwar83/lumo";
 
 export type RuntimeVersions = {
     soiaVersion: string;

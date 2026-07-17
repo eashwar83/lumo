@@ -151,25 +151,16 @@ fn main() {
 
     println!("cargo:rerun-if-env-changed=SOIA_API");
     println!("cargo:rerun-if-changed={}", config_file.display());
+    // Lumo does not phone home. The bundled (XOR-obfuscated) endpoint fallback
+    // is intentionally removed, so unless SOIA_API is explicitly set at build
+    // time there are no servers to contact — the startup daily-signal ping
+    // resolves to an empty endpoint list and does nothing.
     let api = env::var("SOIA_API")
         .ok()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
-        .or_else(|| {
-            fs::read(&config_file)
-                .ok()
-                .and_then(|bytes| {
-                    let data: Vec<u8> = bytes
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, b)| b ^ b"HTUA_AI0S"[i % 9])
-                        .collect();
-                    String::from_utf8(data).ok()
-                })
-        })
-        .unwrap_or_else(|| {
-            String::new()
-        }).replace('\r', "");
+        .unwrap_or_default()
+        .replace('\r', "");
     println!("cargo:rustc-env=SOIA_API={}", api);
 
     println!("cargo:rustc-link-search=native={}", mpv_lib_dir.display());

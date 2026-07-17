@@ -523,7 +523,7 @@ fn read_error_response(response: Response) -> String {
 
 fn default_api_key_access_hint(error: &str) -> String {
     format!(
-        "{error}\nThe shared Soia OpenSubtitles API key is unavailable or its free download quota has been used. Add your own OpenSubtitles API key in Settings and try again."
+        "{error}\nThe shared OpenSubtitles API key is unavailable or its free download quota has been used. Add your own OpenSubtitles API key in Settings and try again."
     )
 }
 

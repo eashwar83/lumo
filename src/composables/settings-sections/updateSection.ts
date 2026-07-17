@@ -13,7 +13,7 @@ type UpdateButtonPhase =
     | "installing"
     | "failed";
 
-const PROJECT_RELEASES_URL = "https://github.com/FengZeng/soia/releases";
+const PROJECT_RELEASES_URL = "https://github.com/eashwar83/lumo/releases";
 
 const formatByteSize = (bytes: number): string => {
     if (!Number.isFinite(bytes) || bytes < 0) return "0 B";

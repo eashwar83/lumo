@@ -2405,6 +2405,49 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
+name = "lumo"
+version = "0.2.9"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "block2 0.6.1",
+ "cfg-if",
+ "chrono",
+ "env_logger",
+ "flate2",
+ "futures-util",
+ "keepawake",
+ "libc",
+ "log",
+ "ndk-context",
+ "objc2 0.6.4",
+ "objc2-app-kit",
+ "objc2-core-foundation",
+ "objc2-foundation 0.3.1",
+ "objc2-metal 0.3.1",
+ "objc2-quartz-core 0.3.1",
+ "percent-encoding",
+ "raw-window-handle",
+ "reqwest 0.12.28",
+ "roxmltree",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "socket2",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-clipboard-manager",
+ "tauri-plugin-dialog",
+ "tauri-plugin-opener",
+ "tauri-plugin-process",
+ "tauri-plugin-updater",
+ "tokio",
+ "url",
+ "uuid",
+ "zip",
+]
+
+[[package]]
 name = "mac"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4340,49 +4383,6 @@ dependencies = [
  "wasm-bindgen",
  "web-sys",
  "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "soia"
-version = "0.2.9"
-dependencies = [
- "axum",
- "base64 0.22.1",
- "block2 0.6.1",
- "cfg-if",
- "chrono",
- "env_logger",
- "flate2",
- "futures-util",
- "keepawake",
- "libc",
- "log",
- "ndk-context",
- "objc2 0.6.4",
- "objc2-app-kit",
- "objc2-core-foundation",
- "objc2-foundation 0.3.1",
- "objc2-metal 0.3.1",
- "objc2-quartz-core 0.3.1",
- "percent-encoding",
- "raw-window-handle",
- "reqwest 0.12.28",
- "roxmltree",
- "rusqlite",
- "serde",
- "serde_json",
- "socket2",
- "tauri",
- "tauri-build",
- "tauri-plugin-clipboard-manager",
- "tauri-plugin-dialog",
- "tauri-plugin-opener",
- "tauri-plugin-process",
- "tauri-plugin-updater",
- "tokio",
- "url",
- "uuid",
- "zip",
 ]
 
 [[package]]

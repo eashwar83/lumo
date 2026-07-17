@@ -68,7 +68,7 @@ mod imp {
     const APP_MENU_GITHUB_ITEM_ID: &str = "app.github";
     const APP_MENU_CHECK_UPDATE_ITEM_ID: &str = "app.check-update";
     const OPEN_SETTINGS_PANEL_EVENT: &str = "soia-open-settings-panel";
-    const PROJECT_GITHUB_URL: &str = "https://github.com/FengZeng/soia";
+    const PROJECT_GITHUB_URL: &str = "https://github.com/eashwar83/lumo";
     const WINDOW_VIBRANCY_VIEW_IDENTIFIER: &str = "soia-window-vibrancy-background";
 
     struct PipEventCtx {
@@ -115,7 +115,7 @@ mod imp {
                 title: snapshot
                     .title
                     .filter(|value| !value.is_empty())
-                    .unwrap_or_else(|| "Soia".to_string()),
+                    .unwrap_or_else(|| "Lumo".to_string()),
                 duration: snapshot.duration.unwrap_or(0.0),
                 position: snapshot.position.max(0.0),
                 is_playing: snapshot.is_playing,

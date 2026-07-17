@@ -53,7 +53,7 @@ export const useMediaAssociationSection = (isMacOS: boolean) => {
             if (result.status.isDefaultForAll) {
                 setDefaultButtonPhase.value = "success";
                 mediaAssociationMessage.value =
-                    "Soia is now the default app for checked media extensions.";
+                    "Lumo is now the default app for checked media extensions.";
             } else if (result.failedExtensions.length) {
                 setDefaultButtonPhase.value = "failed";
                 mediaAssociationMessage.value =
@@ -66,7 +66,7 @@ export const useMediaAssociationSection = (isMacOS: boolean) => {
         } catch {
             setDefaultButtonPhase.value = "failed";
             mediaAssociationMessage.value =
-                "Failed to set Soia as the default media app.";
+                "Failed to set Lumo as the default media app.";
         } finally {
             isApplyingMediaAssociation.value = false;
         }
@@ -119,10 +119,10 @@ export const useMediaAssociationSection = (isMacOS: boolean) => {
             return "Default media app detection is unavailable on this system.";
         }
         if (status.isDefaultForAll) {
-            return "Soia is already the default app for checked media extensions.";
+            return "Lumo is already the default app for checked media extensions.";
         }
         if (!status.missingExtensions.length) {
-            return "Some media extensions are not currently handled by Soia.";
+            return "Some media extensions are not currently handled by Lumo.";
         }
         const previewLimit = 8;
         const preview = status.missingExtensions.slice(0, previewLimit).join(", ");
