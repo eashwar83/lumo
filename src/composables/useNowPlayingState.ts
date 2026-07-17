@@ -25,6 +25,7 @@ export const useNowPlayingState = ({
     const statusOverlayMode = ref<"play" | "pause">("play");
     const lastNowPlayingUpdate = ref(0);
     let statusOverlayTimer: number | null = null;
+    let statusOverlaySuppressedUntil = 0;
 
     const clearArtwork = () => {
         nowPlayingArtworkPath.value = "";
@@ -50,7 +51,15 @@ export const useNowPlayingState = ({
         }, STATUS_OVERLAY_MS);
     };
 
+    // Suppress the play/pause status icon for a short window. Used when a pause
+    // is a side effect of another action (e.g. frame stepping) rather than an
+    // explicit play/pause by the user.
+    const suppressStatusOverlay = (durationMs = 1000) => {
+        statusOverlaySuppressedUntil = performance.now() + durationMs;
+    };
+
     const triggerStatusOverlayFromPlayback = () => {
+        if (performance.now() < statusOverlaySuppressedUntil) return;
         triggerStatusOverlay(isPlaying() ? "play" : "pause");
     };
 
@@ -105,6 +114,7 @@ export const useNowPlayingState = ({
         statusOverlayMode,
         clearArtwork,
         clearStatusOverlay,
+        suppressStatusOverlay,
         triggerStatusOverlayFromPlayback,
         updateNowPlayingMetadata,
         updateNowPlayingStatus,

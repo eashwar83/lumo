@@ -1,5 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
+import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import type { MediaTrack } from "./types/media";
+import ShortcutsHelpOverlay from "./components/ShortcutsHelpOverlay.vue";
 import PlayerControls from "./components/PlayerControls.vue";
 import PlayerHeader from "./components/PlayerHeader.vue";
 import MainPanels from "./components/MainPanels.vue";
@@ -13,6 +17,8 @@ import ContextMenu from "./components/ContextMenu.vue";
 import OnlineSubtitleDialog from "./components/OnlineSubtitleDialog.vue";
 import WindowResizeRegions from "./components/WindowResizeRegions.vue";
 import { usePlaybackShortcuts } from "./composables/usePlaybackShortcuts";
+import { useAutoCrop } from "./composables/useAutoCrop";
+import { useAutoloadFolder } from "./composables/useAutoloadFolder";
 import { usePlaybackFlow } from "./composables/usePlaybackFlow";
 import { useAppUiPersistence } from "./composables/useAppUiPersistence";
 import { useAppRuntimeBindings } from "./composables/useAppRuntimeBindings";
@@ -174,10 +180,12 @@ const {
     seekOverlayRightText,
     seekOverlayLeftTimelineText,
     volumeOverlayText,
+    messageOverlayText,
     seekOverlayLeftPulseToken,
     seekOverlayRightPulseToken,
     showSeekOverlay,
     showVolumeOverlay,
+    showMessageOverlay,
 } = usePlaybackOverlays({
     player,
     isLoading,
@@ -259,18 +267,216 @@ const { onSeek, onSeekRelative } = usePlaybackSeekActions({
     loadingUrl,
 });
 
-const { onKeydown, onDoubleClick } = usePlaybackShortcuts(
+const isShortcutsHelpOpen = ref(false);
+const isAlwaysOnTop = ref(false);
+const areSubtitlesVisible = ref(true);
+
+const runMpvShortcutCommand = async (args: Array<string | number>) => {
+    try {
+        await invoke("mpv_run_command", { args });
+    } catch (error) {
+        console.warn("[shortcuts] mpv command failed", { args, error });
+    }
+};
+
+const formatSignedSeconds = (value: number) =>
+    `${value > 0 ? "+" : ""}${value.toFixed(1)} s`;
+
+const describeTrack = (track: MediaTrack) => {
+    const title = track.title?.trim();
+    const lang = track.lang?.trim();
+    if (title && lang) return `${title} (${lang})`;
+    return title || lang || `Track ${track.id}`;
+};
+
+const stepPlaybackSpeed = async (direction: 1 | -1) => {
+    const rates = [...speed.playbackRates].sort((a, b) => a - b);
+    const current = speed.currentSpeed.value;
+    let index = rates.findIndex((rate) => Math.abs(rate - current) < 0.001);
+    if (index === -1) {
+        index = rates.reduce(
+            (best, rate, rateIndex) =>
+                Math.abs(rate - current) < Math.abs(rates[best] - current)
+                    ? rateIndex
+                    : best,
+            0,
+        );
+    }
+    const next =
+        rates[Math.min(rates.length - 1, Math.max(0, index + direction))];
+    if (Math.abs(next - current) >= 0.001) {
+        await speed.setSpeed(next);
+    }
+    showMessageOverlay(`Speed ${next}×`);
+};
+
+const resetPlaybackSpeed = async () => {
+    await speed.setSpeed(1.0);
+    showMessageOverlay("Speed 1×");
+};
+
+const frameStep = async (direction: 1 | -1) => {
+    // frame-step pauses playback; suppress the play/pause status icon so
+    // stepping doesn't flash the pause overlay each time.
+    nowPlaying.suppressStatusOverlay();
+    await runMpvShortcutCommand([
+        direction === 1 ? "frame-step" : "frame-back-step",
+    ]);
+};
+
+const cycleSubtitleTrack = async (direction: 1 | -1) => {
+    const available = tracks.subTracks.value;
+    if (available.length <= 1) {
+        showMessageOverlay("No subtitle tracks");
+        return;
+    }
+    const currentIndex = available.findIndex((track) => track.selected);
+    const nextIndex =
+        ((currentIndex === -1 ? 0 : currentIndex) +
+            direction +
+            available.length) %
+        available.length;
+    const next = available[nextIndex];
+    await tracks.selectSubTrack({ target: "primary", track: next });
+    showMessageOverlay(`Subtitles: ${describeTrack(next)}`);
+};
+
+const toggleSubtitleVisibility = async () => {
+    areSubtitlesVisible.value = !areSubtitlesVisible.value;
+    const flag = areSubtitlesVisible.value ? "yes" : "no";
+    await runMpvShortcutCommand(["set", "sub-visibility", flag]);
+    await runMpvShortcutCommand(["set", "secondary-sub-visibility", flag]);
+    showMessageOverlay(
+        areSubtitlesVisible.value ? "Subtitles shown" : "Subtitles hidden",
+    );
+};
+
+const cycleAudioTrack = async () => {
+    const available = tracks.audioTracks.value;
+    if (available.length === 0) {
+        showMessageOverlay("No audio tracks");
+        return;
+    }
+    const currentIndex = available.findIndex((track) => track.selected);
+    const next =
+        available[((currentIndex === -1 ? 0 : currentIndex) + 1) % available.length];
+    await tracks.selectAudio(next);
+    showMessageOverlay(`Audio: ${describeTrack(next)}`);
+};
+
+const adjustSubtitleDelay = async (deltaSeconds: number) => {
+    const target = tracks.activeSubTarget.value;
+    const current =
+        target === "secondary"
+            ? adjustments.secondarySubDelay.value
+            : adjustments.subDelay.value;
+    await adjustments.setSubDelayForTarget({
+        target,
+        value: Math.round((current + deltaSeconds) * 10) / 10,
+    });
+    const applied =
+        target === "secondary"
+            ? adjustments.secondarySubDelay.value
+            : adjustments.subDelay.value;
+    showMessageOverlay(`Subtitle delay ${formatSignedSeconds(applied)}`);
+};
+
+const adjustAudioDelayBy = async (deltaSeconds: number) => {
+    await adjustments.setAudioDelay(
+        Math.round((adjustments.audioDelay.value + deltaSeconds) * 10) / 10,
+    );
+    showMessageOverlay(
+        `Audio delay ${formatSignedSeconds(adjustments.audioDelay.value)}`,
+    );
+};
+
+const takeScreenshotShortcut = async (includeSubtitles: boolean) => {
+    try {
+        const result = await invoke<{ path: string; fileName: string }>(
+            "take_screenshot",
+            { includeSubtitles },
+        );
+        showMessageOverlay(`Screenshot saved · ${result.fileName}`, 2400);
+    } catch (error) {
+        console.error("[shortcuts] screenshot failed", error);
+        showMessageOverlay("Screenshot failed");
+    }
+};
+
+const toggleAlwaysOnTop = async () => {
+    try {
+        const next = !isAlwaysOnTop.value;
+        await getCurrentWindow().setAlwaysOnTop(next);
+        isAlwaysOnTop.value = next;
+        showMessageOverlay(next ? "Always on top: on" : "Always on top: off");
+    } catch (error) {
+        console.warn("[shortcuts] always-on-top failed", error);
+    }
+};
+
+const toggleLoopWithFeedback = async () => {
+    await toggleLoopOne();
+    showMessageOverlay(isLoopOne.value ? "Loop file: on" : "Loop file: off");
+};
+
+const showProgressOverlay = () => {
+    showMessageOverlay(
+        `${player.formatTime(player.state.playback.currentTime)} / ${player.formatTime(player.state.playback.duration)}`,
+    );
+};
+
+const { onKeydown, onDoubleClick, bindings: shortcutBindings } = usePlaybackShortcuts(
     {
         state: player.state,
         togglePlayPause: player.togglePlayPause,
         seekRelative: onSeekRelative,
         setVolume: playbackVolume.setVolume,
     },
-    onToggleFullscreen,
-    toggleInfo,
-    showSeekOverlay,
-    showVolumeOverlay,
+    {
+        toggleFullscreen: onToggleFullscreen,
+        toggleInfo,
+        seekOverlay: showSeekOverlay,
+        volumeOverlay: showVolumeOverlay,
+        toggleMuted: onToggleMuted,
+        seekAbsolute: async (positionSeconds: number) => {
+            await onSeek(positionSeconds);
+            showMessageOverlay("Jumped to start");
+        },
+        frameStep,
+        stepPlaybackSpeed,
+        resetPlaybackSpeed,
+        cycleSubtitleTrack,
+        toggleSubtitleVisibility,
+        cycleAudioTrack,
+        adjustSubtitleDelay,
+        adjustAudioDelay: adjustAudioDelayBy,
+        takeScreenshot: takeScreenshotShortcut,
+        previousTrack: onPrevTrack,
+        nextTrack: onNextTrack,
+        toggleLoop: toggleLoopWithFeedback,
+        autoCropNow: () => autoCrop.detectNow(),
+        clearCrop: () => autoCrop.clear(),
+        togglePlaylist,
+        toggleAlwaysOnTop,
+        showProgress: showProgressOverlay,
+        toggleShortcutsHelp: () => {
+            isShortcutsHelpOpen.value = !isShortcutsHelpOpen.value;
+        },
+        closeShortcutsHelp: () => {
+            if (!isShortcutsHelpOpen.value) return false;
+            isShortcutsHelpOpen.value = false;
+            return true;
+        },
+        isShortcutsHelpOpen: () => isShortcutsHelpOpen.value,
+    },
 );
+
+const autoCrop = useAutoCrop({
+    isFileLoaded: () => player.state.media.isFileLoaded,
+    onMessage: showMessageOverlay,
+});
+
+const autoloadFolder = useAutoloadFolder({ playlist: playlistState });
 
 watch(
     subtitlesDisabled,
@@ -366,6 +572,8 @@ const onFileLoaded = async () => {
     }
     await adjustments.applyColorAdjustmentsForMedia(player.state.media.url);
     await subtitleAppearance.applySubtitleAppearanceOptions();
+    void autoCrop.onFileLoaded();
+    void autoloadFolder.onFileLoaded(player.state.media.url);
 };
 
 const onProgressWithLivePlaybackUpdate = (
@@ -482,6 +690,7 @@ useAppStartupBindings({
             :seek-overlay-right-text="seekOverlayRightText"
             :seek-overlay-left-timeline-text="seekOverlayLeftTimelineText"
             :volume-overlay-text="volumeOverlayText"
+            :message-overlay-text="messageOverlayText"
             :hide-seek-timeline="ui.showControls.value"
             :seek-overlay-left-pulse-token="seekOverlayLeftPulseToken"
             :seek-overlay-right-pulse-token="seekOverlayRightPulseToken"
@@ -726,6 +935,12 @@ useAppStartupBindings({
             v-model:name-draft="playlistCreationPrompt.nameDraft.value"
             @cancel="playlistCreationPrompt.cancelPlaylistCreation"
             @confirm="playlistCreationPrompt.confirmPlaylistCreation"
+        />
+
+        <ShortcutsHelpOverlay
+            :open="isShortcutsHelpOpen"
+            :bindings="shortcutBindings"
+            @close="isShortcutsHelpOpen = false"
         />
 
         <WindowResizeRegions

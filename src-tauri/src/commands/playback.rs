@@ -35,6 +35,17 @@ pub(crate) fn mpv_set_option_string(
     })
 }
 
+/// Read an mpv property as a string. Returns `None` when the property is
+/// currently unavailable (e.g. no file loaded, or metadata not yet produced)
+/// so callers can treat "not ready" differently from a hard error.
+#[tauri::command]
+pub(crate) fn mpv_get_property_string(
+    state: tauri::State<'_, AppState>,
+    name: String,
+) -> Result<Option<String>, String> {
+    with_mpv(&state, |mpv_guard| Ok(mpv_guard.get_property_string(&name).ok()))
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LoadFilePayload {
@@ -135,6 +146,108 @@ pub(crate) fn seek_video(state: tauri::State<'_, AppState>, position: f64) -> Re
         Ok(())
     })?;
     Ok(())
+}
+
+fn sanitize_screenshot_stem(raw: &str) -> String {
+    let cleaned: String = raw
+        .chars()
+        .map(|c| {
+            if c.is_control() {
+                return ' ';
+            }
+            match c {
+                '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => ' ',
+                _ => c,
+            }
+        })
+        .collect();
+    let collapsed = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    let stem: String = collapsed.chars().take(64).collect();
+    let stem = stem.trim().trim_end_matches('.').to_string();
+    if stem.is_empty() {
+        "Screenshot".to_string()
+    } else {
+        stem
+    }
+}
+
+fn format_screenshot_position(seconds: f64) -> String {
+    let total = seconds.max(0.0) as u64;
+    format!(
+        "{:02}.{:02}.{:02}",
+        total / 3600,
+        (total % 3600) / 60,
+        total % 60
+    )
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ScreenshotResult {
+    path: String,
+    file_name: String,
+}
+
+#[tauri::command]
+pub(crate) async fn take_screenshot(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    include_subtitles: Option<bool>,
+) -> Result<ScreenshotResult, String> {
+    use tauri::Manager;
+
+    let target_dir = app
+        .path()
+        .picture_dir()
+        .map(|dir| dir.join("Soia Screenshots"))
+        .or_else(|_| {
+            app.path()
+                .app_local_data_dir()
+                .map(|dir| dir.join("screenshots"))
+        })
+        .map_err(|error| format!("Failed to resolve screenshot directory: {error}"))?;
+    std::fs::create_dir_all(&target_dir).map_err(|error| error.to_string())?;
+
+    let mode = if include_subtitles.unwrap_or(true) {
+        "subtitles"
+    } else {
+        "video"
+    };
+    let mpv_player = state.mpv_player.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mpv_guard = mpv_player.lock().map_err(|error| error.to_string())?;
+        let title = mpv_guard
+            .get_property_string("media-title")
+            .unwrap_or_default();
+        let position = mpv_guard
+            .get_property_string("time-pos")
+            .ok()
+            .and_then(|raw| raw.trim().parse::<f64>().ok())
+            .unwrap_or(0.0);
+        let stem = format!(
+            "{} {}",
+            sanitize_screenshot_stem(&title),
+            format_screenshot_position(position)
+        );
+        let mut file_path = target_dir.join(format!("{stem}.png"));
+        let mut counter = 2;
+        while file_path.exists() {
+            file_path = target_dir.join(format!("{stem} ({counter}).png"));
+            counter += 1;
+        }
+        let file_path_str = file_path.to_string_lossy().to_string();
+        mpv_command_checked(&mpv_guard, &["screenshot-to-file", &file_path_str, mode])?;
+        let file_name = file_path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_else(|| file_path_str.clone());
+        Ok(ScreenshotResult {
+            path: file_path_str,
+            file_name,
+        })
+    })
+    .await
+    .map_err(|error| format!("Screenshot task failed: {error}"))?
 }
 
 #[derive(Serialize)]

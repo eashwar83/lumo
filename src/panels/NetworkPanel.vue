@@ -69,11 +69,18 @@ const canDiscoverConnections = true;
 const currentResolvedSource = ref<ResolvedPlaybackSource | null>(null);
 let resolveCurrentSourceSequence = 0;
 
+const hasAutoDiscovered = ref(false);
 watch(
     () => props.isVisible,
     (isVisible, wasVisible) => {
         if (!isVisible || wasVisible) return;
         void resetBrowserToRootWhenVisible();
+        // Kick off network discovery the first time the panel is opened,
+        // rather than eagerly at app startup.
+        if (!hasAutoDiscovered.value) {
+            hasAutoDiscovered.value = true;
+            void onDiscoverConnections();
+        }
     },
 );
 

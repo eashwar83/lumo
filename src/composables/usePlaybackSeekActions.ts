@@ -30,10 +30,10 @@ export const usePlaybackSeekActions = ({
         }
     };
 
-    const onSeekRelative = async (position: number) => {
+    const onSeekRelative = async (position: number, exact = false) => {
         if (!beginSeekLoading()) return;
         try {
-            await player.seekRelative(position);
+            await player.seekRelative(position, exact);
         } catch {
             isLoading.value = false;
             loadingUrl.value = "";

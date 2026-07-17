@@ -1,8 +1,15 @@
-import { onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import {
     SEEK_STEP_SETTING_LABEL,
     SETTINGS_UPDATED_EVENT,
 } from "../mock/settings";
+import {
+    buildDefaultShortcutMap,
+    chordFromEvent,
+    parseShortcutBindings,
+    UNBOUND_CHORD,
+    type ShortcutActionId,
+} from "../constants/shortcuts";
 import { loadUiState } from "./useUiStateStore";
 
 type PlaybackShortcutApi = {
@@ -20,8 +27,37 @@ type PlaybackShortcutApi = {
         };
     };
     togglePlayPause: () => Promise<void>;
-    seekRelative: (position: number) => Promise<void>;
+    seekRelative: (position: number, exact?: boolean) => Promise<void>;
     setVolume: (volume: number) => Promise<void>;
+};
+
+export type PlaybackShortcutActions = {
+    toggleFullscreen: () => Promise<void> | void;
+    toggleInfo: () => void;
+    seekOverlay?: (deltaSeconds: number) => void;
+    volumeOverlay?: (volume: number) => void;
+    toggleMuted?: () => Promise<void> | void;
+    seekAbsolute?: (positionSeconds: number) => Promise<void> | void;
+    frameStep?: (direction: 1 | -1) => Promise<void> | void;
+    stepPlaybackSpeed?: (direction: 1 | -1) => Promise<void> | void;
+    resetPlaybackSpeed?: () => Promise<void> | void;
+    cycleSubtitleTrack?: (direction: 1 | -1) => Promise<void> | void;
+    toggleSubtitleVisibility?: () => Promise<void> | void;
+    cycleAudioTrack?: () => Promise<void> | void;
+    adjustSubtitleDelay?: (deltaSeconds: number) => Promise<void> | void;
+    adjustAudioDelay?: (deltaSeconds: number) => Promise<void> | void;
+    takeScreenshot?: (includeSubtitles: boolean) => Promise<void> | void;
+    previousTrack?: () => Promise<void> | void;
+    nextTrack?: () => Promise<void> | void;
+    toggleLoop?: () => Promise<void> | void;
+    autoCropNow?: () => Promise<void> | void;
+    clearCrop?: () => Promise<void> | void;
+    togglePlaylist?: () => void;
+    toggleAlwaysOnTop?: () => Promise<void> | void;
+    showProgress?: () => void;
+    toggleShortcutsHelp?: () => void;
+    closeShortcutsHelp?: () => boolean;
+    isShortcutsHelpOpen?: () => boolean;
 };
 
 type StoredSettingGroup = {
@@ -29,8 +65,19 @@ type StoredSettingGroup = {
     items: Array<{ label: string; value: string }>;
 };
 
+type ActionHandler = {
+    enabled: () => boolean;
+    /** Screenshots opt out so a held key doesn't spray files; most repeat. */
+    allowRepeat?: boolean;
+    run: (event: KeyboardEvent) => void | Promise<void>;
+};
+
 const DEFAULT_SEEK_STEP_SECONDS = 5;
+const LONG_SEEK_STEP_SECONDS = 60;
+const EXACT_SEEK_STEP_SECONDS = 1;
 const VOLUME_STEP = 5;
+const SUB_DELAY_STEP_SECONDS = 0.1;
+const AUDIO_DELAY_STEP_SECONDS = 0.1;
 
 const parseSeekStepSeconds = (groups?: StoredSettingGroup[]): number => {
     const rawValue = groups
@@ -43,30 +90,48 @@ const parseSeekStepSeconds = (groups?: StoredSettingGroup[]): number => {
 
 export const usePlaybackShortcuts = (
     player: PlaybackShortcutApi,
-    onToggleFullscreen: () => Promise<void>,
-    onToggleInfo: () => void,
-    onSeekByArrow?: (deltaSeconds: number) => void,
-    onVolumeByArrow?: (volume: number) => void,
+    actions: PlaybackShortcutActions,
 ) => {
     let clickTimer: number | null = null;
     const seekStepSeconds = ref(DEFAULT_SEEK_STEP_SECONDS);
+    const bindings = ref<Record<ShortcutActionId, string>>(
+        buildDefaultShortcutMap(),
+    );
 
-    const refreshSeekStepFromSettings = async () => {
+    // Reverse index: chord -> action. Rebuilt whenever bindings change.
+    const chordToAction = computed(() => {
+        const map = new Map<string, ShortcutActionId>();
+        (Object.entries(bindings.value) as Array<[ShortcutActionId, string]>).forEach(
+            ([id, chord]) => {
+                if (chord && chord !== UNBOUND_CHORD) {
+                    map.set(chord, id);
+                }
+            },
+        );
+        return map;
+    });
+
+    const applyStoredGroups = (groups?: StoredSettingGroup[]) => {
+        seekStepSeconds.value = parseSeekStepSeconds(groups);
+        bindings.value = parseShortcutBindings(groups);
+    };
+
+    const refreshFromSettings = async () => {
         const stored = await loadUiState<{
             settings?: {
                 groups?: StoredSettingGroup[];
             };
         }>();
-        seekStepSeconds.value = parseSeekStepSeconds(stored?.settings?.groups);
+        applyStoredGroups(stored?.settings?.groups);
     };
 
     const onSettingsUpdated = (event: Event) => {
         const customEvent = event as CustomEvent<{ groups?: StoredSettingGroup[] }>;
-        seekStepSeconds.value = parseSeekStepSeconds(customEvent.detail?.groups);
+        applyStoredGroups(customEvent.detail?.groups);
     };
 
     onMounted(() => {
-        void refreshSeekStepFromSettings();
+        void refreshFromSettings();
         window.addEventListener(SETTINGS_UPDATED_EVENT, onSettingsUpdated);
     });
 
@@ -88,76 +153,241 @@ export const usePlaybackShortcuts = (
             window.clearTimeout(clickTimer);
             clickTimer = null;
         }
-        await onToggleFullscreen();
+        await actions.toggleFullscreen();
+    };
+
+    const isEditableTarget = (target: HTMLElement | null) => {
+        const tag = target?.tagName?.toLowerCase();
+        return (
+            tag === "input" ||
+            tag === "textarea" ||
+            (target !== null && target.isContentEditable)
+        );
+    };
+
+    const isFileLoaded = () => player.state.media.isFileLoaded;
+
+    const canSeek = () =>
+        player.state.media.isFileLoaded &&
+        !player.state.media.isLivePlayback &&
+        player.state.playback.duration > 0;
+
+    const doSeek = async (delta: number, exact = false) => {
+        actions.seekOverlay?.(delta);
+        await player.seekRelative(delta, exact);
+    };
+
+    const doVolume = async (delta: number) => {
+        await player.setVolume(player.state.playback.volume + delta);
+        actions.volumeOverlay?.(player.state.playback.volume);
+    };
+
+    // Each action's guard (`enabled`) mirrors the original hardcoded behavior:
+    // playback-affecting actions require a loaded file, seeks require a seekable
+    // timeline, and window/UI toggles are always available. Optional callbacks
+    // are treated as disabled when absent so their chord isn't consumed.
+    const handlers: Partial<Record<ShortcutActionId, ActionHandler>> = {
+        togglePlayPause: {
+            enabled: () => true,
+            run: () => player.togglePlayPause(),
+        },
+        seekBackward: {
+            enabled: canSeek,
+            run: () => doSeek(-seekStepSeconds.value),
+        },
+        seekForward: {
+            enabled: canSeek,
+            run: () => doSeek(seekStepSeconds.value),
+        },
+        seekBackwardExact: {
+            enabled: canSeek,
+            run: () => doSeek(-EXACT_SEEK_STEP_SECONDS, true),
+        },
+        seekForwardExact: {
+            enabled: canSeek,
+            run: () => doSeek(EXACT_SEEK_STEP_SECONDS, true),
+        },
+        seekBackwardLong: {
+            enabled: canSeek,
+            run: () => doSeek(-LONG_SEEK_STEP_SECONDS),
+        },
+        seekForwardLong: {
+            enabled: canSeek,
+            run: () => doSeek(LONG_SEEK_STEP_SECONDS),
+        },
+        seekToStart: {
+            enabled: () => Boolean(actions.seekAbsolute) && canSeek(),
+            run: () => actions.seekAbsolute?.(0),
+        },
+        frameStepBackward: {
+            enabled: () => Boolean(actions.frameStep) && isFileLoaded(),
+            run: () => actions.frameStep?.(-1),
+        },
+        frameStepForward: {
+            enabled: () => Boolean(actions.frameStep) && isFileLoaded(),
+            run: () => actions.frameStep?.(1),
+        },
+        speedDown: {
+            enabled: () => Boolean(actions.stepPlaybackSpeed) && isFileLoaded(),
+            run: () => actions.stepPlaybackSpeed?.(-1),
+        },
+        speedUp: {
+            enabled: () => Boolean(actions.stepPlaybackSpeed) && isFileLoaded(),
+            run: () => actions.stepPlaybackSpeed?.(1),
+        },
+        resetSpeed: {
+            enabled: () => Boolean(actions.resetPlaybackSpeed) && isFileLoaded(),
+            run: () => actions.resetPlaybackSpeed?.(),
+        },
+        toggleLoop: {
+            enabled: () => Boolean(actions.toggleLoop) && isFileLoaded(),
+            run: () => actions.toggleLoop?.(),
+        },
+        autoCropNow: {
+            enabled: () => Boolean(actions.autoCropNow) && isFileLoaded(),
+            allowRepeat: false,
+            run: () => actions.autoCropNow?.(),
+        },
+        clearCrop: {
+            enabled: () => Boolean(actions.clearCrop) && isFileLoaded(),
+            allowRepeat: false,
+            run: () => actions.clearCrop?.(),
+        },
+        volumeUp: {
+            enabled: isFileLoaded,
+            run: () => doVolume(VOLUME_STEP),
+        },
+        volumeDown: {
+            enabled: isFileLoaded,
+            run: () => doVolume(-VOLUME_STEP),
+        },
+        toggleMute: {
+            enabled: () => Boolean(actions.toggleMuted) && isFileLoaded(),
+            run: () => actions.toggleMuted?.(),
+        },
+        cycleSubtitleForward: {
+            enabled: () => Boolean(actions.cycleSubtitleTrack) && isFileLoaded(),
+            run: () => actions.cycleSubtitleTrack?.(1),
+        },
+        cycleSubtitleBackward: {
+            enabled: () => Boolean(actions.cycleSubtitleTrack) && isFileLoaded(),
+            run: () => actions.cycleSubtitleTrack?.(-1),
+        },
+        toggleSubtitleVisibility: {
+            enabled: () =>
+                Boolean(actions.toggleSubtitleVisibility) && isFileLoaded(),
+            run: () => actions.toggleSubtitleVisibility?.(),
+        },
+        subtitleDelayDown: {
+            enabled: () => Boolean(actions.adjustSubtitleDelay) && isFileLoaded(),
+            run: () => actions.adjustSubtitleDelay?.(-SUB_DELAY_STEP_SECONDS),
+        },
+        subtitleDelayUp: {
+            enabled: () => Boolean(actions.adjustSubtitleDelay) && isFileLoaded(),
+            run: () => actions.adjustSubtitleDelay?.(SUB_DELAY_STEP_SECONDS),
+        },
+        cycleAudioTrack: {
+            enabled: () => Boolean(actions.cycleAudioTrack) && isFileLoaded(),
+            run: () => actions.cycleAudioTrack?.(),
+        },
+        audioDelayDown: {
+            enabled: () => Boolean(actions.adjustAudioDelay) && isFileLoaded(),
+            run: () => actions.adjustAudioDelay?.(-AUDIO_DELAY_STEP_SECONDS),
+        },
+        audioDelayUp: {
+            enabled: () => Boolean(actions.adjustAudioDelay) && isFileLoaded(),
+            run: () => actions.adjustAudioDelay?.(AUDIO_DELAY_STEP_SECONDS),
+        },
+        screenshotWithSubtitles: {
+            enabled: () => Boolean(actions.takeScreenshot) && isFileLoaded(),
+            allowRepeat: false,
+            run: () => actions.takeScreenshot?.(true),
+        },
+        screenshotVideoOnly: {
+            enabled: () => Boolean(actions.takeScreenshot) && isFileLoaded(),
+            allowRepeat: false,
+            run: () => actions.takeScreenshot?.(false),
+        },
+        toggleFullscreen: {
+            enabled: () => true,
+            run: () => actions.toggleFullscreen(),
+        },
+        toggleInfo: {
+            enabled: isFileLoaded,
+            run: () => actions.toggleInfo(),
+        },
+        showProgress: {
+            enabled: () => Boolean(actions.showProgress) && isFileLoaded(),
+            run: () => actions.showProgress?.(),
+        },
+        togglePlaylist: {
+            enabled: () => Boolean(actions.togglePlaylist),
+            run: () => actions.togglePlaylist?.(),
+        },
+        previousTrack: {
+            enabled: () => Boolean(actions.previousTrack),
+            run: () => actions.previousTrack?.(),
+        },
+        nextTrack: {
+            enabled: () => Boolean(actions.nextTrack),
+            run: () => actions.nextTrack?.(),
+        },
+        toggleAlwaysOnTop: {
+            enabled: () => Boolean(actions.toggleAlwaysOnTop),
+            run: () => actions.toggleAlwaysOnTop?.(),
+        },
     };
 
     const onKeydown = async (event: KeyboardEvent) => {
+        // Escape is reserved: close the help overlay or exit fullscreen.
         if (event.code === "Escape") {
+            if (actions.closeShortcutsHelp?.()) {
+                event.preventDefault();
+                return;
+            }
             if (!player.state.window.isFullscreen) {
                 return;
             }
             event.preventDefault();
-            await onToggleFullscreen();
+            await actions.toggleFullscreen();
             return;
         }
 
-        const target = event.target as HTMLElement | null;
-        const tag = target?.tagName?.toLowerCase();
-        if (
-            tag === "input" ||
-            tag === "textarea" ||
-            (target && target.isContentEditable)
-        ) {
+        if (isEditableTarget(event.target as HTMLElement | null)) {
             return;
         }
 
-        if (
-            event.code !== "Space" &&
-            event.code !== "ArrowLeft" &&
-            event.code !== "ArrowRight" &&
-            event.code !== "ArrowUp" &&
-            event.code !== "ArrowDown" &&
-            event.code !== "KeyI"
-        ) {
+        // `?` / F1 are reserved for the shortcuts help overlay so it can always
+        // be opened regardless of how the other bindings are customized.
+        if (event.key === "?" || event.code === "F1") {
+            if (actions.toggleShortcutsHelp) {
+                event.preventDefault();
+                actions.toggleShortcutsHelp();
+            }
             return;
         }
-        if (event.code === "KeyI") {
-            if (!player.state.media.isFileLoaded) return;
-            event.preventDefault();
-            onToggleInfo();
+
+        if (actions.isShortcutsHelpOpen?.()) {
             return;
         }
-        if (event.code === "Space") {
-            event.preventDefault();
-            await player.togglePlayPause();
-            return;
-        }
-        if (event.code === "ArrowUp" || event.code === "ArrowDown") {
-            if (!player.state.media.isFileLoaded) return;
-            event.preventDefault();
-            const delta = event.code === "ArrowUp" ? VOLUME_STEP : -VOLUME_STEP;
-            await player.setVolume(player.state.playback.volume + delta);
-            onVolumeByArrow?.(player.state.playback.volume);
-            return;
-        }
-        if (
-            !player.state.media.isFileLoaded ||
-            player.state.media.isLivePlayback ||
-            player.state.playback.duration <= 0
-        ) {
-            return;
-        }
+
+        const chord = chordFromEvent(event);
+        if (!chord) return;
+
+        const actionId = chordToAction.value.get(chord);
+        if (!actionId) return;
+
+        const handler = handlers[actionId];
+        if (!handler || !handler.enabled()) return;
+        if (event.repeat && handler.allowRepeat === false) return;
+
         event.preventDefault();
-        const delta =
-            event.code === "ArrowLeft"
-                ? -seekStepSeconds.value
-                : seekStepSeconds.value;
-        onSeekByArrow?.(delta);
-        await player.seekRelative(delta);
+        await handler.run(event);
     };
 
     return {
         onDoubleClick,
         onKeydown,
+        bindings,
     };
 };

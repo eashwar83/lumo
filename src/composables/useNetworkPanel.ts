@@ -278,13 +278,12 @@ export const useNetworkPanel = () => {
         if (typeof window !== "undefined") {
             window.addEventListener(SETTINGS_UPDATED_EVENT, onSettingsUpdated);
         }
+        // Only load saved connections here (fast). Network discovery (SSDP/mDNS
+        // scans, ~6s) is deferred until the Network panel is first shown — see
+        // the visibility watch in NetworkPanel.vue — so it never delays app
+        // startup while the user is on another panel.
         await loadConnections();
         await loadStoredUiState();
-        try {
-            await onDiscoverConnections();
-        } catch {
-            // Keep startup non-blocking even when discovery fails.
-        }
         if (!selectedConnection.value && connections.value.length > 0) {
             selectedConnectionId.value = connections.value[0].id;
         }

@@ -204,8 +204,15 @@ export const usePlaybackCommands = (
     await invoke("seek_video", { position });
   };
 
-  const seekRelative = async (position: number): Promise<void> => {
-    await runMpvCommand(["seek", position, "relative"]);
+  const seekRelative = async (
+    position: number,
+    exact = false,
+  ): Promise<void> => {
+    await runMpvCommand([
+      "seek",
+      position,
+      exact ? "relative+exact" : "relative",
+    ]);
   };
 
   const setLoopFile = async (enabled: boolean): Promise<void> => {

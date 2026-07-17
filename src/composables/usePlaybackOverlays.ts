@@ -34,11 +34,13 @@ export const usePlaybackOverlays = ({
     const seekOverlayRightText = ref("");
     const seekOverlayLeftTimelineText = ref("");
     const volumeOverlayText = ref("");
+    const messageOverlayText = ref("");
     const seekOverlayLeftPulseToken = ref(0);
     const seekOverlayRightPulseToken = ref(0);
     let loadingOverlayDelayTimer: ReturnType<typeof setTimeout> | null = null;
     let seekOverlayTimer: ReturnType<typeof setTimeout> | null = null;
     let volumeOverlayTimer: ReturnType<typeof setTimeout> | null = null;
+    let messageOverlayTimer: ReturnType<typeof setTimeout> | null = null;
     let seekOverlayAccumulatedDelta = 0;
     let seekOverlayBaseTime = 0;
 
@@ -60,6 +62,13 @@ export const usePlaybackOverlays = ({
         if (volumeOverlayTimer !== null) {
             window.clearTimeout(volumeOverlayTimer);
             volumeOverlayTimer = null;
+        }
+    };
+
+    const clearMessageOverlayTimer = () => {
+        if (messageOverlayTimer !== null) {
+            window.clearTimeout(messageOverlayTimer);
+            messageOverlayTimer = null;
         }
     };
 
@@ -115,6 +124,15 @@ export const usePlaybackOverlays = ({
         }, 700);
     };
 
+    const showMessageOverlay = (message: string, durationMs = 1400) => {
+        messageOverlayText.value = message;
+        clearMessageOverlayTimer();
+        messageOverlayTimer = window.setTimeout(() => {
+            messageOverlayText.value = "";
+            messageOverlayTimer = null;
+        }, durationMs);
+    };
+
     const showVolumeOverlay = (volume: number) => {
         const nextVolume = clampNumber(Math.round(volume), 0, 100);
         volumeOverlayText.value = `Volume ${nextVolume}`;
@@ -143,6 +161,7 @@ export const usePlaybackOverlays = ({
         clearLoadingOverlayDelayTimer();
         clearSeekOverlayTimer();
         clearVolumeOverlayTimer();
+        clearMessageOverlayTimer();
     });
 
     return {
@@ -152,9 +171,11 @@ export const usePlaybackOverlays = ({
         seekOverlayRightText,
         seekOverlayLeftTimelineText,
         volumeOverlayText,
+        messageOverlayText,
         seekOverlayLeftPulseToken,
         seekOverlayRightPulseToken,
         showSeekOverlay,
         showVolumeOverlay,
+        showMessageOverlay,
     };
 };

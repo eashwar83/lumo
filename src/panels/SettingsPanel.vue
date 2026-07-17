@@ -2,8 +2,10 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useSettingsPanel } from "../composables/useSettingsPanel";
 import { getPathDisplayName } from "../utils/getPathDisplayName";
+import ShortcutSettings from "../components/ShortcutSettings.vue";
 import {
     ENABLE_COMPACT_MODE_SETTING_LABEL,
+    KEYBOARD_SHORTCUTS_GROUP_TITLE,
     ONLINE_SUBTITLES_SETTING_GROUP_TITLE,
     OPENSUBTITLES_API_KEY_SETTING_LABEL,
     OPENSUBTITLES_ENABLED_SETTING_LABEL,
@@ -482,6 +484,13 @@ onBeforeUnmount(() => {
                 class="panel__section"
                 v-show="shouldShowGroup(group)"
             >
+                <template v-if="group.title === KEYBOARD_SHORTCUTS_GROUP_TITLE">
+                    <div class="panel__subtitle panel__subtitle--large">
+                        {{ group.title }}
+                    </div>
+                    <ShortcutSettings :group="group" />
+                </template>
+                <template v-else>
                 <div class="panel__subtitle panel__subtitle--large">
                     {{ group.title }}
                 </div>
@@ -989,6 +998,7 @@ onBeforeUnmount(() => {
                             </div>
                         </div>
                     </div>
+                </template>
                 </template>
             </div>
             <div class="panel__section">

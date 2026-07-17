@@ -29,6 +29,10 @@ type CreatePlaylistEntryInput = {
     iconUrl?: string;
 };
 
+// Reserved id for the transient "current folder" playlist populated by the
+// Auto-Load Folder feature. It is never persisted (see toPersistedState).
+export const AUTOLOAD_PLAYLIST_ID = "pl_autoload_folder";
+
 const isValidSortMode = (value: unknown): value is PlaylistSortMode =>
     value === "name" || value === "added";
 
@@ -386,10 +390,16 @@ export const usePlaylistState = () => {
     };
 
     const toPersistedState = () => ({
-        playlists: playlists.value,
+        // The auto-loaded folder playlist is session-only; never persist it.
+        playlists: playlists.value.filter(
+            (item) => item.id !== AUTOLOAD_PLAYLIST_ID,
+        ),
         playlistLoopMode: loopMode.value,
         playlistSortMode: sortMode.value,
-        activePlaylistId: activePlaylistId.value,
+        activePlaylistId:
+            activePlaylistId.value === AUTOLOAD_PLAYLIST_ID
+                ? null
+                : activePlaylistId.value,
     });
 
     const addFromDrawerSelection = (paths: string[]) => {
@@ -565,6 +575,83 @@ export const usePlaylistState = () => {
         playbackPlaylistId.value = activePlaylist.value.id;
     };
 
+    const removeAutoloadPlaylist = () => {
+        if (!playlists.value.some((item) => item.id === AUTOLOAD_PLAYLIST_ID)) {
+            return;
+        }
+        playlists.value = playlists.value.filter(
+            (item) => item.id !== AUTOLOAD_PLAYLIST_ID,
+        );
+        if (activePlaylistId.value === AUTOLOAD_PLAYLIST_ID) {
+            activePlaylistId.value = null;
+        }
+        if (playbackPlaylistId.value === AUTOLOAD_PLAYLIST_ID) {
+            playbackPlaylistId.value = null;
+        }
+    };
+
+    const clearAutoloadFolder = () => {
+        removeAutoloadPlaylist();
+    };
+
+    // Populate the transient folder playlist with the media files that live
+    // alongside the currently playing file, so prev/next walk the folder and
+    // the files are visible in the drawer. `mediaPaths` must be in folder order
+    // and include `currentPath` exactly (so navigation string-matches media.url).
+    const syncAutoloadFolder = (currentPath: string, mediaPaths: string[]) => {
+        const current = currentPath.trim();
+        if (!current) return;
+
+        // Don't hijack a user playlist the file is actively being played from.
+        const playbackId = playbackPlaylistId.value;
+        if (playbackId && playbackId !== AUTOLOAD_PLAYLIST_ID) {
+            const activePlayback = findPlaylistById(playbackId);
+            if (activePlayback?.entries.some((entry) => entry.path === current)) {
+                return;
+            }
+        }
+
+        const paths = mediaPaths.map((path) => path.trim()).filter(Boolean);
+        if (paths.length <= 1 || !paths.includes(current)) {
+            removeAutoloadPlaylist();
+            return;
+        }
+
+        // Idempotent: same folder already loaded — just ensure it's active.
+        const existing = findPlaylistById(AUTOLOAD_PLAYLIST_ID);
+        if (
+            existing &&
+            existing.entries.length === paths.length &&
+            paths.every((path) =>
+                existing.entries.some((entry) => entry.path === path),
+            )
+        ) {
+            activePlaylistId.value = AUTOLOAD_PLAYLIST_ID;
+            playbackPlaylistId.value = AUTOLOAD_PLAYLIST_ID;
+            return;
+        }
+
+        // addedAt decreases with folder index so the default "added" (desc)
+        // sort still shows the folder in natural order.
+        const base = Date.now();
+        const entries: PlaylistEntry[] = paths.map((path, index) => ({
+            path,
+            addedAt: base - index,
+        }));
+        const autoloadPlaylist: Playlist = {
+            id: AUTOLOAD_PLAYLIST_ID,
+            name: derivePlaylistNameFromPaths(paths, "Current Folder"),
+            entries,
+            createdAt: base,
+        };
+        playlists.value = [
+            ...playlists.value.filter((item) => item.id !== AUTOLOAD_PLAYLIST_ID),
+            autoloadPlaylist,
+        ];
+        activePlaylistId.value = AUTOLOAD_PLAYLIST_ID;
+        playbackPlaylistId.value = AUTOLOAD_PLAYLIST_ID;
+    };
+
     const toggleLoopOne = async (
         setLoopFile: (enabled: boolean) => Promise<void>,
     ) => {
@@ -613,5 +700,7 @@ export const usePlaylistState = () => {
         getTitleForPath,
         toggleLoopOne,
         togglePlaylistLoop,
+        syncAutoloadFolder,
+        clearAutoloadFolder,
     };
 };

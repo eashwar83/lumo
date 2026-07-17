@@ -4,6 +4,12 @@ import {
     THEME_SETTING_GROUP_TITLE,
     THEME_SETTING_LABEL,
 } from "../constants/theme";
+import {
+    buildShortcutSettingGroup,
+    KEYBOARD_SHORTCUTS_GROUP_TITLE,
+} from "../constants/shortcuts";
+
+export { KEYBOARD_SHORTCUTS_GROUP_TITLE };
 
 export type SelectSettingItem = {
     label: string;
@@ -52,12 +58,21 @@ export type TextSettingItem = {
     validationMessage?: string;
 };
 
+export type KeybindSettingItem = {
+    label: string;
+    displayLabel?: string;
+    value: string;
+    type: "keybind";
+    group?: string;
+};
+
 export type SettingItem =
     | SelectSettingItem
     | ToggleSettingItem
     | SliderSettingItem
     | PathSettingItem
-    | TextSettingItem;
+    | TextSettingItem
+    | KeybindSettingItem;
 export type SettingGroup = { title: string; items: SettingItem[] };
 
 export const YTDL_PATH_SETTING_LABEL = "SOIA_YTDL_PATH";
@@ -86,6 +101,8 @@ export const ALLOW_URL_INPUT_DURING_PLAYBACK_SETTING_LABEL =
 export const DEFAULT_SPEED_SETTING_LABEL = "Default Speed";
 export const IMAGE_DISPLAY_DURATION_SETTING_LABEL = "IMAGE_DISPLAY_DURATION";
 export const DISABLE_SUBTITLES_SETTING_LABEL = "DISABLE_SUBTITLES";
+export const AUTO_CROP_SETTING_LABEL = "AUTO_CROP_BLACK_BARS";
+export const AUTOLOAD_FOLDER_SETTING_LABEL = "AUTOLOAD_FOLDER";
 export const OPENSUBTITLES_ENABLED_SETTING_LABEL = "OPENSUBTITLES_ENABLED";
 export const OPENSUBTITLES_API_KEY_SETTING_LABEL = "OPENSUBTITLES_API_KEY";
 export const OPENSUBTITLES_LANGUAGES_SETTING_LABEL = "OPENSUBTITLES_LANGUAGES";
@@ -158,6 +175,22 @@ export const defaultSettingGroups: SettingGroup[] = [
             {
                 label: DISABLE_SUBTITLES_SETTING_LABEL,
                 displayLabel: "Disable Subtitles",
+                value: "Off",
+                type: "toggle",
+                onValue: "On",
+                offValue: "Off",
+            },
+            {
+                label: AUTO_CROP_SETTING_LABEL,
+                displayLabel: "Auto-Crop Black Bars",
+                value: "Off",
+                type: "toggle",
+                onValue: "On",
+                offValue: "Off",
+            },
+            {
+                label: AUTOLOAD_FOLDER_SETTING_LABEL,
+                displayLabel: "Auto-Load Folder to Playlist",
                 value: "Off",
                 type: "toggle",
                 onValue: "On",
@@ -445,3 +478,14 @@ export const defaultSettingGroups: SettingGroup[] = [
         ],
     },
 ];
+
+// Insert the generated Keyboard Shortcuts group right after "Playback" so the
+// binding editor sits next to the other playback-related settings.
+const playbackGroupIndex = defaultSettingGroups.findIndex(
+    (group) => group.title === "Playback",
+);
+defaultSettingGroups.splice(
+    playbackGroupIndex >= 0 ? playbackGroupIndex + 1 : defaultSettingGroups.length,
+    0,
+    buildShortcutSettingGroup(),
+);

@@ -32,8 +32,31 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
     }
 
     let app_handle = app.handle().clone();
+
+    // The daily-signal / update ping hits remote servers and can stall for many
+    // seconds when they're unreachable. On macOS the returned auth token is
+    // consumed by MpvHandle::new (authenticated streaming), so it must be
+    // fetched synchronously before mpv is created. On Windows/Linux the token
+    // is unused at init, so we skip the blocking fetch entirely and let the
+    // background task below perform the first check off the startup critical
+    // path — the window and playback come up immediately.
+    #[cfg(target_os = "macos")]
     let auth_token = crate::check_update::check_update(app_handle.clone());
+    #[cfg(not(target_os = "macos"))]
+    let auth_token: Option<crate::check_update::SoiaAuthToken> = None;
+
     tauri::async_runtime::spawn(async move {
+        // On non-macOS the initial check was skipped above; run it once now,
+        // in the background, before entering the periodic poll loop.
+        #[cfg(not(target_os = "macos"))]
+        {
+            let handle = app_handle.clone();
+            let _ = tokio::task::spawn_blocking(move || {
+                crate::check_update::check_update(handle)
+            })
+            .await;
+        }
+
         let mut poll_interval = interval(Duration::from_secs(UPDATE_POLL_INTERVAL_SECS));
         poll_interval.tick().await;
         loop {

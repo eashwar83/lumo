@@ -12,6 +12,7 @@ const props = defineProps<{
     seekOverlayRightText?: string;
     seekOverlayLeftTimelineText?: string;
     volumeOverlayText?: string;
+    messageOverlayText?: string;
     hideSeekTimeline?: boolean;
     seekOverlayLeftPulseToken?: number;
     seekOverlayRightPulseToken?: number;
@@ -86,6 +87,11 @@ const seekOverlayRightDisplay = computed(() =>
         <transition name="fade-in">
             <div v-if="volumeOverlayText" class="volume-overlay__text">
                 {{ volumeOverlayText }}
+            </div>
+        </transition>
+        <transition name="fade-in">
+            <div v-if="messageOverlayText" class="message-overlay__text">
+                {{ messageOverlayText }}
             </div>
         </transition>
         <transition name="fade-in">
@@ -310,6 +316,27 @@ const seekOverlayRightDisplay = computed(() =>
     backdrop-filter: blur(8px);
 }
 
+.message-overlay__text {
+    position: absolute;
+    top: clamp(42px, 5.5vh, 66px);
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: min(72vw, 560px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 5px 11px;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.38);
+    color: rgba(255, 255, 255, 0.94);
+    font-size: 15px;
+    font-weight: 500;
+    line-height: 1.2;
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(8px);
+}
+
 .fade-in-enter-active,
 .fade-in-leave-active {
     transition: opacity 0.2s ease;
@@ -374,6 +401,12 @@ const seekOverlayRightDisplay = computed(() =>
     text-shadow: none;
 }
 
+:root[data-theme="light"] .message-overlay__text {
+    color: rgba(27, 39, 54, 0.9);
+    background: rgba(255, 255, 255, 0.72);
+    text-shadow: none;
+}
+
 :root[data-theme="light"] .loading-spinner {
     border-color: rgba(0, 0, 0, 0.2);
     border-top-color: rgba(57, 108, 216, 0.78);
@@ -401,6 +434,11 @@ const seekOverlayRightDisplay = computed(() =>
 }
 
 :root[data-theme="graphite"] .volume-overlay__text {
+    color: rgba(235, 241, 249, 0.94);
+    background: rgba(25, 28, 32, 0.48);
+}
+
+:root[data-theme="graphite"] .message-overlay__text {
     color: rgba(235, 241, 249, 0.94);
     background: rgba(25, 28, 32, 0.48);
 }
