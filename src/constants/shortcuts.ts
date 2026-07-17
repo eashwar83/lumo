@@ -50,7 +50,8 @@ export type ShortcutActionId =
     | "togglePlaylist"
     | "previousTrack"
     | "nextTrack"
-    | "toggleAlwaysOnTop";
+    | "toggleAlwaysOnTop"
+    | "toggleFavorite";
 
 export type ShortcutActionGroup =
     | "Playback"
@@ -116,6 +117,7 @@ export const SHORTCUT_ACTIONS: ShortcutActionDef[] = [
     { id: "previousTrack", label: "Previous playlist item", group: "Interface & Window", defaultChord: "Shift+Comma" },
     { id: "nextTrack", label: "Next playlist item", group: "Interface & Window", defaultChord: "Shift+Period" },
     { id: "toggleAlwaysOnTop", label: "Always on top", group: "Interface & Window", defaultChord: "KeyT" },
+    { id: "toggleFavorite", label: "Toggle favourite", group: "Interface & Window", defaultChord: "KeyB" },
 ];
 
 const ACTION_BY_ID: Record<ShortcutActionId, ShortcutActionDef> =

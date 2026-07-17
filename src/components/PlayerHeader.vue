@@ -22,6 +22,7 @@ const props = defineProps<{
     isFileLoaded: boolean;
     isInfoOpen: boolean;
     isPlaylistOpen: boolean;
+    isFavorite: boolean;
     isLoading: boolean;
     playbackTitleMode: PlaybackTitleMode;
     compactModeEnabled: boolean;
@@ -44,6 +45,7 @@ const emit = defineEmits<{
     (e: "open-file-picker"): void;
     (e: "toggle-info"): void;
     (e: "toggle-playlist"): void;
+    (e: "toggle-favorite"): void;
     (e: "url-input-mousedown", event: MouseEvent): void;
     (e: "url-input-touchstart", event: TouchEvent): void;
 }>();
@@ -878,6 +880,33 @@ watch(
         <form class="top-bar__row" @submit.prevent="emit('load-file')">
             <div class="top-bar__content">
                 <button
+                    v-if="props.isFileLoaded"
+                    class="icon-button top-bar__favorite"
+                    :class="{ 'top-bar__favorite--active': props.isFavorite }"
+                    type="button"
+                    :title="
+                        props.isFavorite
+                            ? 'Remove from Favourites'
+                            : 'Add to Favourites'
+                    "
+                    :aria-pressed="props.isFavorite"
+                    @click="emit('toggle-favorite')"
+                >
+                    <svg
+                        viewBox="0 0 24 24"
+                        :fill="props.isFavorite ? 'currentColor' : 'none'"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        aria-hidden="true"
+                    >
+                        <path
+                            d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"
+                        />
+                    </svg>
+                </button>
+                <button
                     v-if="!props.compactModeEnabled || props.isFileLoaded"
                     class="icon-button top-bar__info"
                     :class="{ 'top-bar__info--active': props.isInfoOpen }"
@@ -1427,6 +1456,33 @@ watch(
     opacity: 0.5;
     cursor: not-allowed;
     transform: none;
+}
+
+.top-bar__favorite {
+    margin-top: var(--top-bar-info-margin-top);
+    color: white;
+    transition:
+        color 0.2s,
+        transform 0.12s;
+    width: var(--top-bar-info-size);
+    height: var(--top-bar-info-size);
+}
+.top-bar__favorite svg {
+    width: var(--top-bar-info-svg-size);
+    height: var(--top-bar-info-svg-size);
+}
+.top-bar__favorite:hover {
+    color: #ff8bad;
+    transform: scale(1.12);
+}
+.top-bar__favorite:active {
+    transform: scale(0.9);
+}
+.top-bar__favorite--active {
+    color: #ff5b8a;
+}
+.top-bar__favorite--active:hover {
+    color: #ff7aa1;
 }
 
 .top-bar__action:disabled,

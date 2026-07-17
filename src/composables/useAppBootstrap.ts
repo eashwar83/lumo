@@ -14,7 +14,12 @@ import { useNowPlayingState } from "./useNowPlayingState";
 import { useUiControls } from "./useUiControls";
 import { useFullscreenTransition } from "./useFullscreenTransition";
 
-export type SideActionId = "home" | "history" | "network" | "settings";
+export type SideActionId =
+    | "home"
+    | "history"
+    | "favorites"
+    | "network"
+    | "settings";
 export type ClearConfirmTarget = "playlist" | "history" | null;
 
 const detectMacOS = () =>
@@ -126,6 +131,7 @@ export const useAppBootstrap = () => {
         if (panel === "setting") return "settings";
         if (panel === "home") return "home";
         if (panel === "history") return "history";
+        if (panel === "favorites") return "favorites";
         if (panel === "network") return "network";
         return "settings";
     };

@@ -434,6 +434,7 @@ pub fn run() {
             commands::playback::mpv_run_command,
             commands::playback::mpv_set_option_string,
             commands::playback::mpv_get_property_string,
+            commands::playback::read_image_data_url,
             commands::playback::load_file,
             commands::platform::pick_media_paths_native,
             commands::platform::pick_paths_native,

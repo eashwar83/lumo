@@ -39,6 +39,7 @@ const emit = defineEmits<{
     (e: "clear"): void;
     (e: "remove", entry: PlaylistEntry): void;
     (e: "enter-playlist", playlistId: string): void;
+    (e: "toggle-favorites-view"): void;
     (e: "back"): void;
     (e: "rename-playlist", playlistId: string, name: string): void;
     (e: "delete-playlist", playlistId: string): void;
@@ -343,12 +344,6 @@ const onPlaylistCardActivate = (playlistId: string, event: Event) => {
     emit("enter-playlist", playlistId);
 };
 
-const enterFavoritesPlaylist = () => {
-    if (!favoritesPlaylist.value) return;
-    openedMenuPlaylistId.value = null;
-    emit("enter-playlist", FAVORITES_PLAYLIST_ID);
-};
-
 const cleanupPointerSorting = () => {
     window.removeEventListener("pointermove", onPlaylistPointerMove);
     window.removeEventListener("pointerup", onPlaylistPointerUp);
@@ -636,7 +631,7 @@ watch(
                             />
                         </svg>
                     </button>
-                    <div>
+                    <div class="playlist-drawer__header-text">
                         <div v-if="!isInPlaylist" class="playlist-drawer__title">
                             {{ titleLabel }}
                         </div>
@@ -659,7 +654,11 @@ watch(
                                     d="M12 21.35 10.55 20.03C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.08C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35Z"
                                 />
                             </svg>
-                            {{ props.activePlaylistName || titleLabel }}
+                            {{
+                                isInFavorites
+                                    ? "Favourites"
+                                    : props.activePlaylistName || titleLabel
+                            }}
                         </div>
                         <div class="playlist-drawer__meta">
                             {{ metaLabel }}
@@ -668,12 +667,20 @@ watch(
                 </div>
                 <div class="playlist-drawer__actions">
                     <button
-                        v-if="!isInPlaylist"
                         class="playlist-drawer__tool playlist-drawer__tool--favorites"
+                        :class="{
+                            'playlist-drawer__tool--favorites-active':
+                                isInFavorites,
+                        }"
                         type="button"
-                        aria-label="Favorites"
-                        title="Favorites"
-                        @click="enterFavoritesPlaylist"
+                        :aria-label="
+                            isInFavorites ? 'Back to playlists' : 'Favourites'
+                        "
+                        :aria-pressed="isInFavorites"
+                        :title="
+                            isInFavorites ? 'Back to playlists' : 'Favourites'
+                        "
+                        @click="emit('toggle-favorites-view')"
                     >
                         <svg viewBox="0 0 24 24" fill="currentColor">
                             <path
@@ -784,15 +791,43 @@ watch(
                     <div class="playlist-drawer__skeleton-row"></div>
                 </div>
                 <template v-else-if="!isInPlaylist">
+                    <div class="playlist-drawer__list playlist-drawer__list--pinned">
+                        <div
+                            class="playlist-drawer__playlist playlist-drawer__playlist--favorites"
+                            role="button"
+                            tabindex="0"
+                            @click="emit('toggle-favorites-view')"
+                            @keydown.enter="emit('toggle-favorites-view')"
+                            @keydown.space.prevent="emit('toggle-favorites-view')"
+                        >
+                            <div class="playlist-drawer__playlist-top">
+                                <span
+                                    class="playlist-drawer__playlist-name playlist-drawer__playlist-name--favorites"
+                                >
+                                    <svg
+                                        class="playlist-drawer__fav-heart"
+                                        viewBox="0 0 24 24"
+                                        fill="currentColor"
+                                        aria-hidden="true"
+                                    >
+                                        <path
+                                            d="M12 21.35 10.55 20.03C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.08C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35Z"
+                                        />
+                                    </svg>
+                                    Favourites
+                                </span>
+                            </div>
+                            <div class="playlist-drawer__playlist-meta">
+                                {{ favoritesPlaylist?.entries.length ?? 0 }} items
+                            </div>
+                        </div>
+                    </div>
                     <div
                         v-if="!playlistCollections.length"
-                        class="playlist-drawer__empty"
+                        class="playlist-drawer__empty playlist-drawer__empty--compact"
                     >
-                        <div class="playlist-drawer__empty-title">
-                            No playlists yet
-                        </div>
                         <div class="playlist-drawer__empty-body">
-                            Click add to create your first playlist.
+                            No other playlists yet. Click add to create one.
                         </div>
                     </div>
                     <transition-group
@@ -1005,6 +1040,12 @@ watch(
     align-items: center;
     gap: 10px;
     min-width: 0;
+    flex: 1 1 auto;
+}
+
+.playlist-drawer__header-text {
+    min-width: 0;
+    flex: 1 1 auto;
 }
 
 .playlist-drawer__back {
@@ -1028,7 +1069,8 @@ watch(
 .playlist-drawer__actions {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
+    flex: 0 0 auto;
 }
 
 .playlist-drawer__tool {
@@ -1068,10 +1110,43 @@ watch(
     color: rgba(213, 46, 89, 0.95);
 }
 
+.playlist-drawer__tool--favorites-active {
+    color: #ff4d7e;
+    background: rgba(255, 77, 126, 0.16);
+}
+
+.playlist-drawer__list--pinned {
+    margin-bottom: 8px;
+}
+
+.playlist-drawer__playlist-name--favorites {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 650;
+}
+
+.playlist-drawer__fav-heart {
+    width: 16px;
+    height: 16px;
+    color: #ff5b8a;
+    flex: 0 0 auto;
+}
+
+.playlist-drawer__empty--compact {
+    padding: 4px 4px 10px;
+    text-align: left;
+    opacity: 0.75;
+}
+
 .playlist-drawer__title {
     font-size: 16px;
     font-weight: 700;
     letter-spacing: 0.02em;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .playlist-drawer__active-name {
@@ -1079,7 +1154,7 @@ watch(
     font-size: 12px;
     font-weight: 600;
     opacity: 0.85;
-    max-width: 220px;
+    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

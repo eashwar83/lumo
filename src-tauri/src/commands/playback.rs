@@ -46,6 +46,38 @@ pub(crate) fn mpv_get_property_string(
     with_mpv(&state, |mpv_guard| Ok(mpv_guard.get_property_string(&name).ok()))
 }
 
+/// Read a local image file and return it as a base64 `data:` URL so the webview
+/// can display it without the asset protocol. Used for Favourites thumbnails.
+/// Returns `None` for missing files or non-image extensions.
+#[tauri::command]
+pub(crate) fn read_image_data_url(path: String) -> Result<Option<String>, String> {
+    use base64::Engine as _;
+
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let file_path = std::path::Path::new(trimmed);
+    let mime = match file_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("png") => "image/png",
+        Some("webp") => "image/webp",
+        Some("gif") => "image/gif",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        _ => return Ok(None),
+    };
+    if !file_path.is_file() {
+        return Ok(None);
+    }
+    let bytes = std::fs::read(file_path).map_err(|error| error.to_string())?;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(Some(format!("data:{mime};base64,{encoded}")))
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LoadFilePayload {

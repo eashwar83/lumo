@@ -3,7 +3,12 @@ import type { HistoryEntry } from "../types/history";
 import type { PlaylistEntry } from "../types/playlist";
 import type { PlayerApi } from "./usePlaybackController";
 
-type SideActionId = "home" | "history" | "network" | "settings";
+type SideActionId =
+    | "home"
+    | "history"
+    | "favorites"
+    | "network"
+    | "settings";
 type ClearConfirmTarget = "playlist" | "history" | null;
 
 type PlaylistApi = {
@@ -90,7 +95,7 @@ export const useAppUiActions = ({
         if (player.state.media.isFileLoaded) {
             closePlaylist();
             await onStopPlayback();
-            if (["home", "history", "network"].includes(panel)) {
+            if (["home", "history", "favorites", "network"].includes(panel)) {
                 player.state.media.url = "";
                 player.state.media.title = "";
             }

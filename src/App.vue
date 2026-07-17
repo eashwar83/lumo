@@ -3,6 +3,8 @@ import { computed, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { MediaTrack } from "./types/media";
+import type { PlaylistEntry } from "./types/playlist";
+import { FAVORITES_PLAYLIST_ID } from "./types/playlist";
 import ShortcutsHelpOverlay from "./components/ShortcutsHelpOverlay.vue";
 import PlayerControls from "./components/PlayerControls.vue";
 import PlayerHeader from "./components/PlayerHeader.vue";
@@ -250,7 +252,7 @@ const {
 });
 
 const onSideNavNavigate = async (
-    panel: "home" | "history" | "network" | "settings",
+    panel: "home" | "history" | "favorites" | "network" | "settings",
 ) => {
     clearNavSelectionDuringLoad.value = false;
     await onNavAction(panel);
@@ -425,6 +427,68 @@ const showProgressOverlay = () => {
     );
 };
 
+const favorites = playlistState.favorites;
+const isCurrentFavorite = computed(() =>
+    playlistState.isFavorite(player.state.media.url),
+);
+
+const onToggleFavorite = async () => {
+    const url = player.state.media.url;
+    if (!url) return;
+    if (playlistState.isFavorite(url)) {
+        playlistState.removeFromFavorites(url);
+        showMessageOverlay("Removed from Favourites");
+        return;
+    }
+    // Capture a poster frame for the Favourites grid if we don't have one yet.
+    let icon = nowPlaying.nowPlayingArtworkPath.value;
+    if (!icon) {
+        await nowPlaying.captureNowPlayingArtwork();
+        icon = nowPlaying.nowPlayingArtworkPath.value;
+    }
+    playlistState.addToFavorites({
+        path: url,
+        title: player.state.media.title?.trim() || undefined,
+        iconUrl: icon || undefined,
+    });
+    showMessageOverlay("Added to Favourites");
+};
+
+const onPlayFavorite = async (entry: PlaylistEntry) => {
+    clearNavSelectionDuringLoad.value = false;
+    await playPath(entry.path, entry.title?.trim() || undefined);
+};
+
+const onRemoveFavorite = (entry: PlaylistEntry) => {
+    playlistState.removeFromFavorites(entry.path);
+};
+
+const onClearFavorites = () => {
+    playlistState.clearFavorites();
+};
+
+// Remembers which playlist/folder was showing before jumping to Favourites,
+// so the second heart press returns there instead of the playlist list.
+let playlistBeforeFavorites: string | null = null;
+
+const onToggleFavoritesView = () => {
+    if (activePlaylistId.value === FAVORITES_PLAYLIST_ID) {
+        const previous = playlistBeforeFavorites;
+        playlistBeforeFavorites = null;
+        if (previous && previous !== FAVORITES_PLAYLIST_ID) {
+            playlistState.enterPlaylist(previous);
+        }
+        // If there was nothing to restore (or it's gone), fall back to the list.
+        if (activePlaylistId.value === FAVORITES_PLAYLIST_ID) {
+            playlistState.backToPlaylistList();
+        }
+    } else {
+        playlistBeforeFavorites = activePlaylistId.value;
+        playlistState.openFavoritesView();
+        showMessageOverlay(`Favourites · ${favorites.value.length}`);
+    }
+};
+
 const { onKeydown, onDoubleClick, bindings: shortcutBindings } = usePlaybackShortcuts(
     {
         state: player.state,
@@ -458,6 +522,7 @@ const { onKeydown, onDoubleClick, bindings: shortcutBindings } = usePlaybackShor
         clearCrop: () => autoCrop.clear(),
         togglePlaylist,
         toggleAlwaysOnTop,
+        toggleFavorite: onToggleFavorite,
         showProgress: showProgressOverlay,
         toggleShortcutsHelp: () => {
             isShortcutsHelpOpen.value = !isShortcutsHelpOpen.value;
@@ -655,6 +720,7 @@ useAppStartupBindings({
             :is-file-loaded="player.state.media.isFileLoaded"
             :is-info-open="isInfoOpen"
             :is-playlist-open="isPlaylistOpen"
+            :is-favorite="isCurrentFavorite"
             :is-loading="isLoadingForCurrentUrl"
             :playback-title-mode="playbackTitleMode"
             :compact-mode-enabled="playerHeaderCompactModeEnabled"
@@ -674,6 +740,7 @@ useAppStartupBindings({
             @open-file-picker="requestOpenFilePicker"
             @toggle-info="toggleInfo"
             @toggle-playlist="togglePlaylist"
+            @toggle-favorite="onToggleFavorite"
             @url-input-mousedown="onDragRegionMouseDown"
             @url-input-touchstart="onDragRegionTouchStart"
         />
@@ -703,6 +770,7 @@ useAppStartupBindings({
             :history="history.history.value"
             :history-ready="history.isReady.value"
             :hide-history="hideHistory"
+            :favorites="favorites"
             :mode="activePanel"
             :current-url="currentOrLastPlaybackUrl"
             @update:hover="ui.hoverFilePicker.value = $event"
@@ -712,6 +780,9 @@ useAppStartupBindings({
             @clear-history="onClearHistory"
             @remove-history="onRemoveHistory"
             @toggle-pin-history="onTogglePinHistory"
+            @play-favorite="onPlayFavorite"
+            @remove-favorite="onRemoveFavorite"
+            @clear-favorites="onClearFavorites"
         />
 
         <PlaylistDrawer
@@ -735,6 +806,7 @@ useAppStartupBindings({
             @remove="onRemovePlaylistItem"
             @play="onPlayPlaylist"
             @enter-playlist="onEnterPlaylist"
+            @toggle-favorites-view="onToggleFavoritesView"
             @back="onBackToPlaylists"
             @rename-playlist="onRenamePlaylist"
             @delete-playlist="onDeletePlaylist"

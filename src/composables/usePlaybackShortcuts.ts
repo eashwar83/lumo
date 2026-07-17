@@ -54,6 +54,7 @@ export type PlaybackShortcutActions = {
     clearCrop?: () => Promise<void> | void;
     togglePlaylist?: () => void;
     toggleAlwaysOnTop?: () => Promise<void> | void;
+    toggleFavorite?: () => Promise<void> | void;
     showProgress?: () => void;
     toggleShortcutsHelp?: () => void;
     closeShortcutsHelp?: () => boolean;
@@ -335,6 +336,10 @@ export const usePlaybackShortcuts = (
         toggleAlwaysOnTop: {
             enabled: () => Boolean(actions.toggleAlwaysOnTop),
             run: () => actions.toggleAlwaysOnTop?.(),
+        },
+        toggleFavorite: {
+            enabled: () => Boolean(actions.toggleFavorite) && isFileLoaded(),
+            run: () => actions.toggleFavorite?.(),
         },
     };
 

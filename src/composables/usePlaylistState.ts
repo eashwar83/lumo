@@ -293,6 +293,75 @@ export const usePlaylistState = () => {
         addEntryToPlaylist(FAVORITES_PLAYLIST_ID, item);
     };
 
+    const favoritesPlaylist = computed<Playlist | null>(() =>
+        findPlaylistById(FAVORITES_PLAYLIST_ID),
+    );
+
+    // Favourited videos, newest first.
+    const favorites = computed<PlaylistEntry[]>(() =>
+        [...(favoritesPlaylist.value?.entries ?? [])].sort(
+            (a, b) => b.addedAt - a.addedAt,
+        ),
+    );
+
+    const isFavorite = (path: string): boolean => {
+        const normalized = path.trim();
+        if (!normalized) return false;
+        return (favoritesPlaylist.value?.entries ?? []).some(
+            (entry) => entry.path === normalized,
+        );
+    };
+
+    const removeFromFavorites = (path: string) => {
+        const normalized = path.trim();
+        if (!normalized) return;
+        const index = playlists.value.findIndex(
+            (item) => item.id === FAVORITES_PLAYLIST_ID,
+        );
+        if (index < 0) return;
+        const target = playlists.value[index];
+        const nextEntries = target.entries.filter(
+            (entry) => entry.path !== normalized,
+        );
+        if (nextEntries.length === target.entries.length) return;
+        const nextPlaylists = [...playlists.value];
+        nextPlaylists[index] = { ...target, entries: nextEntries };
+        playlists.value = nextPlaylists;
+    };
+
+    // Make the drawer show the Favourites list, creating the playlist if it is
+    // somehow missing. Robust entry point used by the header/nav toggle.
+    const openFavoritesView = () => {
+        if (
+            !playlists.value.some((item) => item.id === FAVORITES_PLAYLIST_ID)
+        ) {
+            playlists.value = [createFavoritesPlaylist(), ...playlists.value];
+        }
+        activePlaylistId.value = FAVORITES_PLAYLIST_ID;
+    };
+
+    const clearFavorites = () => {
+        const index = playlists.value.findIndex(
+            (item) => item.id === FAVORITES_PLAYLIST_ID,
+        );
+        if (index < 0 || !playlists.value[index].entries.length) return;
+        const nextPlaylists = [...playlists.value];
+        nextPlaylists[index] = { ...nextPlaylists[index], entries: [] };
+        playlists.value = nextPlaylists;
+    };
+
+    // Returns the new state: true if now favourited, false if removed.
+    const toggleFavorite = (item: CreatePlaylistEntryInput): boolean => {
+        const normalized = item.path?.trim() ?? "";
+        if (!normalized) return false;
+        if (isFavorite(normalized)) {
+            removeFromFavorites(normalized);
+            return false;
+        }
+        addToFavorites(item);
+        return true;
+    };
+
     const createPlaylistWithEntries = (
         items: CreatePlaylistEntryInput[],
         options: CreatePlaylistOptions = {},
@@ -594,6 +663,20 @@ export const usePlaylistState = () => {
         removeAutoloadPlaylist();
     };
 
+    // Point playback at the folder (so prev/next walk it) and show it in the
+    // drawer by default — but NEVER override a playlist the user has opened in
+    // the drawer (e.g. Favourites), which would otherwise be undone every time
+    // the next file auto-loads.
+    const activateAutoloadPlaylist = () => {
+        if (
+            activePlaylistId.value === null ||
+            activePlaylistId.value === AUTOLOAD_PLAYLIST_ID
+        ) {
+            activePlaylistId.value = AUTOLOAD_PLAYLIST_ID;
+        }
+        playbackPlaylistId.value = AUTOLOAD_PLAYLIST_ID;
+    };
+
     // Populate the transient folder playlist with the media files that live
     // alongside the currently playing file, so prev/next walk the folder and
     // the files are visible in the drawer. `mediaPaths` must be in folder order
@@ -626,8 +709,7 @@ export const usePlaylistState = () => {
                 existing.entries.some((entry) => entry.path === path),
             )
         ) {
-            activePlaylistId.value = AUTOLOAD_PLAYLIST_ID;
-            playbackPlaylistId.value = AUTOLOAD_PLAYLIST_ID;
+            activateAutoloadPlaylist();
             return;
         }
 
@@ -648,8 +730,7 @@ export const usePlaylistState = () => {
             ...playlists.value.filter((item) => item.id !== AUTOLOAD_PLAYLIST_ID),
             autoloadPlaylist,
         ];
-        activePlaylistId.value = AUTOLOAD_PLAYLIST_ID;
-        playbackPlaylistId.value = AUTOLOAD_PLAYLIST_ID;
+        activateAutoloadPlaylist();
     };
 
     const toggleLoopOne = async (
@@ -694,6 +775,12 @@ export const usePlaylistState = () => {
         enterPlaylist,
         backToPlaylistList,
         markActivePlaylistAsPlayback,
+        favorites,
+        isFavorite,
+        toggleFavorite,
+        removeFromFavorites,
+        clearFavorites,
+        openFavoritesView,
         cycleSortMode,
         getAdjacentPath,
         getPathForEnd,

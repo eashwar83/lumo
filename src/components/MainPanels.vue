@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import type { HistoryEntry } from "../types/history";
 import type { NetworkPlayRequest } from "../types/network";
+import type { PlaylistEntry } from "../types/playlist";
 import HomePanel from "../panels/HomePanel.vue";
 import HistoryPanel from "../panels/HistoryPanel.vue";
+import FavoritesPanel from "../panels/FavoritesPanel.vue";
 import NetworkPanel from "../panels/NetworkPanel.vue";
 import SettingsPanel from "../panels/SettingsPanel.vue";
 
@@ -12,7 +14,8 @@ const props = defineProps<{
     history: HistoryEntry[];
     historyReady: boolean;
     hideHistory: boolean;
-    mode: "home" | "history" | "network" | "settings";
+    favorites: PlaylistEntry[];
+    mode: "home" | "history" | "favorites" | "network" | "settings";
     currentUrl: string;
 }>();
 
@@ -24,6 +27,9 @@ const emit = defineEmits<{
     (e: "clear-history"): void;
     (e: "remove-history", entry: HistoryEntry): void;
     (e: "toggle-pin-history", entry: HistoryEntry): void;
+    (e: "play-favorite", entry: PlaylistEntry): void;
+    (e: "remove-favorite", entry: PlaylistEntry): void;
+    (e: "clear-favorites"): void;
 }>();
 
 const showPanels = () => !props.isFileLoaded;
@@ -38,7 +44,8 @@ const showPanels = () => !props.isFileLoaded;
                 {
                     'main-panels__content--aligned-panel':
                         props.mode === 'network' ||
-                        props.mode === 'settings',
+                        props.mode === 'settings' ||
+                        props.mode === 'favorites',
                 },
             ]"
         >
@@ -62,6 +69,14 @@ const showPanels = () => !props.isFileLoaded;
                 @clear-history="emit('clear-history')"
                 @remove-history="emit('remove-history', $event)"
                 @toggle-pin-history="emit('toggle-pin-history', $event)"
+            />
+
+            <FavoritesPanel
+                v-if="showPanels() && props.mode === 'favorites'"
+                :favorites="props.favorites"
+                @play="emit('play-favorite', $event)"
+                @remove="emit('remove-favorite', $event)"
+                @clear="emit('clear-favorites')"
             />
 
             <NetworkPanel
