@@ -241,22 +241,38 @@ pub(crate) async fn take_screenshot(
             sanitize_screenshot_stem(&title),
             format_screenshot_position(position)
         );
-        let mut file_path = target_dir.join(format!("{stem}.png"));
-        let mut counter = 2;
-        while file_path.exists() {
-            file_path = target_dir.join(format!("{stem} ({counter}).png"));
-            counter += 1;
+
+        // Prefer lossless PNG, but some libmpv/ffmpeg builds ship without the
+        // PNG encoder (screenshot-to-file then fails with "Could not open
+        // libavcodec encoder"). Fall back to JPG, which these builds support.
+        let mut last_error = "Failed to write screenshot".to_string();
+        for extension in ["png", "jpg"] {
+            let mut file_path = target_dir.join(format!("{stem}.{extension}"));
+            let mut counter = 2;
+            while file_path.exists() {
+                file_path = target_dir.join(format!("{stem} ({counter}).{extension}"));
+                counter += 1;
+            }
+            let file_path_str = file_path.to_string_lossy().to_string();
+            match mpv_command_checked(&mpv_guard, &["screenshot-to-file", &file_path_str, mode]) {
+                Ok(()) => {
+                    let file_name = file_path
+                        .file_name()
+                        .map(|name| name.to_string_lossy().to_string())
+                        .unwrap_or_else(|| file_path_str.clone());
+                    return Ok(ScreenshotResult {
+                        path: file_path_str,
+                        file_name,
+                    });
+                }
+                Err(error) => {
+                    // Remove any empty/partial file the failed attempt may have left.
+                    let _ = std::fs::remove_file(&file_path);
+                    last_error = error;
+                }
+            }
         }
-        let file_path_str = file_path.to_string_lossy().to_string();
-        mpv_command_checked(&mpv_guard, &["screenshot-to-file", &file_path_str, mode])?;
-        let file_name = file_path
-            .file_name()
-            .map(|name| name.to_string_lossy().to_string())
-            .unwrap_or_else(|| file_path_str.clone());
-        Ok(ScreenshotResult {
-            path: file_path_str,
-            file_name,
-        })
+        Err(last_error)
     })
     .await
     .map_err(|error| format!("Screenshot task failed: {error}"))?
