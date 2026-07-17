@@ -600,7 +600,7 @@ export const useGeneralSettingsSection = (isWindowsPlatform: boolean) => {
         }
         const selected = await open({
             multiple: false,
-            directory: false,
+            directory: item.directory ?? false,
             title: item.browseTitle ?? "Select file",
         });
         if (selected) {

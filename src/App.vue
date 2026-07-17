@@ -399,7 +399,7 @@ const takeScreenshotShortcut = async (includeSubtitles: boolean) => {
         showMessageOverlay(`Screenshot saved · ${result.fileName}`, 2400);
     } catch (error) {
         console.error("[shortcuts] screenshot failed", error);
-        showMessageOverlay("Screenshot failed");
+        showMessageOverlay(`Screenshot failed: ${error}`, 3200);
     }
 };
 

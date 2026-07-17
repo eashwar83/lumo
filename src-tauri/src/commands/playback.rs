@@ -196,17 +196,29 @@ pub(crate) async fn take_screenshot(
 ) -> Result<ScreenshotResult, String> {
     use tauri::Manager;
 
-    let target_dir = app
-        .path()
-        .picture_dir()
-        .map(|dir| dir.join("Lumo Screenshots"))
-        .or_else(|_| {
-            app.path()
-                .app_local_data_dir()
-                .map(|dir| dir.join("screenshots"))
-        })
-        .map_err(|error| format!("Failed to resolve screenshot directory: {error}"))?;
-    std::fs::create_dir_all(&target_dir).map_err(|error| error.to_string())?;
+    // A user-configured folder (Settings → Playback → Screenshot Folder) takes
+    // precedence. This lets users avoid OneDrive-redirected Pictures folders,
+    // where mpv's screenshot writer can fail on the reparse-point path.
+    let custom_dir = crate::store::ui_state_store::load_setting_value(&app, "SCREENSHOT_DIR")
+        .ok()
+        .flatten()
+        .map(PathBuf::from);
+
+    let target_dir = match custom_dir {
+        Some(dir) => dir,
+        None => app
+            .path()
+            .picture_dir()
+            .map(|dir| dir.join("Lumo Screenshots"))
+            .or_else(|_| {
+                app.path()
+                    .app_local_data_dir()
+                    .map(|dir| dir.join("screenshots"))
+            })
+            .map_err(|error| format!("Failed to resolve screenshot directory: {error}"))?,
+    };
+    std::fs::create_dir_all(&target_dir)
+        .map_err(|error| format!("Failed to create screenshot folder: {error}"))?;
 
     let mode = if include_subtitles.unwrap_or(true) {
         "subtitles"

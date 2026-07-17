@@ -47,6 +47,8 @@ export type PathSettingItem = {
     placeholder?: string;
     browseTitle?: string;
     validationMessage?: string;
+    /** When true, the browse button opens a folder picker instead of a file picker. */
+    directory?: boolean;
 };
 
 export type TextSettingItem = {
@@ -103,6 +105,7 @@ export const IMAGE_DISPLAY_DURATION_SETTING_LABEL = "IMAGE_DISPLAY_DURATION";
 export const DISABLE_SUBTITLES_SETTING_LABEL = "DISABLE_SUBTITLES";
 export const AUTO_CROP_SETTING_LABEL = "AUTO_CROP_BLACK_BARS";
 export const AUTOLOAD_FOLDER_SETTING_LABEL = "AUTOLOAD_FOLDER";
+export const SCREENSHOT_DIR_SETTING_LABEL = "SCREENSHOT_DIR";
 export const OPENSUBTITLES_ENABLED_SETTING_LABEL = "OPENSUBTITLES_ENABLED";
 export const OPENSUBTITLES_API_KEY_SETTING_LABEL = "OPENSUBTITLES_API_KEY";
 export const OPENSUBTITLES_LANGUAGES_SETTING_LABEL = "OPENSUBTITLES_LANGUAGES";
@@ -231,6 +234,15 @@ export const defaultSettingGroups: SettingGroup[] = [
                 max: 60,
                 step: 1,
                 unit: "s",
+            },
+            {
+                label: SCREENSHOT_DIR_SETTING_LABEL,
+                displayLabel: "Screenshot Folder",
+                value: "",
+                type: "path",
+                directory: true,
+                placeholder: "Default: Pictures\\Lumo Screenshots (avoid OneDrive)",
+                browseTitle: "Select screenshot folder",
             },
             // v1: Loop setting is not supported yet. Keep this block for future rollout.
             // {
