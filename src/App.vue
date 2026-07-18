@@ -635,6 +635,18 @@ type EnhanceSuggestion = {
     temperature: number;
     tint: number;
 };
+// Reset the current video's full look: colour adjustments + colour grade +
+// sharpen/denoise/deinterlace. Quality preset & AI Upscale (global) are kept.
+const onResetVideoSettings = async () => {
+    await adjustments.setBrightness(0);
+    await adjustments.setContrast(0);
+    await adjustments.setSaturation(0);
+    await adjustments.setGamma(0);
+    await adjustments.setHue(0);
+    await enhancements.resetLook();
+    showMessageOverlay("Video settings reset");
+};
+
 const onAutoEnhance = async () => {
     if (!player.state.media.isFileLoaded) return;
     showMessageOverlay("Auto Enhance…");
@@ -1090,6 +1102,7 @@ useAppStartupBindings({
                 adjustments.setGlobalColorAdjustmentsEnabled
             "
             @auto-enhance="onAutoEnhance"
+            @reset-video-settings="onResetVideoSettings"
             @select-audio="tracks.selectAudio"
             @select-sub-track="tracks.selectSubTrack"
             @set-active-sub-target="tracks.setActiveSubTarget"

@@ -383,6 +383,23 @@ export const useVideoEnhancements = () => {
         persist();
     };
 
+    // Reset only the per-video "look": sharpen, denoise, deinterlace, colour
+    // grade. Quality preset and AI Upscale (global settings) are left as-is.
+    const resetLook = async () => {
+        state.sharpenAmount = 0;
+        state.sharpenRadius = DEFAULT_STATE.sharpenRadius;
+        state.denoise = false;
+        state.deinterlace = false;
+        COLOR_GRADE_KEYS.forEach((key) => {
+            state[key] = 0;
+        });
+        await applySharpen();
+        await rebuildVideoFilters();
+        await applyDeinterlace();
+        await applyColorGrade();
+        persist();
+    };
+
     onMounted(async () => {
         const stored = await loadUiState<{
             videoEnhancements?: StoredVideoEnhancements;
@@ -402,6 +419,7 @@ export const useVideoEnhancements = () => {
         setMessageHandler,
         onFileLoaded,
         reset,
+        resetLook,
     };
 };
 

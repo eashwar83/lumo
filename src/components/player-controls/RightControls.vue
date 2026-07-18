@@ -75,6 +75,7 @@ const emit = defineEmits<{
     (e: "set-hue", value: number): void;
     (e: "set-global-color-adjustments-enabled", enabled: boolean): void;
     (e: "auto-enhance"): void;
+    (e: "reset-video-settings"): void;
     (e: "select-audio", track: MediaTrack): void;
     (e: "select-sub-track", payload: { target: SubtitleTarget; track: MediaTrack }): void;
     (e: "set-active-sub-target", target: SubtitleTarget): void;
@@ -871,6 +872,18 @@ watch(
                         <span>Video</span>
                         <div class="track-menu__header-actions">
                             <button
+                                class="track-menu__reset-all"
+                                type="button"
+                                title="Reset all video settings"
+                                aria-label="Reset all video settings"
+                                @click.stop="emit('reset-video-settings')"
+                            >
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M3 2v6h6" />
+                                    <path d="M3 13a9 9 0 1 0 3-7.7L3 8" />
+                                </svg>
+                            </button>
+                            <button
                                 class="track-menu__mode-toggle"
                                 type="button"
                                 :aria-pressed="globalColorAdjustmentsEnabled"
@@ -1287,6 +1300,30 @@ watch(
     background: rgba(143, 179, 255, 0.22);
     border-color: rgba(143, 179, 255, 0.75);
     color: #dfeaff;
+}
+
+.track-menu__reset-all {
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.75);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.track-menu__reset-all:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+}
+
+.track-menu__reset-all svg {
+    width: 16px;
+    height: 16px;
 }
 
 .track-menu__mode-toggle {
