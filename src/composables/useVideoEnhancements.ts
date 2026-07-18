@@ -39,6 +39,8 @@ export type StoredVideoEnhancements = {
     sharpenAmount?: number;
     sharpenRadius?: number;
     aiUpscale?: AiUpscaleMode;
+    denoise?: boolean;
+    deinterlace?: boolean;
     exposure?: number;
     temperature?: number;
     tint?: number;
@@ -129,9 +131,50 @@ const isQualityPreset = (value: unknown): value is QualityPreset =>
 const isAiUpscaleMode = (value: unknown): value is AiUpscaleMode =>
     value === "off" || value === "anime" || value === "live";
 
-export const useVideoEnhancements = () => {
+// The per-video "look": sharpen + denoise/deinterlace + colour grade. Quality
+// preset and AI Upscale are deliberately NOT part of this (they stay global).
+type LookState = {
+    sharpenAmount: number;
+    sharpenRadius: number;
+    denoise: boolean;
+    deinterlace: boolean;
+    exposure: number;
+    temperature: number;
+    tint: number;
+    highlights: number;
+    shadows: number;
+};
+
+const DEFAULT_LOOK: LookState = {
+    sharpenAmount: 0,
+    sharpenRadius: 5,
+    denoise: false,
+    deinterlace: false,
+    exposure: 0,
+    temperature: 0,
+    tint: 0,
+    highlights: 0,
+    shadows: 0,
+};
+
+const PER_FILE_LOOK_MAX = 300;
+
+type VideoEnhancementsOptions = {
+    // When true the look applies globally to every video; when false it's
+    // remembered per file (the default). Mirrors the colour-adjustments toggle.
+    isGlobalLook?: () => boolean;
+};
+
+export const useVideoEnhancements = (options: VideoEnhancementsOptions = {}) => {
     const state = reactive<VideoEnhancementsState>({ ...DEFAULT_STATE });
     const persistedSaver = createDebouncedUiStateSaver(300);
+    const perFileSaver = createDebouncedUiStateSaver(400);
+
+    const isGlobalLook = () => options.isGlobalLook?.() ?? false;
+    // The look used when Global is on, plus the per-file map used when it's off.
+    let globalLook: LookState = { ...DEFAULT_LOOK };
+    const perFileLook = new Map<string, LookState>();
+    let currentKey = "";
 
     // Track the last hwdec we asked for so we don't reinit the decoder needlessly.
     let lastHwdec: "auto" | "auto-copy" = "auto";
@@ -139,6 +182,30 @@ export const useVideoEnhancements = () => {
     let onMessage: ((text: string) => void) | null = null;
     const setMessageHandler = (handler: (text: string) => void) => {
         onMessage = handler;
+    };
+
+    const readLook = (): LookState => ({
+        sharpenAmount: state.sharpenAmount,
+        sharpenRadius: state.sharpenRadius,
+        denoise: state.denoise,
+        deinterlace: state.deinterlace,
+        exposure: state.exposure,
+        temperature: state.temperature,
+        tint: state.tint,
+        highlights: state.highlights,
+        shadows: state.shadows,
+    });
+
+    const writeLook = (look: LookState) => {
+        state.sharpenAmount = look.sharpenAmount;
+        state.sharpenRadius = look.sharpenRadius;
+        state.denoise = look.denoise;
+        state.deinterlace = look.deinterlace;
+        state.exposure = look.exposure;
+        state.temperature = look.temperature;
+        state.tint = look.tint;
+        state.highlights = look.highlights;
+        state.shadows = look.shadows;
     };
 
     const setProp = async (name: string, value: string) => {
@@ -158,20 +225,42 @@ export const useVideoEnhancements = () => {
         }
     };
 
-    const persist = () => {
+    // Global settings (quality preset, AI upscale) + the global look are stored
+    // in the videoEnhancements slice.
+    const persistGlobal = () => {
         persistedSaver.saveDebounced({
             videoEnhancements: {
                 qualityPreset: state.qualityPreset,
-                sharpenAmount: state.sharpenAmount,
-                sharpenRadius: state.sharpenRadius,
                 aiUpscale: state.aiUpscale,
-                exposure: state.exposure,
-                temperature: state.temperature,
-                tint: state.tint,
-                highlights: state.highlights,
-                shadows: state.shadows,
+                ...globalLook,
             },
         });
+    };
+
+    const persistPerFile = () => {
+        const object: Record<string, LookState> = {};
+        perFileLook.forEach((value, key) => {
+            object[key] = { ...value };
+        });
+        perFileSaver.saveDebounced({ perFileEnhance: object });
+    };
+
+    // Persist a look change to whichever store is active.
+    const persistLook = () => {
+        if (isGlobalLook()) {
+            globalLook = readLook();
+            persistGlobal();
+            return;
+        }
+        if (!currentKey) return;
+        perFileLook.delete(currentKey);
+        perFileLook.set(currentKey, readLook());
+        while (perFileLook.size > PER_FILE_LOOK_MAX) {
+            const oldest = perFileLook.keys().next().value;
+            if (oldest === undefined) break;
+            perFileLook.delete(oldest);
+        }
+        persistPerFile();
     };
 
     // --- mpv application ----------------------------------------------------
@@ -234,11 +323,8 @@ export const useVideoEnhancements = () => {
     const setColorGrade = (key: ColorGradeKey, value: number) => {
         state[key] = clamp(Math.round(value), -100, 100);
         scheduleColorGrade();
-        persist();
+        persistLook();
     };
-
-    const hasColorGrade = () =>
-        COLOR_GRADE_KEYS.some((key) => state[key] !== 0);
 
     // Only the denoise (hqdn3d) lavfi filter needs software frames now, so hwdec
     // copy-back is tied to denoise alone; sharpening is GPU and stays hw-decoded.
@@ -282,30 +368,32 @@ export const useVideoEnhancements = () => {
     const setQualityPreset = async (preset: QualityPreset) => {
         state.qualityPreset = preset;
         await applyQualityPreset();
-        persist();
+        persistGlobal();
     };
 
     const setSharpenAmount = (value: number) => {
         state.sharpenAmount = clamp(Math.round(value), 0, 100);
         scheduleSharpen();
-        persist();
+        persistLook();
     };
 
     const setSharpenRadius = (value: number) => {
         state.sharpenRadius = normalizeRadius(value);
         scheduleSharpen();
-        persist();
+        persistLook();
     };
 
     const setDenoise = async (enabled: boolean) => {
         state.denoise = enabled;
         await rebuildVideoFilters();
+        persistLook();
         onMessage?.(`Denoise ${enabled ? "on" : "off"}`);
     };
 
     const setDeinterlace = async (enabled: boolean) => {
         state.deinterlace = enabled;
         await applyDeinterlace();
+        persistLook();
         onMessage?.(`Deinterlace ${enabled ? "on" : "off"}`);
     };
 
@@ -318,7 +406,7 @@ export const useVideoEnhancements = () => {
     const setAiUpscale = async (mode: AiUpscaleMode) => {
         state.aiUpscale = mode;
         const count = await applyAiUpscale();
-        persist();
+        persistGlobal();
         if (mode === "off") {
             onMessage?.("AI Upscale off");
         } else if (count > 0) {
@@ -330,81 +418,113 @@ export const useVideoEnhancements = () => {
 
     // --- lifecycle ----------------------------------------------------------
 
-    // Reapply everything to the freshly-loaded file. Renderer properties and
-    // the vf chain generally persist across files, but reapplying is cheap and
-    // guarantees a consistent picture.
-    const onFileLoaded = async () => {
-        if (!loaded) return;
-        await applyQualityPreset();
+    // Apply the currently-loaded look values to mpv. Each apply is idempotent
+    // and clears itself at neutral, so this also resets a previous file's look.
+    const applyLook = async () => {
         await rebuildVideoFilters();
         await applyDeinterlace();
-        if (state.sharpenAmount > 0) await applySharpen();
-        if (hasColorGrade()) await applyColorGrade();
-        if (state.aiUpscale !== "off") await applyAiUpscale();
+        await applySharpen();
+        await applyColorGrade();
     };
 
-    const load = async (stored?: StoredVideoEnhancements) => {
+    // Load the look for a file (per-file entry, or the global look when Global is
+    // on) into state and apply it.
+    const applyLookForMedia = async (key: string) => {
+        currentKey = key.trim();
+        const source = isGlobalLook()
+            ? globalLook
+            : perFileLook.get(currentKey) ?? DEFAULT_LOOK;
+        writeLook({ ...source });
+        await applyLook();
+    };
+
+    // Re-apply for the current file (e.g. after the Global toggle flips).
+    const reapplyLook = async () => {
+        await applyLookForMedia(currentKey);
+    };
+
+    const onFileLoaded = async (key: string) => {
+        if (!loaded) return;
+        await applyQualityPreset();
+        if (state.aiUpscale !== "off") await applyAiUpscale();
+        await applyLookForMedia(key);
+    };
+
+    const readStoredLook = (stored: StoredVideoEnhancements): LookState => ({
+        sharpenAmount:
+            typeof stored.sharpenAmount === "number"
+                ? clamp(Math.round(stored.sharpenAmount), 0, 100)
+                : DEFAULT_LOOK.sharpenAmount,
+        sharpenRadius:
+            typeof stored.sharpenRadius === "number"
+                ? normalizeRadius(stored.sharpenRadius)
+                : DEFAULT_LOOK.sharpenRadius,
+        denoise: stored.denoise === true,
+        deinterlace: stored.deinterlace === true,
+        exposure: clamp(Math.round(stored.exposure ?? 0), -100, 100),
+        temperature: clamp(Math.round(stored.temperature ?? 0), -100, 100),
+        tint: clamp(Math.round(stored.tint ?? 0), -100, 100),
+        highlights: clamp(Math.round(stored.highlights ?? 0), -100, 100),
+        shadows: clamp(Math.round(stored.shadows ?? 0), -100, 100),
+    });
+
+    const load = async (
+        stored?: StoredVideoEnhancements,
+        storedPerFile?: Record<string, Partial<LookState>>,
+    ) => {
         if (stored) {
             if (isQualityPreset(stored.qualityPreset)) {
                 state.qualityPreset = stored.qualityPreset;
             }
-            if (typeof stored.sharpenAmount === "number") {
-                state.sharpenAmount = clamp(Math.round(stored.sharpenAmount), 0, 100);
-            }
-            if (typeof stored.sharpenRadius === "number") {
-                state.sharpenRadius = normalizeRadius(stored.sharpenRadius);
-            }
             if (isAiUpscaleMode(stored.aiUpscale)) {
                 state.aiUpscale = stored.aiUpscale;
             }
-            COLOR_GRADE_KEYS.forEach((key) => {
-                const value = stored[key];
-                if (typeof value === "number") {
-                    state[key] = clamp(Math.round(value), -100, 100);
-                }
+            globalLook = readStoredLook(stored);
+        }
+        if (storedPerFile) {
+            Object.entries(storedPerFile).forEach(([key, value]) => {
+                const normalizedKey = key.trim();
+                if (!normalizedKey) return;
+                perFileLook.set(normalizedKey, {
+                    ...DEFAULT_LOOK,
+                    ...value,
+                    sharpenRadius: normalizeRadius(
+                        value.sharpenRadius ?? DEFAULT_LOOK.sharpenRadius,
+                    ),
+                });
             });
         }
+        // Seed the visible state with the global look; the first file load will
+        // swap in its per-file look if Global is off.
+        writeLook({ ...globalLook });
         loaded = true;
-        // Denoise / deinterlace intentionally default off each launch.
         await applyQualityPreset();
-        if (state.sharpenAmount > 0) await applySharpen();
-        if (hasColorGrade()) await applyColorGrade();
         if (state.aiUpscale !== "off") await applyAiUpscale();
     };
 
     const reset = async () => {
         Object.assign(state, DEFAULT_STATE);
+        globalLook = { ...DEFAULT_LOOK };
         await applyQualityPreset();
-        await rebuildVideoFilters();
-        await applyDeinterlace();
-        await applySharpen();
-        await applyColorGrade();
+        await applyLook();
         await applyAiUpscale();
-        persist();
+        persistGlobal();
     };
 
-    // Reset only the per-video "look": sharpen, denoise, deinterlace, colour
-    // grade. Quality preset and AI Upscale (global settings) are left as-is.
+    // Reset only the current video's look (sharpen, denoise, deinterlace, colour
+    // grade) to neutral. Quality preset and AI Upscale are left as-is.
     const resetLook = async () => {
-        state.sharpenAmount = 0;
-        state.sharpenRadius = DEFAULT_STATE.sharpenRadius;
-        state.denoise = false;
-        state.deinterlace = false;
-        COLOR_GRADE_KEYS.forEach((key) => {
-            state[key] = 0;
-        });
-        await applySharpen();
-        await rebuildVideoFilters();
-        await applyDeinterlace();
-        await applyColorGrade();
-        persist();
+        writeLook({ ...DEFAULT_LOOK });
+        await applyLook();
+        persistLook();
     };
 
     onMounted(async () => {
         const stored = await loadUiState<{
             videoEnhancements?: StoredVideoEnhancements;
+            perFileEnhance?: Record<string, Partial<LookState>>;
         }>();
-        await load(stored?.videoEnhancements);
+        await load(stored?.videoEnhancements, stored?.perFileEnhance);
     });
 
     return {
@@ -418,6 +538,8 @@ export const useVideoEnhancements = () => {
         setColorGrade,
         setMessageHandler,
         onFileLoaded,
+        applyLookForMedia,
+        reapplyLook,
         reset,
         resetLook,
     };

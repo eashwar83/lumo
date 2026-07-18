@@ -38,7 +38,9 @@ export const useAppBootstrap = () => {
     const tracks = useMediaTracks(() => player.state.media.url, history);
     const speed = usePlaybackSpeed();
     const adjustments = usePlaybackAdjustments();
-    const enhancements = useVideoEnhancements();
+    const enhancements = useVideoEnhancements({
+        isGlobalLook: () => adjustments.globalColorAdjustmentsEnabled.value,
+    });
     const subtitleAppearance = useSubtitleAppearance();
     const playlistState = usePlaylistState();
 

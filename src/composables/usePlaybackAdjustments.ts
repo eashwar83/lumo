@@ -76,6 +76,17 @@ export const usePlaybackAdjustments = () => {
     });
     const globalColorAdjustmentsEnabled = ref(false);
     const persistedStateSaver = createDebouncedUiStateSaver(350);
+    const perFileSaver = createDebouncedUiStateSaver(400);
+
+    // Persist the per-file colour-adjustment map so a video's brightness/etc are
+    // remembered across restarts (not just within the session).
+    const persistPerFileColorAdjustments = () => {
+        const object: Record<string, ColorAdjustmentsState> = {};
+        localColorAdjustmentsByMediaKey.forEach((value, key) => {
+            object[key] = { ...value };
+        });
+        perFileSaver.saveDebounced({ perFileColorAdjustments: object });
+    };
 
     const activeColorAdjustments = computed(() =>
         globalColorAdjustmentsEnabled.value
@@ -147,6 +158,7 @@ export const usePlaybackAdjustments = () => {
                     localColorAdjustmentsByMediaKey.delete(oldestKey);
                 }
             }
+            persistPerFileColorAdjustments();
         }
         await applyColorAdjustment(key, next);
         if (globalColorAdjustmentsEnabled.value) {
@@ -242,6 +254,10 @@ export const usePlaybackAdjustments = () => {
     void (async () => {
         const stored = await loadUiState<{
             playbackAdjustments?: PersistedPlaybackAdjustmentsState;
+            perFileColorAdjustments?: Record<
+                string,
+                Partial<ColorAdjustmentsState>
+            >;
         }>();
         const persisted = stored?.playbackAdjustments;
         const enabled = persisted?.globalColorAdjustmentsEnabled === true;
@@ -249,6 +265,19 @@ export const usePlaybackAdjustments = () => {
             persisted?.globalColorAdjustments,
         );
         globalColorAdjustmentsEnabled.value = enabled;
+        // Restore the per-file map so remembered per-video adjustments survive
+        // restarts.
+        const storedPerFile = stored?.perFileColorAdjustments;
+        if (storedPerFile) {
+            Object.entries(storedPerFile).forEach(([key, value]) => {
+                const normalizedKey = key.trim();
+                if (!normalizedKey) return;
+                localColorAdjustmentsByMediaKey.set(
+                    normalizedKey,
+                    normalizeColorAdjustments(value),
+                );
+            });
+        }
         if (!enabled) return;
         await reapplyGlobalColorAdjustments();
     })();

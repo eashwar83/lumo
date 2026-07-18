@@ -58,6 +58,11 @@ pub struct UiState {
     pub per_file_video: Option<std::collections::HashMap<String, PerFileVideo>>,
     #[serde(default)]
     pub window_locked_size: Option<WindowLockedSize>,
+    #[serde(default)]
+    pub per_file_color_adjustments:
+        Option<std::collections::HashMap<String, PerFileColorAdjust>>,
+    #[serde(default)]
+    pub per_file_enhance: Option<std::collections::HashMap<String, PerFileEnhance>>,
 }
 
 impl Default for UiState {
@@ -79,6 +84,8 @@ impl Default for UiState {
             video_enhancements: None,
             per_file_video: None,
             window_locked_size: None,
+            per_file_color_adjustments: None,
+            per_file_enhance: None,
         }
     }
 }
@@ -104,6 +111,10 @@ impl UiState {
             video_enhancements: incoming.video_enhancements.or(self.video_enhancements),
             per_file_video: incoming.per_file_video.or(self.per_file_video),
             window_locked_size: incoming.window_locked_size.or(self.window_locked_size),
+            per_file_color_adjustments: incoming
+                .per_file_color_adjustments
+                .or(self.per_file_color_adjustments),
+            per_file_enhance: incoming.per_file_enhance.or(self.per_file_enhance),
         }
     }
 }
@@ -232,6 +243,10 @@ pub struct VideoEnhancementsState {
     #[serde(default)]
     pub ai_upscale: Option<String>,
     #[serde(default)]
+    pub denoise: Option<bool>,
+    #[serde(default)]
+    pub deinterlace: Option<bool>,
+    #[serde(default)]
     pub exposure: Option<f64>,
     #[serde(default)]
     pub temperature: Option<f64>,
@@ -261,6 +276,44 @@ pub struct WindowLockedSize {
     pub width: Option<f64>,
     #[serde(default)]
     pub height: Option<f64>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PerFileColorAdjust {
+    #[serde(default)]
+    pub brightness: Option<f64>,
+    #[serde(default)]
+    pub contrast: Option<f64>,
+    #[serde(default)]
+    pub saturation: Option<f64>,
+    #[serde(default)]
+    pub gamma: Option<f64>,
+    #[serde(default)]
+    pub hue: Option<f64>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PerFileEnhance {
+    #[serde(default)]
+    pub sharpen_amount: Option<f64>,
+    #[serde(default)]
+    pub sharpen_radius: Option<f64>,
+    #[serde(default)]
+    pub denoise: Option<bool>,
+    #[serde(default)]
+    pub deinterlace: Option<bool>,
+    #[serde(default)]
+    pub exposure: Option<f64>,
+    #[serde(default)]
+    pub temperature: Option<f64>,
+    #[serde(default)]
+    pub tint: Option<f64>,
+    #[serde(default)]
+    pub highlights: Option<f64>,
+    #[serde(default)]
+    pub shadows: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]

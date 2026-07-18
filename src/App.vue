@@ -635,6 +635,13 @@ type EnhanceSuggestion = {
     temperature: number;
     tint: number;
 };
+// Flip the Global toggle: switch colour adjustments AND the enhancement look
+// between per-file and global for the current video in one step.
+const onSetGlobalColorAdjustments = async (enabled: boolean) => {
+    await adjustments.setGlobalColorAdjustmentsEnabled(enabled);
+    await enhancements.reapplyLook();
+};
+
 // Reset the current video's full look: colour adjustments + colour grade +
 // sharpen/denoise/deinterlace. Quality preset & AI Upscale (global) are kept.
 const onResetVideoSettings = async () => {
@@ -822,7 +829,7 @@ const onFileLoaded = async () => {
     }
     await adjustments.applyColorAdjustmentsForMedia(player.state.media.url);
     await subtitleAppearance.applySubtitleAppearanceOptions();
-    void enhancements.onFileLoaded();
+    void enhancements.onFileLoaded(currentMediaKey());
     await geometry.applyAspectForMedia(currentMediaKey());
     void applyWindowSizingForMedia();
     void autoCrop.onFileLoaded();
@@ -1098,9 +1105,7 @@ useAppStartupBindings({
             @set-saturation="adjustments.setSaturation"
             @set-gamma="adjustments.setGamma"
             @set-hue="adjustments.setHue"
-            @set-global-color-adjustments-enabled="
-                adjustments.setGlobalColorAdjustmentsEnabled
-            "
+            @set-global-color-adjustments-enabled="onSetGlobalColorAdjustments"
             @auto-enhance="onAutoEnhance"
             @reset-video-settings="onResetVideoSettings"
             @select-audio="tracks.selectAudio"
