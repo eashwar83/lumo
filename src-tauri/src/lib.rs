@@ -442,6 +442,7 @@ pub fn run() {
             commands::playback::cycle_pause,
             commands::playback::seek_video,
             commands::playback::take_screenshot,
+            commands::playback::analyze_frame_for_enhance,
             commands::window::set_window_controls_visible,
             commands::window::apply_window_appearance,
             commands::window::set_window_vibrancy_visible,

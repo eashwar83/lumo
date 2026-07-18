@@ -625,6 +625,33 @@ const onCycleAspectRatio = async () => {
     showMessageOverlay(`Aspect: ${label}`);
 };
 
+// Auto Enhance: sample the current frame in Rust, then apply the suggested
+// brightness/contrast/saturation (mpv adjustments) and temperature/tint
+// (colour-grade shader). Values land in the sliders so they can be tweaked.
+type EnhanceSuggestion = {
+    brightness: number;
+    contrast: number;
+    saturation: number;
+    temperature: number;
+    tint: number;
+};
+const onAutoEnhance = async () => {
+    if (!player.state.media.isFileLoaded) return;
+    showMessageOverlay("Auto Enhance…");
+    try {
+        const s = await invoke<EnhanceSuggestion>("analyze_frame_for_enhance");
+        await adjustments.setBrightness(Math.round(s.brightness));
+        await adjustments.setContrast(Math.round(s.contrast));
+        await adjustments.setSaturation(Math.round(s.saturation));
+        enhancements.setColorGrade("temperature", Math.round(s.temperature));
+        enhancements.setColorGrade("tint", Math.round(s.tint));
+        showMessageOverlay("Auto Enhance applied");
+    } catch (error) {
+        console.warn("[auto-enhance] failed", error);
+        showMessageOverlay("Auto Enhance failed");
+    }
+};
+
 // Grow/shrink the window by a step, keeping its aspect, clamped to a sane
 // minimum and the current monitor. No-op while fullscreen or maximized. Counts
 // as a user size change: updates the lock and drops any per-file fit flag.
@@ -1062,6 +1089,7 @@ useAppStartupBindings({
             @set-global-color-adjustments-enabled="
                 adjustments.setGlobalColorAdjustmentsEnabled
             "
+            @auto-enhance="onAutoEnhance"
             @select-audio="tracks.selectAudio"
             @select-sub-track="tracks.selectSubTrack"
             @set-active-sub-target="tracks.setActiveSubTarget"

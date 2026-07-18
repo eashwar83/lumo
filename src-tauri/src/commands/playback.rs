@@ -312,6 +312,124 @@ pub(crate) async fn take_screenshot(
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct EnhanceSuggestion {
+    brightness: f64,
+    contrast: f64,
+    saturation: f64,
+    temperature: f64,
+    tint: f64,
+}
+
+// "Auto Enhance": sample the current frame, analyse its histogram + colour
+// balance, and return balanced correction values. Auto-levels (contrast),
+// exposure (brightness), a dull-frame saturation bump, and gray-world white
+// balance (temperature/tint). Values are in the -100..100 slider space.
+#[tauri::command]
+pub(crate) async fn analyze_frame_for_enhance(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<EnhanceSuggestion, String> {
+    use tauri::Manager;
+
+    let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
+    let sample = cache_dir.join("enhance_sample.jpg");
+    let sample_str = sample.to_string_lossy().to_string();
+
+    let mpv_player = state.mpv_player.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _ = std::fs::remove_file(&sample_str);
+        {
+            let mpv_guard = mpv_player.lock().map_err(|e| e.to_string())?;
+            mpv_command_checked(
+                &mpv_guard,
+                &["screenshot-to-file", &sample_str, "video"],
+            )?;
+        }
+
+        let file = std::fs::File::open(&sample_str)
+            .map_err(|e| format!("Could not read frame sample: {e}"))?;
+        let decoder = image::codecs::jpeg::JpegDecoder::new(std::io::BufReader::new(file))
+            .map_err(|e| format!("Could not decode frame: {e}"))?;
+        let rgb = image::DynamicImage::from_decoder(decoder)
+            .map_err(|e| format!("Could not read frame pixels: {e}"))?
+            .to_rgb8();
+        let _ = std::fs::remove_file(&sample_str);
+
+        let (w, h) = rgb.dimensions();
+        if w == 0 || h == 0 {
+            return Err("Empty frame".to_string());
+        }
+        // Subsample to ~150k pixels for speed.
+        let total = (w as u64) * (h as u64);
+        let step = ((total / 150_000).max(1)) as usize;
+
+        let mut hist = [0u32; 256];
+        let (mut sum_r, mut sum_g, mut sum_b, mut sum_sat) = (0f64, 0f64, 0f64, 0f64);
+        let mut count = 0u64;
+        for (i, px) in rgb.pixels().enumerate() {
+            if i % step != 0 {
+                continue;
+            }
+            let (r, g, b) = (px[0] as f64, px[1] as f64, px[2] as f64);
+            let luma = 0.299 * r + 0.587 * g + 0.114 * b;
+            hist[(luma.round().clamp(0.0, 255.0)) as usize] += 1;
+            sum_r += r;
+            sum_g += g;
+            sum_b += b;
+            let mx = r.max(g).max(b);
+            let mn = r.min(g).min(b);
+            if mx > 0.0 {
+                sum_sat += (mx - mn) / mx;
+            }
+            count += 1;
+        }
+        if count == 0 {
+            return Err("No pixels sampled".to_string());
+        }
+
+        let n = count as f64;
+        let (mean_r, mean_g, mean_b) = (sum_r / n, sum_g / n, sum_b / n);
+        let avg_sat = sum_sat / n;
+
+        let percentile = |p: f64| -> f64 {
+            let target = (n * p) as u64;
+            let mut acc = 0u64;
+            for (v, &c) in hist.iter().enumerate() {
+                acc += c as u64;
+                if acc >= target {
+                    return v as f64;
+                }
+            }
+            255.0
+        };
+        let black = percentile(0.01);
+        let white = percentile(0.99);
+        let median = percentile(0.5);
+        let range = (white - black).max(1.0);
+
+        // Balanced strength; conservative caps so a good source isn't wrecked.
+        let s = 0.6;
+        let contrast = (((255.0 / range) - 1.0) * 60.0 * s).clamp(0.0, 55.0);
+        let brightness = ((120.0 - median) * 0.5 * s).clamp(-40.0, 40.0);
+        let saturation = ((0.32 - avg_sat) * 180.0 * s).clamp(0.0, 40.0);
+        let temperature = ((mean_b - mean_r) * 0.5 * s).clamp(-45.0, 45.0);
+        let tint = (((mean_r + mean_b) / 2.0 - mean_g) * 0.5 * s).clamp(-40.0, 40.0);
+
+        Ok(EnhanceSuggestion {
+            brightness,
+            contrast,
+            saturation,
+            temperature,
+            tint,
+        })
+    })
+    .await
+    .map_err(|e| format!("Auto-enhance task failed: {e}"))?
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct RuntimeVersions {
     soia_version: String,
     mpv_version: Option<String>,

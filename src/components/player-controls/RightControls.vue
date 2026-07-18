@@ -74,6 +74,7 @@ const emit = defineEmits<{
     (e: "set-gamma", value: number): void;
     (e: "set-hue", value: number): void;
     (e: "set-global-color-adjustments-enabled", enabled: boolean): void;
+    (e: "auto-enhance"): void;
     (e: "select-audio", track: MediaTrack): void;
     (e: "select-sub-track", payload: { target: SubtitleTarget; track: MediaTrack }): void;
     (e: "set-active-sub-target", target: SubtitleTarget): void;
@@ -104,6 +105,17 @@ const COLOR_GRADE_CONTROLS: { key: ColorGradeKey; label: string }[] = [
     { key: "highlights", label: "Highlights" },
     { key: "shadows", label: "Shadows" },
 ];
+
+const autoEnhanceBusy = ref(false);
+const onAutoEnhanceClick = () => {
+    if (autoEnhanceBusy.value) return;
+    autoEnhanceBusy.value = true;
+    emit("auto-enhance");
+    // Re-enable shortly; the parent runs the analysis asynchronously.
+    window.setTimeout(() => {
+        autoEnhanceBusy.value = false;
+    }, 1200);
+};
 
 const isNativePipPlatform =
     typeof navigator !== "undefined" &&
@@ -888,6 +900,17 @@ watch(
                         </div>
                     </div>
                     <div class="track-menu__list track-menu__list--settings">
+                        <button
+                            class="auto-enhance-btn"
+                            type="button"
+                            :disabled="autoEnhanceBusy"
+                            @click.stop="onAutoEnhanceClick"
+                        >
+                            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                <path d="M7.5 5.6 5 7l1.4-2.5L5 2l2.5 1.4L10 2 8.6 4.5 10 7zM19 9l-1.3 2.9L15 13l2.7 1.1L19 17l1.3-2.9L23 13l-2.7-1.1zM11.5 11.5 9 6 6.5 11.5 1 14l5.5 2.5L9 22l2.5-5.5L17 14z" />
+                            </svg>
+                            <span>{{ autoEnhanceBusy ? "Enhancing…" : "Auto Enhance" }}</span>
+                        </button>
                         <ControlSlider
                             label="Brightness"
                             :value="brightness"
@@ -1314,6 +1337,40 @@ watch(
 
 .track-menu__mode-switch--on .track-menu__mode-thumb {
     transform: translateX(12px);
+}
+
+.auto-enhance-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    padding: 9px 12px;
+    margin-bottom: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 9px;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.95);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.auto-enhance-btn:hover:not(:disabled) {
+    background: rgba(143, 179, 255, 0.22);
+    border-color: rgba(143, 179, 255, 0.5);
+}
+
+.auto-enhance-btn:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.auto-enhance-btn svg {
+    width: 16px;
+    height: 16px;
+    color: #8fb3ff;
 }
 
 /* --- Enhance section (video quality) --- */

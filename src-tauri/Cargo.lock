@@ -2062,6 +2062,8 @@ dependencies = [
  "num-traits",
  "png 0.18.1",
  "tiff",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]
@@ -2416,6 +2418,7 @@ dependencies = [
  "env_logger",
  "flate2",
  "futures-util",
+ "image",
  "keepawake",
  "libc",
  "log",
