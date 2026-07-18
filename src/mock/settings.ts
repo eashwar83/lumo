@@ -104,6 +104,7 @@ export const DEFAULT_SPEED_SETTING_LABEL = "Default Speed";
 export const IMAGE_DISPLAY_DURATION_SETTING_LABEL = "IMAGE_DISPLAY_DURATION";
 export const DISABLE_SUBTITLES_SETTING_LABEL = "DISABLE_SUBTITLES";
 export const AUTO_CROP_SETTING_LABEL = "AUTO_CROP_BLACK_BARS";
+export const AUTO_CROP_LIMIT_SETTING_LABEL = "AUTO_CROP_LIMIT";
 export const AUTOLOAD_FOLDER_SETTING_LABEL = "AUTOLOAD_FOLDER";
 export const SCREENSHOT_DIR_SETTING_LABEL = "SCREENSHOT_DIR";
 export const OPENSUBTITLES_ENABLED_SETTING_LABEL = "OPENSUBTITLES_ENABLED";
@@ -190,6 +191,16 @@ export const defaultSettingGroups: SettingGroup[] = [
                 type: "toggle",
                 onValue: "On",
                 offValue: "Off",
+            },
+            {
+                label: AUTO_CROP_LIMIT_SETTING_LABEL,
+                displayLabel: "Auto-Crop Black Threshold",
+                value: "24",
+                type: "slider",
+                min: 0,
+                max: 128,
+                step: 1,
+                unit: "",
             },
             {
                 label: AUTOLOAD_FOLDER_SETTING_LABEL,

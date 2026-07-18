@@ -2,6 +2,7 @@ import { onMounted, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, PhysicalSize } from "@tauri-apps/api/window";
 import {
+    AUTO_CROP_LIMIT_SETTING_LABEL,
     AUTO_CROP_SETTING_LABEL,
     SETTINGS_UPDATED_EVENT,
 } from "../mock/settings";
@@ -32,7 +33,7 @@ const CROPDETECT_LABEL = "soia-cropdetect";
 // Defaults mirror autocrop.lua.
 const AUTO_DELAY_SECONDS = 4;
 const DETECT_SECONDS = 1;
-const DETECT_LIMIT = "24/255";
+const DEFAULT_DETECT_LIMIT = 24;
 const DETECT_ROUND = 2;
 const DETECT_MIN_RATIO = 0.5;
 
@@ -40,6 +41,17 @@ const parseAutoCropEnabled = (groups?: StoredSettingGroup[]): boolean =>
     groups
         ?.flatMap((group) => group.items)
         .find((item) => item.label === AUTO_CROP_SETTING_LABEL)?.value === "On";
+
+// cropdetect black threshold (0..128, as N/255). Higher catches noisy/greyish
+// "black" bars on analog/VHS-style sources that the default 24 misses.
+const parseAutoCropLimit = (groups?: StoredSettingGroup[]): number => {
+    const raw = groups
+        ?.flatMap((group) => group.items)
+        .find((item) => item.label === AUTO_CROP_LIMIT_SETTING_LABEL)?.value;
+    const parsed = Number.parseInt(raw ?? "", 10);
+    if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_DETECT_LIMIT;
+    return Math.min(128, parsed);
+};
 
 const getProp = async (name: string): Promise<string | null> => {
     try {
@@ -68,6 +80,7 @@ const runCommand = async (args: Array<string | number>): Promise<boolean> => {
 
 export const useAutoCrop = (options: AutoCropOptions) => {
     const enabled = ref(false);
+    const detectLimit = ref(DEFAULT_DETECT_LIMIT);
 
     let autoDelayTimer: number | null = null;
     let detectTimer: number | null = null;
@@ -257,7 +270,7 @@ export const useAutoCrop = (options: AutoCropOptions) => {
         const inserted = await runCommand([
             "vf",
             "pre",
-            `@${CROPDETECT_LABEL}:cropdetect=limit=${DETECT_LIMIT}:round=${DETECT_ROUND}:reset=0`,
+            `@${CROPDETECT_LABEL}:cropdetect=limit=${detectLimit.value}/255:round=${DETECT_ROUND}:reset=0`,
         ]);
         if (!inserted) {
             await restoreHwdec();
@@ -325,6 +338,7 @@ export const useAutoCrop = (options: AutoCropOptions) => {
 
     const applyStoredGroups = (groups?: StoredSettingGroup[]) => {
         enabled.value = parseAutoCropEnabled(groups);
+        detectLimit.value = parseAutoCropLimit(groups);
     };
 
     const refreshFromSettings = async () => {
