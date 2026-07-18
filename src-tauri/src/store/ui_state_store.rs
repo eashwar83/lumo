@@ -221,6 +221,8 @@ pub struct VideoEnhancementsState {
     pub sharpen_amount: Option<f64>,
     #[serde(default)]
     pub sharpen_radius: Option<f64>,
+    #[serde(default)]
+    pub ai_upscale: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]

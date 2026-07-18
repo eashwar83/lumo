@@ -552,6 +552,63 @@ fn apply_runtime_glsl_shaders(
     Ok(())
 }
 
+// The `glsl-shaders` list has two independent owners: the manual shader picker
+// in Settings and the one-click "AI Upscaling" control. We keep each layer's
+// shaders here and always rebuild the combined list (upscale first, then the
+// user's manual shaders) so neither owner clobbers the other.
+struct GlslLayers {
+    manual: Vec<String>,
+    upscale: Vec<String>,
+}
+
+static GLSL_LAYERS: std::sync::Mutex<GlslLayers> = std::sync::Mutex::new(GlslLayers {
+    manual: Vec::new(),
+    upscale: Vec::new(),
+});
+
+fn rebuild_combined_glsl(mpv_guard: &crate::mpv::MpvHandle) -> Result<(), String> {
+    let layers = GLSL_LAYERS.lock().map_err(|_| "glsl layer lock poisoned".to_string())?;
+    let mut combined = layers.upscale.clone();
+    combined.extend(layers.manual.iter().cloned());
+    apply_runtime_glsl_shaders(mpv_guard, &combined)
+}
+
+// Ordered bundled shader files (relative to the shaders dir) per mode.
+fn upscale_shader_files(mode: &str) -> Vec<&'static str> {
+    match mode {
+        "anime" => vec![
+            "anime/1_Clamp_Highlights.glsl",
+            "anime/2_Restore_CNN_M.glsl",
+            "anime/3_Upscale_CNN_x2_M.glsl",
+        ],
+        "live" => vec!["live/ravu-lite-ar-r3.glsl"],
+        _ => Vec::new(),
+    }
+}
+
+fn resolve_upscale_shaders(app: &tauri::AppHandle, mode: &str) -> Vec<String> {
+    let mut resolved = Vec::new();
+    for tail in upscale_shader_files(mode) {
+        // Tauri lays resources out under the resource dir preserving the path
+        // given in the bundle config; try the configured prefix and a couple of
+        // fallbacks so path-layout differences don't silently break upscaling.
+        for base in ["resources/shaders", "shaders", "resources"] {
+            let rel = format!("{base}/{tail}");
+            if let Ok(path) = app
+                .path()
+                .resolve(&rel, tauri::path::BaseDirectory::Resource)
+            {
+                let path_str = path.to_string_lossy().into_owned();
+                if is_existing_glsl_file(&path_str) {
+                    resolved.push(path_str);
+                    break;
+                }
+            }
+        }
+    }
+    resolved
+}
+
 #[tauri::command]
 pub(crate) fn open_log_directory(app: tauri::AppHandle) -> Result<(), String> {
     let log_path = resolve_current_log_path(&app)
@@ -644,15 +701,38 @@ pub(crate) fn apply_rendering_settings(
     let existing_selected = filter_existing_shader_files(&selected);
     let active = align_active_shaders(&existing_selected, active_shader_files);
 
-    with_mpv(&state, |mpv_guard| {
-        apply_runtime_glsl_shaders(mpv_guard, &active)?;
-        Ok(())
-    })?;
+    {
+        let mut layers = GLSL_LAYERS
+            .lock()
+            .map_err(|_| "glsl layer lock poisoned".to_string())?;
+        layers.manual = active.clone();
+    }
+    with_mpv(&state, |mpv_guard| rebuild_combined_glsl(mpv_guard))?;
 
     Ok(RenderingSettingsState {
         selected_shader_files: selected,
         active_shader_files: active,
     })
+}
+
+// One-click AI upscaling. Sets the bundled upscale-shader layer for the given
+// mode ("anime" | "live" | "off"/anything else) and rebuilds the combined
+// glsl-shaders list, preserving any manual shaders.
+#[tauri::command]
+pub(crate) fn apply_upscale_shaders(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    mode: String,
+) -> Result<(), String> {
+    let upscale = resolve_upscale_shaders(&app, &mode);
+    {
+        let mut layers = GLSL_LAYERS
+            .lock()
+            .map_err(|_| "glsl layer lock poisoned".to_string())?;
+        layers.upscale = upscale;
+    }
+    with_mpv(&state, |mpv_guard| rebuild_combined_glsl(mpv_guard))?;
+    Ok(())
 }
 
 #[tauri::command]

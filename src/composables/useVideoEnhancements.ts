@@ -16,11 +16,13 @@ import { createDebouncedUiStateSaver, loadUiState } from "./useUiStateStore";
 // (mirroring the approach in useAutoCrop) and restore `auto` when both are off.
 
 export type QualityPreset = "fast" | "balanced" | "high";
+export type AiUpscaleMode = "off" | "anime" | "live";
 
 export type StoredVideoEnhancements = {
     qualityPreset?: QualityPreset;
     sharpenAmount?: number;
     sharpenRadius?: number;
+    aiUpscale?: AiUpscaleMode;
 };
 
 export type VideoEnhancementsState = {
@@ -31,6 +33,7 @@ export type VideoEnhancementsState = {
     sharpenRadius: number;
     denoise: boolean;
     deinterlace: boolean;
+    aiUpscale: AiUpscaleMode;
 };
 
 // mpv gpu renderer properties per preset. All are runtime-changeable, so the
@@ -77,6 +80,7 @@ const DEFAULT_STATE: VideoEnhancementsState = {
     sharpenRadius: 5,
     denoise: false,
     deinterlace: false,
+    aiUpscale: "off",
 };
 
 const clamp = (value: number, min: number, max: number) =>
@@ -90,6 +94,9 @@ const normalizeRadius = (value: number): number => {
 
 const isQualityPreset = (value: unknown): value is QualityPreset =>
     value === "fast" || value === "balanced" || value === "high";
+
+const isAiUpscaleMode = (value: unknown): value is AiUpscaleMode =>
+    value === "off" || value === "anime" || value === "live";
 
 export const useVideoEnhancements = () => {
     const state = reactive<VideoEnhancementsState>({ ...DEFAULT_STATE });
@@ -122,6 +129,7 @@ export const useVideoEnhancements = () => {
                 qualityPreset: state.qualityPreset,
                 sharpenAmount: state.sharpenAmount,
                 sharpenRadius: state.sharpenRadius,
+                aiUpscale: state.aiUpscale,
             },
         });
     };
@@ -169,6 +177,15 @@ export const useVideoEnhancements = () => {
         await setProp("deinterlace", state.deinterlace ? "yes" : "no");
     };
 
+    // Bundled GLSL upscalers, composed with any manual shaders in the backend.
+    const applyAiUpscale = async () => {
+        try {
+            await invoke("apply_upscale_shaders", { mode: state.aiUpscale });
+        } catch (error) {
+            console.warn("[enhance] apply upscale failed", error);
+        }
+    };
+
     // --- public setters -----------------------------------------------------
 
     const setQualityPreset = async (preset: QualityPreset) => {
@@ -199,6 +216,12 @@ export const useVideoEnhancements = () => {
         await applyDeinterlace();
     };
 
+    const setAiUpscale = async (mode: AiUpscaleMode) => {
+        state.aiUpscale = mode;
+        await applyAiUpscale();
+        persist();
+    };
+
     // --- lifecycle ----------------------------------------------------------
 
     // Reapply everything to the freshly-loaded file. Renderer properties and
@@ -209,6 +232,7 @@ export const useVideoEnhancements = () => {
         await applyQualityPreset();
         await rebuildVideoFilters();
         await applyDeinterlace();
+        if (state.aiUpscale !== "off") await applyAiUpscale();
     };
 
     const load = async (stored?: StoredVideoEnhancements) => {
@@ -222,10 +246,14 @@ export const useVideoEnhancements = () => {
             if (typeof stored.sharpenRadius === "number") {
                 state.sharpenRadius = normalizeRadius(stored.sharpenRadius);
             }
+            if (isAiUpscaleMode(stored.aiUpscale)) {
+                state.aiUpscale = stored.aiUpscale;
+            }
         }
         loaded = true;
         // Denoise / deinterlace intentionally default off each launch.
         await applyQualityPreset();
+        if (state.aiUpscale !== "off") await applyAiUpscale();
     };
 
     const reset = async () => {
@@ -233,6 +261,7 @@ export const useVideoEnhancements = () => {
         await applyQualityPreset();
         await rebuildVideoFilters();
         await applyDeinterlace();
+        await applyAiUpscale();
         persist();
     };
 
@@ -250,6 +279,7 @@ export const useVideoEnhancements = () => {
         setSharpenRadius,
         setDenoise,
         setDeinterlace,
+        setAiUpscale,
         onFileLoaded,
         reset,
     };

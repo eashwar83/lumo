@@ -5,6 +5,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type { MediaTrack } from "../../types/media";
 import type { SubtitleTarget } from "../../composables/useSubtitleState";
 import type {
+    AiUpscaleMode,
     QualityPreset,
     VideoEnhancementsController,
 } from "../../composables/useVideoEnhancements";
@@ -87,6 +88,12 @@ const QUALITY_PRESETS: { id: QualityPreset; label: string }[] = [
     { id: "fast", label: "Fast" },
     { id: "balanced", label: "Balanced" },
     { id: "high", label: "High" },
+];
+
+const AI_UPSCALE_OPTIONS: { id: AiUpscaleMode; label: string }[] = [
+    { id: "off", label: "Off" },
+    { id: "anime", label: "Anime" },
+    { id: "live", label: "Live" },
 ];
 
 const isNativePipPlatform =
@@ -1033,6 +1040,30 @@ watch(
                                     <span class="track-menu__mode-thumb"></span>
                                 </span>
                             </button>
+
+                            <div class="enh__seg-row">
+                                <span class="enh__label">AI Upscale</span>
+                                <div class="enh-seg">
+                                    <button
+                                        v-for="opt in AI_UPSCALE_OPTIONS"
+                                        :key="opt.id"
+                                        type="button"
+                                        class="enh-seg__btn"
+                                        :class="{
+                                            'enh-seg__btn--active':
+                                                props.enhancements.state
+                                                    .aiUpscale === opt.id,
+                                        }"
+                                        @click.stop="
+                                            props.enhancements.setAiUpscale(
+                                                opt.id,
+                                            )
+                                        "
+                                    >
+                                        {{ opt.label }}
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
