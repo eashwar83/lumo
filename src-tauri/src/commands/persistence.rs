@@ -609,10 +609,29 @@ vec4 hook() {{\n\
     )
 }
 
+// mpv caches user shaders by file path, so rewriting the same filename and
+// re-adding it reuses the first compiled shader — later Amount/Radius changes
+// would never take effect. Write a fresh, uniquely-named file each time (and
+// sweep away the old ones) so every change is a genuinely new shader to mpv.
+static SHARPEN_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 fn write_sharpen_shader(app: &tauri::AppHandle, amount: f64, radius: f64) -> Result<String, String> {
     let dir = app.path().app_cache_dir().map_err(|err| err.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
-    let path = dir.join("lumo_sharpen.glsl");
+
+    // Remove previously generated sharpen shaders so they don't accumulate.
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with("lumo_sharpen") && name.ends_with(".glsl") {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+
+    let seq = SHARPEN_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let path = dir.join(format!("lumo_sharpen_{seq}.glsl"));
     std::fs::write(&path, sharpen_shader_source(amount, radius)).map_err(|err| err.to_string())?;
     Ok(path.to_string_lossy().into_owned())
 }
