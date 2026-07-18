@@ -74,6 +74,10 @@ export const useWindowSizeLock = (options: WindowSizeLockOptions = {}) => {
 
     const hasLocked = () => lockedSize !== null;
 
+    // The locked logical size, but only while the feature is enabled — callers
+    // use this as a settled height baseline for fitting. null => use live size.
+    const getLockedSize = (): LockedSize | null => (enabled ? lockedSize : null);
+
     // Read the window's current logical inner size and store it as the lock.
     const captureCurrentAsLocked = async () => {
         const win = getCurrentWindow();
@@ -155,6 +159,7 @@ export const useWindowSizeLock = (options: WindowSizeLockOptions = {}) => {
         runProgrammatic,
         setLocked,
         hasLocked,
+        getLockedSize,
         applyLocked,
     };
 };

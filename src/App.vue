@@ -588,14 +588,22 @@ const fitWindowToVideoDisplay = async () => {
         const win = getCurrentWindow();
         if ((await win.isFullscreen()) || (await win.isMaximized())) return;
         const size = await win.innerSize();
-        if (!size.height) return;
-        let targetWidth = Math.round(size.height * (dw / dh));
+        const scale = await win.scaleFactor().catch(() => 1);
+        // Base the fit height on the locked size (a settled value) when a lock is
+        // active — reading innerSize right after applying the lock can return a
+        // mid-transition height, causing a slight misalignment.
+        const locked = windowLock.getLockedSize();
+        const targetHeight = locked
+            ? Math.round(locked.height * scale)
+            : size.height;
+        if (!targetHeight) return;
+        let targetWidth = Math.round(targetHeight * (dw / dh));
         const monitor = await currentMonitor();
         if (monitor) targetWidth = Math.min(targetWidth, monitor.size.width);
-        if (targetWidth > 0 && targetWidth !== size.width) {
+        if (targetWidth > 0 && (targetWidth !== size.width || targetHeight !== size.height)) {
             // Programmatic: don't let this count as a user resize of the lock.
             await windowLock.runProgrammatic(async () => {
-                await win.setSize(new PhysicalSize(targetWidth, size.height));
+                await win.setSize(new PhysicalSize(targetWidth, targetHeight));
             });
         }
     } catch (error) {
