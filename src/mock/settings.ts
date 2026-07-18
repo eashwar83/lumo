@@ -105,6 +105,7 @@ export const IMAGE_DISPLAY_DURATION_SETTING_LABEL = "IMAGE_DISPLAY_DURATION";
 export const DISABLE_SUBTITLES_SETTING_LABEL = "DISABLE_SUBTITLES";
 export const AUTO_CROP_SETTING_LABEL = "AUTO_CROP_BLACK_BARS";
 export const AUTO_CROP_LIMIT_SETTING_LABEL = "AUTO_CROP_LIMIT";
+export const WINDOW_SIZE_LOCK_SETTING_LABEL = "WINDOW_SIZE_LOCK";
 export const AUTOLOAD_FOLDER_SETTING_LABEL = "AUTOLOAD_FOLDER";
 export const SCREENSHOT_DIR_SETTING_LABEL = "SCREENSHOT_DIR";
 export const OPENSUBTITLES_ENABLED_SETTING_LABEL = "OPENSUBTITLES_ENABLED";
@@ -206,6 +207,14 @@ export const defaultSettingGroups: SettingGroup[] = [
                 label: AUTOLOAD_FOLDER_SETTING_LABEL,
                 displayLabel: "Auto-Load Folder to Playlist",
                 value: "Off",
+                type: "toggle",
+                onValue: "On",
+                offValue: "Off",
+            },
+            {
+                label: WINDOW_SIZE_LOCK_SETTING_LABEL,
+                displayLabel: "Remember Window Size",
+                value: "On",
                 type: "toggle",
                 onValue: "On",
                 offValue: "Off",

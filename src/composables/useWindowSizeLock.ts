@@ -1,6 +1,10 @@
 import { onMounted, onUnmounted } from "vue";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
+import {
+    SETTINGS_UPDATED_EVENT,
+    WINDOW_SIZE_LOCK_SETTING_LABEL,
+} from "../mock/settings";
 import { createDebouncedUiStateSaver, loadUiState } from "./useUiStateStore";
 
 // "Locked" window size: once the user sizes the window, keep that exact size
@@ -18,9 +22,21 @@ type WindowSizeLockOptions = {
 };
 
 type StoredLock = { windowLockedSize?: { width?: number; height?: number } };
+type StoredSettingGroup = {
+    title: string;
+    items: Array<{ label: string; value: string }>;
+};
+
+const parseLockEnabled = (groups?: StoredSettingGroup[]): boolean =>
+    groups
+        ?.flatMap((group) => group.items)
+        .find((item) => item.label === WINDOW_SIZE_LOCK_SETTING_LABEL)?.value !==
+    "Off";
 
 export const useWindowSizeLock = (options: WindowSizeLockOptions = {}) => {
     let lockedSize: LockedSize | null = null;
+    // Defaults on; an explicit "Off" in settings disables the whole feature.
+    let enabled = true;
     const saver = createDebouncedUiStateSaver(300);
 
     // Depth counter so the onResized events our own setSize triggers are not
@@ -71,6 +87,7 @@ export const useWindowSizeLock = (options: WindowSizeLockOptions = {}) => {
     };
 
     const onWindowResized = () => {
+        if (!enabled) return;
         if (programmaticDepth > 0) return;
         if (captureTimer) window.clearTimeout(captureTimer);
         captureTimer = window.setTimeout(() => {
@@ -82,6 +99,7 @@ export const useWindowSizeLock = (options: WindowSizeLockOptions = {}) => {
     // Apply the locked size to the window without centering. Returns true when a
     // lock exists (so the caller skips the native auto-resize); false otherwise.
     const applyLocked = async (): Promise<boolean> => {
+        if (!enabled) return false;
         if (!lockedSize) return false;
         const win = getCurrentWindow();
         if (await win.isFullscreen().catch(() => false)) return true;
@@ -92,8 +110,17 @@ export const useWindowSizeLock = (options: WindowSizeLockOptions = {}) => {
         return true;
     };
 
+    const onSettingsUpdated = (event: Event) => {
+        const detail = (event as CustomEvent<{ groups?: StoredSettingGroup[] }>)
+            .detail;
+        enabled = parseLockEnabled(detail?.groups);
+    };
+
     onMounted(async () => {
-        const stored = await loadUiState<StoredLock>();
+        const stored = await loadUiState<
+            StoredLock & { settings?: { groups?: StoredSettingGroup[] } }
+        >();
+        enabled = parseLockEnabled(stored?.settings?.groups);
         const size = stored?.windowLockedSize;
         if (
             size &&
@@ -107,6 +134,7 @@ export const useWindowSizeLock = (options: WindowSizeLockOptions = {}) => {
                 height: Math.round(size.height),
             };
         }
+        window.addEventListener(SETTINGS_UPDATED_EVENT, onSettingsUpdated);
         try {
             unlistenResized = await getCurrentWindow().onResized(() => {
                 onWindowResized();
@@ -117,6 +145,7 @@ export const useWindowSizeLock = (options: WindowSizeLockOptions = {}) => {
     });
 
     onUnmounted(() => {
+        window.removeEventListener(SETTINGS_UPDATED_EVENT, onSettingsUpdated);
         unlistenResized?.();
         unlistenResized = null;
         if (captureTimer) window.clearTimeout(captureTimer);

@@ -645,17 +645,36 @@ const stepWindowSize = async (factor: number) => {
     }
 };
 
-// Called when a newly-sized video loads. Take over window sizing so the locked
-// size (or a per-file fit) is honoured instead of resizing to the video's
-// native pixels. Returns true when handled (skips the native auto-resize).
+// Called when a newly-sized video loads (resize_window event). Take over window
+// sizing so the locked size (or a per-file fit) is honoured instead of resizing
+// to the video's native pixels. Returns true when handled (skips the native
+// auto-resize). Dimensions are already known here, so no dwidth/dheight wait.
 const onVideoAutoResize = async (): Promise<boolean> => {
     if (geometry.isFitWindow(currentMediaKey())) {
-        // Baseline to the locked size (for a consistent height), then fit width.
         await windowLock.applyLocked();
         await fitWindowToVideoDisplay();
         return true;
     }
     return windowLock.applyLocked();
+};
+
+// Apply window sizing on every file load — the reliable path. The resize_window
+// event only fires when the video's dimensions CHANGE, so reopening the same
+// file (or another with identical dimensions) wouldn't otherwise re-apply the
+// locked size or a remembered fit. dwidth/dheight can lag a moment after load /
+// aspect apply, so retry briefly before fitting.
+const applyWindowSizingForMedia = async () => {
+    await windowLock.applyLocked();
+    if (!geometry.isFitWindow(currentMediaKey())) return;
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+        const dw = await readMpvNumber("dwidth");
+        const dh = await readMpvNumber("dheight");
+        if (dw && dh) {
+            await fitWindowToVideoDisplay();
+            return;
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 80));
+    }
 };
 
 enhancements.setMessageHandler(showMessageOverlay);
@@ -757,7 +776,8 @@ const onFileLoaded = async () => {
     await adjustments.applyColorAdjustmentsForMedia(player.state.media.url);
     await subtitleAppearance.applySubtitleAppearanceOptions();
     void enhancements.onFileLoaded();
-    void geometry.applyAspectForMedia(currentMediaKey());
+    await geometry.applyAspectForMedia(currentMediaKey());
+    void applyWindowSizingForMedia();
     void autoCrop.onFileLoaded();
     void autoloadFolder.onFileLoaded(player.state.media.url);
 };
