@@ -529,7 +529,7 @@ const { onKeydown, onDoubleClick, bindings: shortcutBindings } = usePlaybackShor
         togglePlaylist,
         toggleAlwaysOnTop,
         toggleFavorite: onToggleFavorite,
-        cycleAspectRatio: onCycleAspectRatio,
+        cycleAspectRatio: () => onCycleAspectRatio(),
         windowSizeUp: () => stepWindowSize(1.1),
         windowSizeDown: () => stepWindowSize(0.9),
         showProgress: showProgressOverlay,
