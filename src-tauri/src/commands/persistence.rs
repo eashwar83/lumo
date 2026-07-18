@@ -559,18 +559,62 @@ fn apply_runtime_glsl_shaders(
 struct GlslLayers {
     manual: Vec<String>,
     upscale: Vec<String>,
+    sharpen: Vec<String>,
 }
 
 static GLSL_LAYERS: std::sync::Mutex<GlslLayers> = std::sync::Mutex::new(GlslLayers {
     manual: Vec::new(),
     upscale: Vec::new(),
+    sharpen: Vec::new(),
 });
 
 fn rebuild_combined_glsl(mpv_guard: &crate::mpv::MpvHandle) -> Result<(), String> {
     let layers = GLSL_LAYERS.lock().map_err(|_| "glsl layer lock poisoned".to_string())?;
+    // Order: upscale (prescale hooks) -> sharpen (post-scale MAIN) -> manual.
     let mut combined = layers.upscale.clone();
+    combined.extend(layers.sharpen.iter().cloned());
     combined.extend(layers.manual.iter().cloned());
     apply_runtime_glsl_shaders(mpv_guard, &combined)
+}
+
+// A parametric unsharp-mask shader (13-tap disk blur on MAIN/RGB) with the
+// amount and radius baked in as constants. Radius is in source pixels and is
+// unbounded — unlike the `unsharp` video filter (matrix capped at 13), so a
+// large radius yields the broad local-contrast / "HDR" look. Runs on the GPU,
+// so there is no hardware-decode copy-back penalty.
+fn sharpen_shader_source(amount: f64, radius: f64) -> String {
+    format!(
+        "//!HOOK MAIN\n\
+//!BIND HOOKED\n\
+//!DESC Lumo USM sharpen (amount={amount:.3} radius={radius:.2})\n\
+vec4 hook() {{\n\
+    vec4 col = HOOKED_tex(HOOKED_pos);\n\
+    vec2 r = HOOKED_pt * {radius:.3};\n\
+    vec3 blur = col.rgb * 0.20;\n\
+    blur += ( HOOKED_tex(HOOKED_pos + vec2( 0.500, 0.000) * r).rgb\n\
+            + HOOKED_tex(HOOKED_pos + vec2( 0.250, 0.433) * r).rgb\n\
+            + HOOKED_tex(HOOKED_pos + vec2(-0.250, 0.433) * r).rgb\n\
+            + HOOKED_tex(HOOKED_pos + vec2(-0.500, 0.000) * r).rgb\n\
+            + HOOKED_tex(HOOKED_pos + vec2(-0.250,-0.433) * r).rgb\n\
+            + HOOKED_tex(HOOKED_pos + vec2( 0.250,-0.433) * r).rgb ) * 0.08333;\n\
+    blur += ( HOOKED_tex(HOOKED_pos + vec2( 1.000, 0.000) * r).rgb\n\
+            + HOOKED_tex(HOOKED_pos + vec2( 0.500, 0.866) * r).rgb\n\
+            + HOOKED_tex(HOOKED_pos + vec2(-0.500, 0.866) * r).rgb\n\
+            + HOOKED_tex(HOOKED_pos + vec2(-1.000, 0.000) * r).rgb\n\
+            + HOOKED_tex(HOOKED_pos + vec2(-0.500,-0.866) * r).rgb\n\
+            + HOOKED_tex(HOOKED_pos + vec2( 0.500,-0.866) * r).rgb ) * 0.05;\n\
+    vec3 sharp = col.rgb + {amount:.3} * (col.rgb - blur);\n\
+    return vec4(clamp(sharp, 0.0, 1.0), col.a);\n\
+}}\n"
+    )
+}
+
+fn write_sharpen_shader(app: &tauri::AppHandle, amount: f64, radius: f64) -> Result<String, String> {
+    let dir = app.path().app_cache_dir().map_err(|err| err.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
+    let path = dir.join("lumo_sharpen.glsl");
+    std::fs::write(&path, sharpen_shader_source(amount, radius)).map_err(|err| err.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
 }
 
 // Ordered bundled shader files (relative to the shaders dir) per mode.
@@ -741,6 +785,30 @@ pub(crate) fn apply_upscale_shaders(
     }
     with_mpv(&state, |mpv_guard| rebuild_combined_glsl(mpv_guard))?;
     Ok(count)
+}
+
+// GPU sharpen. amount <= 0 clears it; otherwise a parametric unsharp shader is
+// generated with the given amount/radius and loaded as the sharpen layer.
+#[tauri::command]
+pub(crate) fn apply_sharpen_shader(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    amount: f64,
+    radius: f64,
+) -> Result<(), String> {
+    let sharpen = if amount > 0.0 {
+        vec![write_sharpen_shader(&app, amount, radius)?]
+    } else {
+        Vec::new()
+    };
+    {
+        let mut layers = GLSL_LAYERS
+            .lock()
+            .map_err(|_| "glsl layer lock poisoned".to_string())?;
+        layers.sharpen = sharpen;
+    }
+    with_mpv(&state, |mpv_guard| rebuild_combined_glsl(mpv_guard))?;
+    Ok(())
 }
 
 #[tauri::command]
