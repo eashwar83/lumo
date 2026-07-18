@@ -9,6 +9,7 @@ import { createDebouncedUiStateSaver, loadUiState } from "./useUiStateStore";
 export type PerFileVideo = {
     aspect?: string;
     crop?: string;
+    fitWindow?: boolean;
 };
 
 type StoredPerFileVideo = Record<string, PerFileVideo>;
@@ -108,10 +109,26 @@ export const useVideoGeometry = () => {
         const existing = entries.get(normalizedKey) ?? {};
         const crop = value.trim() ? value : undefined;
         // Drop the whole entry if nothing is worth remembering.
-        if (!crop && existing.aspect === undefined) {
+        if (!crop && existing.aspect === undefined && !existing.fitWindow) {
             entries.delete(normalizedKey);
         } else {
             touch(normalizedKey, { ...existing, crop });
+        }
+        persist();
+    };
+
+    const isFitWindow = (key: string): boolean =>
+        entries.get(normalizeKey(key))?.fitWindow === true;
+
+    const setFitWindow = (key: string, value: boolean) => {
+        const normalizedKey = normalizeKey(key);
+        if (!normalizedKey) return;
+        const existing = entries.get(normalizedKey) ?? {};
+        const fitWindow = value ? true : undefined;
+        if (!fitWindow && existing.aspect === undefined && !existing.crop) {
+            entries.delete(normalizedKey);
+        } else {
+            touch(normalizedKey, { ...existing, fitWindow });
         }
         persist();
     };
@@ -124,6 +141,7 @@ export const useVideoGeometry = () => {
             entries.set(normalizedKey, {
                 aspect: value.aspect,
                 crop: value.crop,
+                fitWindow: value.fitWindow,
             });
         });
     };
@@ -139,6 +157,8 @@ export const useVideoGeometry = () => {
         cycleAspect,
         getCrop,
         setCrop,
+        isFitWindow,
+        setFitWindow,
     };
 };
 

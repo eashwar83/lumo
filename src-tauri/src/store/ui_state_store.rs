@@ -56,6 +56,8 @@ pub struct UiState {
     pub video_enhancements: Option<VideoEnhancementsState>,
     #[serde(default)]
     pub per_file_video: Option<std::collections::HashMap<String, PerFileVideo>>,
+    #[serde(default)]
+    pub window_locked_size: Option<WindowLockedSize>,
 }
 
 impl Default for UiState {
@@ -76,6 +78,7 @@ impl Default for UiState {
             playlist_sort_mode: None,
             video_enhancements: None,
             per_file_video: None,
+            window_locked_size: None,
         }
     }
 }
@@ -100,6 +103,7 @@ impl UiState {
             playlist_sort_mode: incoming.playlist_sort_mode.or(self.playlist_sort_mode),
             video_enhancements: incoming.video_enhancements.or(self.video_enhancements),
             per_file_video: incoming.per_file_video.or(self.per_file_video),
+            window_locked_size: incoming.window_locked_size.or(self.window_locked_size),
         }
     }
 }
@@ -236,6 +240,17 @@ pub struct PerFileVideo {
     pub aspect: Option<String>,
     #[serde(default)]
     pub crop: Option<String>,
+    #[serde(default)]
+    pub fit_window: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowLockedSize {
+    #[serde(default)]
+    pub width: Option<f64>,
+    #[serde(default)]
+    pub height: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]

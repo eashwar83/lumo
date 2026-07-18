@@ -25,6 +25,7 @@ import WindowResizeRegions from "./components/WindowResizeRegions.vue";
 import { usePlaybackShortcuts } from "./composables/usePlaybackShortcuts";
 import { useAutoCrop } from "./composables/useAutoCrop";
 import { useVideoGeometry } from "./composables/useVideoGeometry";
+import { useWindowSizeLock } from "./composables/useWindowSizeLock";
 import { useAutoloadFolder } from "./composables/useAutoloadFolder";
 import { usePlaybackFlow } from "./composables/usePlaybackFlow";
 import { useAppUiPersistence } from "./composables/useAppUiPersistence";
@@ -530,7 +531,7 @@ const { onKeydown, onDoubleClick, bindings: shortcutBindings } = usePlaybackShor
         toggleAlwaysOnTop,
         toggleFavorite: onToggleFavorite,
         cycleAspectRatio: () => onCycleAspectRatio(),
-        fitWindowToVideo: () => fitWindowToVideoDisplay(),
+        fitWindowToVideo: () => onFitWindowToVideo(),
         windowSizeUp: () => stepWindowSize(1.1),
         windowSizeDown: () => stepWindowSize(0.9),
         showProgress: showProgressOverlay,
@@ -548,6 +549,12 @@ const { onKeydown, onDoubleClick, bindings: shortcutBindings } = usePlaybackShor
 
 const currentMediaKey = () => player.state.media.url;
 const geometry = useVideoGeometry();
+
+// Locked window size (persists across videos). A genuine user drag updates the
+// lock and drops the current file's per-file "fit" flag it just overrode.
+const windowLock = useWindowSizeLock({
+    onUserResize: () => geometry.setFitWindow(currentMediaKey(), false),
+});
 
 const autoCrop = useAutoCrop({
     isFileLoaded: () => player.state.media.isFileLoaded,
@@ -586,11 +593,22 @@ const fitWindowToVideoDisplay = async () => {
         const monitor = await currentMonitor();
         if (monitor) targetWidth = Math.min(targetWidth, monitor.size.width);
         if (targetWidth > 0 && targetWidth !== size.width) {
-            await win.setSize(new PhysicalSize(targetWidth, size.height));
+            // Programmatic: don't let this count as a user resize of the lock.
+            await windowLock.runProgrammatic(async () => {
+                await win.setSize(new PhysicalSize(targetWidth, size.height));
+            });
         }
     } catch (error) {
         console.warn("[window] fit-to-video failed", error);
     }
+};
+
+// Explicit "Fit window to video" (default G): reshape the window and remember
+// the fit for this file so it's re-applied on reopen.
+const onFitWindowToVideo = async () => {
+    await fitWindowToVideoDisplay();
+    geometry.setFitWindow(currentMediaKey(), true);
+    showMessageOverlay("Fit to window");
 };
 
 const onCycleAspectRatio = async () => {
@@ -600,12 +618,14 @@ const onCycleAspectRatio = async () => {
 };
 
 // Grow/shrink the window by a step, keeping its aspect, clamped to a sane
-// minimum and the current monitor. No-op while fullscreen or maximized.
+// minimum and the current monitor. No-op while fullscreen or maximized. Counts
+// as a user size change: updates the lock and drops any per-file fit flag.
 const stepWindowSize = async (factor: number) => {
     try {
         const win = getCurrentWindow();
         if ((await win.isFullscreen()) || (await win.isMaximized())) return;
         const size = await win.innerSize();
+        const scale = await win.scaleFactor().catch(() => 1);
         let width = Math.round(size.width * factor);
         let height = Math.round(size.height * factor);
         width = Math.max(320, width);
@@ -615,10 +635,27 @@ const stepWindowSize = async (factor: number) => {
             width = Math.min(width, monitor.size.width);
             height = Math.min(height, monitor.size.height);
         }
-        await win.setSize(new PhysicalSize(width, height));
+        await windowLock.runProgrammatic(async () => {
+            await win.setSize(new PhysicalSize(width, height));
+        });
+        windowLock.setLocked(width / scale, height / scale);
+        geometry.setFitWindow(currentMediaKey(), false);
     } catch (error) {
         console.warn("[window] resize step failed", error);
     }
+};
+
+// Called when a newly-sized video loads. Take over window sizing so the locked
+// size (or a per-file fit) is honoured instead of resizing to the video's
+// native pixels. Returns true when handled (skips the native auto-resize).
+const onVideoAutoResize = async (): Promise<boolean> => {
+    if (geometry.isFitWindow(currentMediaKey())) {
+        // Baseline to the locked size (for a consistent height), then fit width.
+        await windowLock.applyLocked();
+        await fitWindowToVideoDisplay();
+        return true;
+    }
+    return windowLock.applyLocked();
 };
 
 enhancements.setMessageHandler(showMessageOverlay);
@@ -747,6 +784,7 @@ useAppRuntimeBindings({
     onProgress: onProgressWithLivePlaybackUpdate,
     onEndFile,
     resolveMediaTitle,
+    interceptAutoResize: () => onVideoAutoResize(),
     nowPlaying,
     isInfoOpen,
     isPlaylistOpen,

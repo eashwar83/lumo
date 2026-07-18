@@ -46,6 +46,12 @@ type AppEventBindingsOptions = {
     onProgress?: (payload: ProgressPayload) => void;
     onEndFile?: (payload: EndFilePayload) => void | Promise<void>;
     resolveMediaTitle?: (incomingTitle: string, currentUrl: string) => string;
+    // Return true to take over window sizing for a newly-sized video (skips the
+    // default native auto-resize + centering).
+    interceptAutoResize?: (
+        width: number,
+        height: number,
+    ) => boolean | Promise<boolean>;
 };
 
 const AUTO_RESIZE_MIN_WIDTH = 720;
@@ -66,6 +72,7 @@ export const useAppEventBindings = ({
     onProgress,
     onEndFile,
     resolveMediaTitle,
+    interceptAutoResize,
 }: AppEventBindingsOptions) => {
     // 事件监听器引用
     let unlistenProgress: UnlistenFn | null = null;
@@ -184,6 +191,17 @@ export const useAppEventBindings = ({
                     if (isWindowFullscreen) return;
                 } catch {
                     // Ignore fullscreen detection errors and continue fallback logic.
+                }
+
+                // Let the app take over sizing (locked size / per-file fit)
+                // before falling back to the native auto-resize.
+                if (interceptAutoResize) {
+                    try {
+                        const handled = await interceptAutoResize(width, height);
+                        if (handled) return;
+                    } catch (error) {
+                        console.warn("[resize] intercept failed", error);
+                    }
                 }
 
                 const monitor =

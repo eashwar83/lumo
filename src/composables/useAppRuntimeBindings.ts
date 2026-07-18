@@ -42,6 +42,7 @@ export const useAppRuntimeBindings = ({
     onProgress,
     onEndFile,
     resolveMediaTitle,
+    interceptAutoResize,
     nowPlaying,
     isInfoOpen,
     isPlaylistOpen,
@@ -78,6 +79,7 @@ export const useAppRuntimeBindings = ({
         onProgress,
         onEndFile,
         resolveMediaTitle,
+        interceptAutoResize,
     });
 
     watch(
