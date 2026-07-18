@@ -86,11 +86,14 @@ const DEFAULT_STATE: VideoEnhancementsState = {
 const clamp = (value: number, min: number, max: number) =>
     Math.min(max, Math.max(min, value));
 
-// Unsharp needs an odd matrix size. 3..23 is the filter's full range: small =
-// crisp edge sharpening, large = broad local-contrast / "HDR"-style glow (like
-// a photo editor's USM radius). 23 is ffmpeg's ceiling for the matrix size.
+// Unsharp needs an odd matrix size. ffmpeg caps a symmetric luma matrix at
+// (lx/2 + ly/2) * 2 <= 25, i.e. size <= 13 — beyond that the filter refuses to
+// initialise (the earlier "radius nullifies sharpness" bug: sizes 15..23 just
+// failed silently). Within 3..13: small = crisp edges, 13 = broad local-
+// contrast / "HDR"-style glow.
+const MAX_SHARPEN_RADIUS = 13;
 const normalizeRadius = (value: number): number => {
-    const rounded = clamp(Math.round(value), 3, 23);
+    const rounded = clamp(Math.round(value), 3, MAX_SHARPEN_RADIUS);
     return rounded % 2 === 0 ? rounded + 1 : rounded;
 };
 
@@ -152,8 +155,9 @@ export const useVideoEnhancements = () => {
     const buildUnsharp = (): string => {
         // Independent controls, like a photo editor's USM: Amount is strength,
         // Radius is scale. Small radius sharpens fine edges; large radius gives
-        // the broad local-contrast / "HDR" look. Amount 0..100 -> luma 0..3.
-        const amount = (clamp(state.sharpenAmount, 0, 100) / 100) * 3;
+        // the broad local-contrast / "HDR" look. Amount 0..100 -> luma 0..4.5
+        // (ffmpeg's luma_amount ceiling is 5.0).
+        const amount = (clamp(state.sharpenAmount, 0, 100) / 100) * 4.5;
         const size = normalizeRadius(state.sharpenRadius);
         // luma_x:luma_y:luma_amount:chroma_x:chroma_y:chroma_amount (luma only)
         return `unsharp=${size}:${size}:${amount.toFixed(3)}:3:3:0`;
