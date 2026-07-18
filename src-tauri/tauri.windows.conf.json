@@ -51,7 +51,9 @@
       }
     ],
     "resources": {
-      "libs/mpv/*.dll": ""
+      "libs/mpv/*.dll": "",
+      "resources/shaders/anime/*.glsl": "shaders/anime/",
+      "resources/shaders/live/*.glsl": "shaders/live/"
     },
     "windows": {
       "nsis": {

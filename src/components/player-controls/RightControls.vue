@@ -985,7 +985,7 @@ watch(
                                 label="Radius"
                                 :value="props.enhancements.state.sharpenRadius"
                                 :min="3"
-                                :max="15"
+                                :max="11"
                                 :step="2"
                                 unit="px"
                                 :precision="0"
