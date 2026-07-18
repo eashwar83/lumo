@@ -587,22 +587,29 @@ fn upscale_shader_files(mode: &str) -> Vec<&'static str> {
 }
 
 fn resolve_upscale_shaders(app: &tauri::AppHandle, mode: &str) -> Vec<String> {
+    // Candidate roots under which the bundled shaders may live, most-likely
+    // first. Tauri normally exposes them via the Resource base dir, but layout
+    // differs across bundle types, so we also probe the executable's directory.
+    let mut roots: Vec<PathBuf> = Vec::new();
+    if let Ok(res) = app.path().resource_dir() {
+        roots.push(res.clone());
+        roots.push(res.join("resources"));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            roots.push(dir.to_path_buf());
+            roots.push(dir.join("resources"));
+        }
+    }
+
     let mut resolved = Vec::new();
     for tail in upscale_shader_files(mode) {
-        // Tauri lays resources out under the resource dir preserving the path
-        // given in the bundle config; try the configured prefix and a couple of
-        // fallbacks so path-layout differences don't silently break upscaling.
-        for base in ["resources/shaders", "shaders", "resources"] {
-            let rel = format!("{base}/{tail}");
-            if let Ok(path) = app
-                .path()
-                .resolve(&rel, tauri::path::BaseDirectory::Resource)
-            {
-                let path_str = path.to_string_lossy().into_owned();
-                if is_existing_glsl_file(&path_str) {
-                    resolved.push(path_str);
-                    break;
-                }
+        for root in &roots {
+            let path = root.join("shaders").join(tail);
+            let path_str = path.to_string_lossy().into_owned();
+            if is_existing_glsl_file(&path_str) {
+                resolved.push(path_str);
+                break;
             }
         }
     }
@@ -723,8 +730,9 @@ pub(crate) fn apply_upscale_shaders(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     mode: String,
-) -> Result<(), String> {
+) -> Result<usize, String> {
     let upscale = resolve_upscale_shaders(&app, &mode);
+    let count = upscale.len();
     {
         let mut layers = GLSL_LAYERS
             .lock()
@@ -732,7 +740,7 @@ pub(crate) fn apply_upscale_shaders(
         layers.upscale = upscale;
     }
     with_mpv(&state, |mpv_guard| rebuild_combined_glsl(mpv_guard))?;
-    Ok(())
+    Ok(count)
 }
 
 #[tauri::command]

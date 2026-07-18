@@ -105,6 +105,10 @@ export const useVideoEnhancements = () => {
     // Track the last hwdec we asked for so we don't reinit the decoder needlessly.
     let lastHwdec: "auto" | "auto-copy" = "auto";
     let loaded = false;
+    let onMessage: ((text: string) => void) | null = null;
+    const setMessageHandler = (handler: (text: string) => void) => {
+        onMessage = handler;
+    };
 
     const setProp = async (name: string, value: string) => {
         try {
@@ -161,16 +165,18 @@ export const useVideoEnhancements = () => {
 
     // Rebuild our labelled video filters deterministically (denoise before
     // sharpen) so toggling one never disturbs the other or the ordering.
+    // hwdec must be switched to a copy mode BEFORE inserting the lavfi filters —
+    // they don't attach under non-copy hardware decoding (they silently no-op).
     const rebuildVideoFilters = async () => {
         await runCommand(["vf", "remove", `@${DENOISE_LABEL}`]);
         await runCommand(["vf", "remove", `@${SHARPEN_LABEL}`]);
+        await syncHwdec();
         if (state.denoise) {
             await runCommand(["vf", "add", `@${DENOISE_LABEL}:hqdn3d`]);
         }
         if (state.sharpenAmount > 0) {
             await runCommand(["vf", "add", `@${SHARPEN_LABEL}:${buildUnsharp()}`]);
         }
-        await syncHwdec();
     };
 
     const applyDeinterlace = async () => {
@@ -178,11 +184,16 @@ export const useVideoEnhancements = () => {
     };
 
     // Bundled GLSL upscalers, composed with any manual shaders in the backend.
-    const applyAiUpscale = async () => {
+    // Returns how many shader files actually resolved (0 => resources missing).
+    const applyAiUpscale = async (): Promise<number> => {
         try {
-            await invoke("apply_upscale_shaders", { mode: state.aiUpscale });
+            const count = await invoke<number>("apply_upscale_shaders", {
+                mode: state.aiUpscale,
+            });
+            return typeof count === "number" ? count : 0;
         } catch (error) {
             console.warn("[enhance] apply upscale failed", error);
+            return 0;
         }
     };
 
@@ -209,17 +220,32 @@ export const useVideoEnhancements = () => {
     const setDenoise = async (enabled: boolean) => {
         state.denoise = enabled;
         await rebuildVideoFilters();
+        onMessage?.(`Denoise ${enabled ? "on" : "off"}`);
     };
 
     const setDeinterlace = async (enabled: boolean) => {
         state.deinterlace = enabled;
         await applyDeinterlace();
+        onMessage?.(`Deinterlace ${enabled ? "on" : "off"}`);
+    };
+
+    const AI_LABELS: Record<AiUpscaleMode, string> = {
+        off: "Off",
+        anime: "Anime",
+        live: "Live-action",
     };
 
     const setAiUpscale = async (mode: AiUpscaleMode) => {
         state.aiUpscale = mode;
-        await applyAiUpscale();
+        const count = await applyAiUpscale();
         persist();
+        if (mode === "off") {
+            onMessage?.("AI Upscale off");
+        } else if (count > 0) {
+            onMessage?.(`AI Upscale · ${AI_LABELS[mode]} (${count} shaders)`);
+        } else {
+            onMessage?.(`AI Upscale · ${AI_LABELS[mode]}: shaders not found`);
+        }
     };
 
     // --- lifecycle ----------------------------------------------------------
@@ -280,6 +306,7 @@ export const useVideoEnhancements = () => {
         setDenoise,
         setDeinterlace,
         setAiUpscale,
+        setMessageHandler,
         onFileLoaded,
         reset,
     };

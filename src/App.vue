@@ -542,6 +542,8 @@ const autoCrop = useAutoCrop({
     onMessage: showMessageOverlay,
 });
 
+enhancements.setMessageHandler(showMessageOverlay);
+
 const autoloadFolder = useAutoloadFolder({ playlist: playlistState });
 
 watch(
