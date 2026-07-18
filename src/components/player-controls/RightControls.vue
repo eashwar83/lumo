@@ -6,6 +6,7 @@ import type { MediaTrack } from "../../types/media";
 import type { SubtitleTarget } from "../../composables/useSubtitleState";
 import type {
     AiUpscaleMode,
+    ColorGradeKey,
     QualityPreset,
     VideoEnhancementsController,
 } from "../../composables/useVideoEnhancements";
@@ -94,6 +95,14 @@ const AI_UPSCALE_OPTIONS: { id: AiUpscaleMode; label: string }[] = [
     { id: "off", label: "Off" },
     { id: "anime", label: "Anime" },
     { id: "live", label: "Live" },
+];
+
+const COLOR_GRADE_CONTROLS: { key: ColorGradeKey; label: string }[] = [
+    { key: "exposure", label: "Exposure" },
+    { key: "temperature", label: "Temperature" },
+    { key: "tint", label: "Tint" },
+    { key: "highlights", label: "Highlights" },
+    { key: "shadows", label: "Shadows" },
 ];
 
 const isNativePipPlatform =
@@ -939,6 +948,31 @@ watch(
                             @change="emit('set-hue', $event)"
                             @reset="emit('set-hue', 0)"
                         />
+
+                        <div class="enh">
+                            <div class="enh__heading">Colour grade</div>
+                            <ControlSlider
+                                v-for="grade in COLOR_GRADE_CONTROLS"
+                                :key="grade.key"
+                                :label="grade.label"
+                                :value="props.enhancements.state[grade.key]"
+                                :min="-100"
+                                :max="100"
+                                :step="1"
+                                unit="%"
+                                :show-sign="true"
+                                :precision="0"
+                                @change="
+                                    props.enhancements.setColorGrade(
+                                        grade.key,
+                                        $event,
+                                    )
+                                "
+                                @reset="
+                                    props.enhancements.setColorGrade(grade.key, 0)
+                                "
+                            />
+                        </div>
 
                         <div class="enh">
                             <div class="enh__heading">Enhance</div>

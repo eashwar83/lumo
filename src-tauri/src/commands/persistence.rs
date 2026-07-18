@@ -559,19 +559,22 @@ fn apply_runtime_glsl_shaders(
 struct GlslLayers {
     manual: Vec<String>,
     upscale: Vec<String>,
+    grade: Vec<String>,
     sharpen: Vec<String>,
 }
 
 static GLSL_LAYERS: std::sync::Mutex<GlslLayers> = std::sync::Mutex::new(GlslLayers {
     manual: Vec::new(),
     upscale: Vec::new(),
+    grade: Vec::new(),
     sharpen: Vec::new(),
 });
 
 fn rebuild_combined_glsl(mpv_guard: &crate::mpv::MpvHandle) -> Result<(), String> {
     let layers = GLSL_LAYERS.lock().map_err(|_| "glsl layer lock poisoned".to_string())?;
-    // Order: upscale (prescale hooks) -> sharpen (post-scale MAIN) -> manual.
+    // Order: upscale (prescale hooks) -> grade (colour) -> sharpen -> manual.
     let mut combined = layers.upscale.clone();
+    combined.extend(layers.grade.iter().cloned());
     combined.extend(layers.sharpen.iter().cloned());
     combined.extend(layers.manual.iter().cloned());
     apply_runtime_glsl_shaders(mpv_guard, &combined)
@@ -633,6 +636,76 @@ fn write_sharpen_shader(app: &tauri::AppHandle, amount: f64, radius: f64) -> Res
     let seq = SHARPEN_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let path = dir.join(format!("lumo_sharpen_{seq}.glsl"));
     std::fs::write(&path, sharpen_shader_source(amount, radius)).map_err(|err| err.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+// A parametric colour-grade shader on MAIN/RGB. Inputs are -100..100; we bake
+// derived constants: exposure (multiplicative stops), temperature (R/B balance),
+// tint (green/magenta), and separate highlight/shadow tone lifts. Identity when
+// all inputs are zero. GPU, so no decode copy-back.
+fn color_grade_shader_source(
+    exposure: f64,
+    temperature: f64,
+    tint: f64,
+    highlights: f64,
+    shadows: f64,
+) -> String {
+    let n = |v: f64| (v / 100.0).clamp(-1.0, 1.0);
+    let expo = 2.0_f64.powf(n(exposure)); // 0.5x .. 2.0x
+    let temp_r = 1.0 + n(temperature) * 0.25;
+    let temp_b = 1.0 - n(temperature) * 0.25;
+    let tint_g = 1.0 + n(tint) * 0.15;
+    let hi = n(highlights) * 0.35;
+    let sh = n(shadows) * 0.35;
+    format!(
+        "//!HOOK MAIN\n\
+//!BIND HOOKED\n\
+//!DESC Lumo colour grade\n\
+vec4 hook() {{\n\
+    vec4 col = HOOKED_tex(HOOKED_pos);\n\
+    vec3 c = col.rgb;\n\
+    c *= {expo:.5};\n\
+    c.r *= {temp_r:.5};\n\
+    c.b *= {temp_b:.5};\n\
+    c.g *= {tint_g:.5};\n\
+    float l = dot(c, vec3(0.299, 0.587, 0.114));\n\
+    float sMask = 1.0 - smoothstep(0.0, 0.5, l);\n\
+    float hMask = smoothstep(0.5, 1.0, l);\n\
+    c += {sh:.5} * sMask;\n\
+    c += {hi:.5} * hMask;\n\
+    return vec4(clamp(c, 0.0, 1.0), col.a);\n\
+}}\n"
+    )
+}
+
+static GRADE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn write_color_grade_shader(
+    app: &tauri::AppHandle,
+    exposure: f64,
+    temperature: f64,
+    tint: f64,
+    highlights: f64,
+    shadows: f64,
+) -> Result<String, String> {
+    let dir = app.path().app_cache_dir().map_err(|err| err.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with("lumo_grade") && name.ends_with(".glsl") {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+    let seq = GRADE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let path = dir.join(format!("lumo_grade_{seq}.glsl"));
+    std::fs::write(
+        &path,
+        color_grade_shader_source(exposure, temperature, tint, highlights, shadows),
+    )
+    .map_err(|err| err.to_string())?;
     Ok(path.to_string_lossy().into_owned())
 }
 
@@ -825,6 +898,44 @@ pub(crate) fn apply_sharpen_shader(
             .lock()
             .map_err(|_| "glsl layer lock poisoned".to_string())?;
         layers.sharpen = sharpen;
+    }
+    with_mpv(&state, |mpv_guard| rebuild_combined_glsl(mpv_guard))?;
+    Ok(())
+}
+
+// GPU colour grade. All-zero inputs clear the grade; otherwise a parametric
+// shader (exposure / temperature / tint / highlights / shadows) is generated and
+// loaded as the grade layer.
+#[tauri::command]
+pub(crate) fn apply_color_grade_shader(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    exposure: f64,
+    temperature: f64,
+    tint: f64,
+    highlights: f64,
+    shadows: f64,
+) -> Result<(), String> {
+    let any = [exposure, temperature, tint, highlights, shadows]
+        .iter()
+        .any(|v| v.abs() > 0.0001);
+    let grade = if any {
+        vec![write_color_grade_shader(
+            &app,
+            exposure,
+            temperature,
+            tint,
+            highlights,
+            shadows,
+        )?]
+    } else {
+        Vec::new()
+    };
+    {
+        let mut layers = GLSL_LAYERS
+            .lock()
+            .map_err(|_| "glsl layer lock poisoned".to_string())?;
+        layers.grade = grade;
     }
     with_mpv(&state, |mpv_guard| rebuild_combined_glsl(mpv_guard))?;
     Ok(())

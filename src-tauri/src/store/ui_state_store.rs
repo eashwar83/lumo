@@ -231,6 +231,16 @@ pub struct VideoEnhancementsState {
     pub sharpen_radius: Option<f64>,
     #[serde(default)]
     pub ai_upscale: Option<String>,
+    #[serde(default)]
+    pub exposure: Option<f64>,
+    #[serde(default)]
+    pub temperature: Option<f64>,
+    #[serde(default)]
+    pub tint: Option<f64>,
+    #[serde(default)]
+    pub highlights: Option<f64>,
+    #[serde(default)]
+    pub shadows: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]

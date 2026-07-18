@@ -18,11 +18,32 @@ import { createDebouncedUiStateSaver, loadUiState } from "./useUiStateStore";
 export type QualityPreset = "fast" | "balanced" | "high";
 export type AiUpscaleMode = "off" | "anime" | "live";
 
+// Colour-grade parameters, all -100..100 (0 = neutral). Applied via a GPU shader.
+export type ColorGradeKey =
+    | "exposure"
+    | "temperature"
+    | "tint"
+    | "highlights"
+    | "shadows";
+
+export const COLOR_GRADE_KEYS: ColorGradeKey[] = [
+    "exposure",
+    "temperature",
+    "tint",
+    "highlights",
+    "shadows",
+];
+
 export type StoredVideoEnhancements = {
     qualityPreset?: QualityPreset;
     sharpenAmount?: number;
     sharpenRadius?: number;
     aiUpscale?: AiUpscaleMode;
+    exposure?: number;
+    temperature?: number;
+    tint?: number;
+    highlights?: number;
+    shadows?: number;
 };
 
 export type VideoEnhancementsState = {
@@ -34,6 +55,11 @@ export type VideoEnhancementsState = {
     denoise: boolean;
     deinterlace: boolean;
     aiUpscale: AiUpscaleMode;
+    exposure: number;
+    temperature: number;
+    tint: number;
+    highlights: number;
+    shadows: number;
 };
 
 // mpv gpu renderer properties per preset. All are runtime-changeable, so the
@@ -80,6 +106,11 @@ const DEFAULT_STATE: VideoEnhancementsState = {
     denoise: false,
     deinterlace: false,
     aiUpscale: "off",
+    exposure: 0,
+    temperature: 0,
+    tint: 0,
+    highlights: 0,
+    shadows: 0,
 };
 
 const clamp = (value: number, min: number, max: number) =>
@@ -134,6 +165,11 @@ export const useVideoEnhancements = () => {
                 sharpenAmount: state.sharpenAmount,
                 sharpenRadius: state.sharpenRadius,
                 aiUpscale: state.aiUpscale,
+                exposure: state.exposure,
+                temperature: state.temperature,
+                tint: state.tint,
+                highlights: state.highlights,
+                shadows: state.shadows,
             },
         });
     };
@@ -169,6 +205,40 @@ export const useVideoEnhancements = () => {
             void applySharpen();
         }, 120);
     };
+
+    // GPU colour-grade shader (exposure / temperature / tint / highlights /
+    // shadows). All-zero clears it on the backend.
+    const applyColorGrade = async () => {
+        try {
+            await invoke("apply_color_grade_shader", {
+                exposure: clamp(state.exposure, -100, 100),
+                temperature: clamp(state.temperature, -100, 100),
+                tint: clamp(state.tint, -100, 100),
+                highlights: clamp(state.highlights, -100, 100),
+                shadows: clamp(state.shadows, -100, 100),
+            });
+        } catch (error) {
+            console.warn("[enhance] apply colour grade failed", error);
+        }
+    };
+
+    let gradeTimer: number | null = null;
+    const scheduleColorGrade = () => {
+        if (gradeTimer) window.clearTimeout(gradeTimer);
+        gradeTimer = window.setTimeout(() => {
+            gradeTimer = null;
+            void applyColorGrade();
+        }, 120);
+    };
+
+    const setColorGrade = (key: ColorGradeKey, value: number) => {
+        state[key] = clamp(Math.round(value), -100, 100);
+        scheduleColorGrade();
+        persist();
+    };
+
+    const hasColorGrade = () =>
+        COLOR_GRADE_KEYS.some((key) => state[key] !== 0);
 
     // Only the denoise (hqdn3d) lavfi filter needs software frames now, so hwdec
     // copy-back is tied to denoise alone; sharpening is GPU and stays hw-decoded.
@@ -269,6 +339,7 @@ export const useVideoEnhancements = () => {
         await rebuildVideoFilters();
         await applyDeinterlace();
         if (state.sharpenAmount > 0) await applySharpen();
+        if (hasColorGrade()) await applyColorGrade();
         if (state.aiUpscale !== "off") await applyAiUpscale();
     };
 
@@ -286,11 +357,18 @@ export const useVideoEnhancements = () => {
             if (isAiUpscaleMode(stored.aiUpscale)) {
                 state.aiUpscale = stored.aiUpscale;
             }
+            COLOR_GRADE_KEYS.forEach((key) => {
+                const value = stored[key];
+                if (typeof value === "number") {
+                    state[key] = clamp(Math.round(value), -100, 100);
+                }
+            });
         }
         loaded = true;
         // Denoise / deinterlace intentionally default off each launch.
         await applyQualityPreset();
         if (state.sharpenAmount > 0) await applySharpen();
+        if (hasColorGrade()) await applyColorGrade();
         if (state.aiUpscale !== "off") await applyAiUpscale();
     };
 
@@ -300,6 +378,7 @@ export const useVideoEnhancements = () => {
         await rebuildVideoFilters();
         await applyDeinterlace();
         await applySharpen();
+        await applyColorGrade();
         await applyAiUpscale();
         persist();
     };
@@ -319,6 +398,7 @@ export const useVideoEnhancements = () => {
         setDenoise,
         setDeinterlace,
         setAiUpscale,
+        setColorGrade,
         setMessageHandler,
         onFileLoaded,
         reset,
