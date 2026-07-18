@@ -52,6 +52,8 @@ pub struct UiState {
     pub playlist_loop_mode: Option<String>,
     #[serde(default)]
     pub playlist_sort_mode: Option<String>,
+    #[serde(default)]
+    pub video_enhancements: Option<VideoEnhancementsState>,
 }
 
 impl Default for UiState {
@@ -70,6 +72,7 @@ impl Default for UiState {
             active_playlist_id: None,
             playlist_loop_mode: None,
             playlist_sort_mode: None,
+            video_enhancements: None,
         }
     }
 }
@@ -92,6 +95,7 @@ impl UiState {
             active_playlist_id: incoming.active_playlist_id.or(self.active_playlist_id),
             playlist_loop_mode: incoming.playlist_loop_mode.or(self.playlist_loop_mode),
             playlist_sort_mode: incoming.playlist_sort_mode.or(self.playlist_sort_mode),
+            video_enhancements: incoming.video_enhancements.or(self.video_enhancements),
         }
     }
 }
@@ -206,6 +210,17 @@ pub struct RenderingState {
     pub anime_mode_active_shader_files: Option<Vec<String>>,
     #[serde(default, alias = "animeAutoShaderEnabled")]
     pub anime_mode_enabled: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoEnhancementsState {
+    #[serde(default)]
+    pub quality_preset: Option<String>,
+    #[serde(default)]
+    pub sharpen_amount: Option<f64>,
+    #[serde(default)]
+    pub sharpen_radius: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]

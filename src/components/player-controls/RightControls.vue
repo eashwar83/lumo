@@ -4,6 +4,10 @@ import { listen } from "@tauri-apps/api/event";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type { MediaTrack } from "../../types/media";
 import type { SubtitleTarget } from "../../composables/useSubtitleState";
+import type {
+    QualityPreset,
+    VideoEnhancementsController,
+} from "../../composables/useVideoEnhancements";
 import {
     getAudioTrackDetails,
     getAudioTrackHoverTitle,
@@ -28,6 +32,7 @@ const props = defineProps<{
     gamma: number;
     hue: number;
     globalColorAdjustmentsEnabled: boolean;
+    enhancements: VideoEnhancementsController;
     isLoopOne: boolean;
     audioTracks: MediaTrack[];
     showAudioMenu: boolean;
@@ -77,6 +82,12 @@ const emit = defineEmits<{
     (e: "toggle-fullscreen"): void;
     (e: "update:showSubtitleAdvancedSettings", value: boolean): void;
 }>();
+
+const QUALITY_PRESETS: { id: QualityPreset; label: string }[] = [
+    { id: "fast", label: "Fast" },
+    { id: "balanced", label: "Balanced" },
+    { id: "high", label: "High" },
+];
 
 const isNativePipPlatform =
     typeof navigator !== "undefined" &&
@@ -921,6 +932,108 @@ watch(
                             @change="emit('set-hue', $event)"
                             @reset="emit('set-hue', 0)"
                         />
+
+                        <div class="enh">
+                            <div class="enh__heading">Enhance</div>
+
+                            <div class="enh__seg-row">
+                                <span class="enh__label">Quality</span>
+                                <div class="enh-seg">
+                                    <button
+                                        v-for="opt in QUALITY_PRESETS"
+                                        :key="opt.id"
+                                        type="button"
+                                        class="enh-seg__btn"
+                                        :class="{
+                                            'enh-seg__btn--active':
+                                                props.enhancements.state
+                                                    .qualityPreset === opt.id,
+                                        }"
+                                        @click.stop="
+                                            props.enhancements.setQualityPreset(
+                                                opt.id,
+                                            )
+                                        "
+                                    >
+                                        {{ opt.label }}
+                                    </button>
+                                </div>
+                            </div>
+
+                            <ControlSlider
+                                label="Sharpness"
+                                :value="props.enhancements.state.sharpenAmount"
+                                :min="0"
+                                :max="100"
+                                :step="1"
+                                unit="%"
+                                :precision="0"
+                                @change="
+                                    props.enhancements.setSharpenAmount($event)
+                                "
+                                @reset="props.enhancements.setSharpenAmount(0)"
+                            />
+                            <ControlSlider
+                                v-if="props.enhancements.state.sharpenAmount > 0"
+                                label="Radius"
+                                :value="props.enhancements.state.sharpenRadius"
+                                :min="3"
+                                :max="15"
+                                :step="2"
+                                unit="px"
+                                :precision="0"
+                                @change="
+                                    props.enhancements.setSharpenRadius($event)
+                                "
+                                @reset="props.enhancements.setSharpenRadius(5)"
+                            />
+
+                            <button
+                                class="enh__toggle"
+                                type="button"
+                                :aria-pressed="props.enhancements.state.denoise"
+                                @click.stop="
+                                    props.enhancements.setDenoise(
+                                        !props.enhancements.state.denoise,
+                                    )
+                                "
+                            >
+                                <span class="enh__label">Denoise</span>
+                                <span
+                                    class="track-menu__mode-switch"
+                                    :class="{
+                                        'track-menu__mode-switch--on':
+                                            props.enhancements.state.denoise,
+                                    }"
+                                >
+                                    <span class="track-menu__mode-thumb"></span>
+                                </span>
+                            </button>
+
+                            <button
+                                class="enh__toggle"
+                                type="button"
+                                :aria-pressed="
+                                    props.enhancements.state.deinterlace
+                                "
+                                @click.stop="
+                                    props.enhancements.setDeinterlace(
+                                        !props.enhancements.state.deinterlace,
+                                    )
+                                "
+                            >
+                                <span class="enh__label">Deinterlace</span>
+                                <span
+                                    class="track-menu__mode-switch"
+                                    :class="{
+                                        'track-menu__mode-switch--on':
+                                            props.enhancements.state.deinterlace,
+                                    }"
+                                >
+                                    <span class="track-menu__mode-thumb"></span>
+                                </span>
+                            </button>
+                        </div>
                     </div>
                 </div>
             </transition>
@@ -1136,6 +1249,83 @@ watch(
 
 .track-menu__mode-switch--on .track-menu__mode-thumb {
     transform: translateX(12px);
+}
+
+/* --- Enhance section (video quality) --- */
+.enh {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.enh__heading {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.enh__seg-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.enh__label {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.92);
+}
+
+.enh-seg {
+    display: inline-flex;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 2px;
+    gap: 2px;
+}
+
+.enh-seg__btn {
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.enh-seg__btn:hover {
+    color: #fff;
+}
+
+.enh-seg__btn--active {
+    background: #8fb3ff;
+    color: #10233f;
+}
+
+.enh__toggle {
+    border: none;
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    border-radius: 8px;
+    padding: 4px 2px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.enh__toggle:hover {
+    background: rgba(255, 255, 255, 0.08);
 }
 
 .track-menu__item--audio {

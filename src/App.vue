@@ -48,6 +48,7 @@ const {
     tracks,
     speed,
     adjustments,
+    enhancements,
     subtitleAppearance,
     history,
     playlistState,
@@ -637,6 +638,7 @@ const onFileLoaded = async () => {
     }
     await adjustments.applyColorAdjustmentsForMedia(player.state.media.url);
     await subtitleAppearance.applySubtitleAppearanceOptions();
+    void enhancements.onFileLoaded();
     void autoCrop.onFileLoaded();
     void autoloadFolder.onFileLoaded(player.state.media.url);
 };
@@ -866,6 +868,7 @@ useAppStartupBindings({
             :global-color-adjustments-enabled="
                 adjustments.globalColorAdjustmentsEnabled.value
             "
+            :enhancements="enhancements"
             :is-loop-one="isLoopOne"
             :audio-tracks="tracks.audioTracks.value"
             :show-audio-menu="tracks.showAudioMenu.value"
