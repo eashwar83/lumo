@@ -55,6 +55,9 @@ export type PlaybackShortcutActions = {
     togglePlaylist?: () => void;
     toggleAlwaysOnTop?: () => Promise<void> | void;
     toggleFavorite?: () => Promise<void> | void;
+    cycleAspectRatio?: () => Promise<void> | void;
+    windowSizeUp?: () => Promise<void> | void;
+    windowSizeDown?: () => Promise<void> | void;
     showProgress?: () => void;
     toggleShortcutsHelp?: () => void;
     closeShortcutsHelp?: () => boolean;
@@ -340,6 +343,18 @@ export const usePlaybackShortcuts = (
         toggleFavorite: {
             enabled: () => Boolean(actions.toggleFavorite) && isFileLoaded(),
             run: () => actions.toggleFavorite?.(),
+        },
+        cycleAspectRatio: {
+            enabled: () => Boolean(actions.cycleAspectRatio) && isFileLoaded(),
+            run: () => actions.cycleAspectRatio?.(),
+        },
+        windowSizeUp: {
+            enabled: () => Boolean(actions.windowSizeUp),
+            run: () => actions.windowSizeUp?.(),
+        },
+        windowSizeDown: {
+            enabled: () => Boolean(actions.windowSizeDown),
+            run: () => actions.windowSizeDown?.(),
         },
     };
 

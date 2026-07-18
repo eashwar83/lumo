@@ -54,6 +54,8 @@ pub struct UiState {
     pub playlist_sort_mode: Option<String>,
     #[serde(default)]
     pub video_enhancements: Option<VideoEnhancementsState>,
+    #[serde(default)]
+    pub per_file_video: Option<std::collections::HashMap<String, PerFileVideo>>,
 }
 
 impl Default for UiState {
@@ -73,6 +75,7 @@ impl Default for UiState {
             playlist_loop_mode: None,
             playlist_sort_mode: None,
             video_enhancements: None,
+            per_file_video: None,
         }
     }
 }
@@ -96,6 +99,7 @@ impl UiState {
             playlist_loop_mode: incoming.playlist_loop_mode.or(self.playlist_loop_mode),
             playlist_sort_mode: incoming.playlist_sort_mode.or(self.playlist_sort_mode),
             video_enhancements: incoming.video_enhancements.or(self.video_enhancements),
+            per_file_video: incoming.per_file_video.or(self.per_file_video),
         }
     }
 }
@@ -223,6 +227,15 @@ pub struct VideoEnhancementsState {
     pub sharpen_radius: Option<f64>,
     #[serde(default)]
     pub ai_upscale: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PerFileVideo {
+    #[serde(default)]
+    pub aspect: Option<String>,
+    #[serde(default)]
+    pub crop: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]

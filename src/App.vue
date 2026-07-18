@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import {
+    currentMonitor,
+    getCurrentWindow,
+    PhysicalSize,
+} from "@tauri-apps/api/window";
 import type { MediaTrack } from "./types/media";
 import type { PlaylistEntry } from "./types/playlist";
 import { FAVORITES_PLAYLIST_ID } from "./types/playlist";
@@ -20,6 +24,7 @@ import OnlineSubtitleDialog from "./components/OnlineSubtitleDialog.vue";
 import WindowResizeRegions from "./components/WindowResizeRegions.vue";
 import { usePlaybackShortcuts } from "./composables/usePlaybackShortcuts";
 import { useAutoCrop } from "./composables/useAutoCrop";
+import { useVideoGeometry } from "./composables/useVideoGeometry";
 import { useAutoloadFolder } from "./composables/useAutoloadFolder";
 import { usePlaybackFlow } from "./composables/usePlaybackFlow";
 import { useAppUiPersistence } from "./composables/useAppUiPersistence";
@@ -524,6 +529,9 @@ const { onKeydown, onDoubleClick, bindings: shortcutBindings } = usePlaybackShor
         togglePlaylist,
         toggleAlwaysOnTop,
         toggleFavorite: onToggleFavorite,
+        cycleAspectRatio: onCycleAspectRatio,
+        windowSizeUp: () => stepWindowSize(1.1),
+        windowSizeDown: () => stepWindowSize(0.9),
         showProgress: showProgressOverlay,
         toggleShortcutsHelp: () => {
             isShortcutsHelpOpen.value = !isShortcutsHelpOpen.value;
@@ -537,10 +545,43 @@ const { onKeydown, onDoubleClick, bindings: shortcutBindings } = usePlaybackShor
     },
 );
 
+const currentMediaKey = () => player.state.media.url;
+const geometry = useVideoGeometry();
+
 const autoCrop = useAutoCrop({
     isFileLoaded: () => player.state.media.isFileLoaded,
     onMessage: showMessageOverlay,
+    mediaKey: currentMediaKey,
+    getSavedCrop: geometry.getCrop,
+    onCropChanged: geometry.setCrop,
 });
+
+const onCycleAspectRatio = async () => {
+    const label = await geometry.cycleAspect();
+    showMessageOverlay(`Aspect: ${label}`);
+};
+
+// Grow/shrink the window by a step, keeping its aspect, clamped to a sane
+// minimum and the current monitor. No-op while fullscreen or maximized.
+const stepWindowSize = async (factor: number) => {
+    try {
+        const win = getCurrentWindow();
+        if ((await win.isFullscreen()) || (await win.isMaximized())) return;
+        const size = await win.innerSize();
+        let width = Math.round(size.width * factor);
+        let height = Math.round(size.height * factor);
+        width = Math.max(320, width);
+        height = Math.max(180, height);
+        const monitor = await currentMonitor();
+        if (monitor) {
+            width = Math.min(width, monitor.size.width);
+            height = Math.min(height, monitor.size.height);
+        }
+        await win.setSize(new PhysicalSize(width, height));
+    } catch (error) {
+        console.warn("[window] resize step failed", error);
+    }
+};
 
 enhancements.setMessageHandler(showMessageOverlay);
 
@@ -641,6 +682,7 @@ const onFileLoaded = async () => {
     await adjustments.applyColorAdjustmentsForMedia(player.state.media.url);
     await subtitleAppearance.applySubtitleAppearanceOptions();
     void enhancements.onFileLoaded();
+    void geometry.applyAspectForMedia(currentMediaKey());
     void autoCrop.onFileLoaded();
     void autoloadFolder.onFileLoaded(player.state.media.url);
 };

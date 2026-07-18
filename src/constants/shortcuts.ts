@@ -51,7 +51,10 @@ export type ShortcutActionId =
     | "previousTrack"
     | "nextTrack"
     | "toggleAlwaysOnTop"
-    | "toggleFavorite";
+    | "toggleFavorite"
+    | "cycleAspectRatio"
+    | "windowSizeUp"
+    | "windowSizeDown";
 
 export type ShortcutActionGroup =
     | "Playback"
@@ -93,6 +96,7 @@ export const SHORTCUT_ACTIONS: ShortcutActionDef[] = [
     { id: "toggleLoop", label: "Loop current file", group: "Playback", defaultChord: "KeyL" },
     { id: "autoCropNow", label: "Auto-crop now", group: "Playback", defaultChord: "KeyC" },
     { id: "clearCrop", label: "Clear crop", group: "Playback", defaultChord: "Shift+KeyC" },
+    { id: "cycleAspectRatio", label: "Cycle aspect ratio", group: "Playback", defaultChord: "KeyE" },
 
     { id: "volumeUp", label: "Volume up", group: "Volume", defaultChord: "ArrowUp" },
     { id: "volumeDown", label: "Volume down", group: "Volume", defaultChord: "ArrowDown" },
@@ -118,6 +122,8 @@ export const SHORTCUT_ACTIONS: ShortcutActionDef[] = [
     { id: "nextTrack", label: "Next playlist item", group: "Interface & Window", defaultChord: "Shift+Period" },
     { id: "toggleAlwaysOnTop", label: "Always on top", group: "Interface & Window", defaultChord: "KeyT" },
     { id: "toggleFavorite", label: "Toggle favourite", group: "Interface & Window", defaultChord: "KeyB" },
+    { id: "windowSizeUp", label: "Grow window", group: "Interface & Window", defaultChord: "Alt+Equal" },
+    { id: "windowSizeDown", label: "Shrink window", group: "Interface & Window", defaultChord: "Alt+Minus" },
 ];
 
 const ACTION_BY_ID: Record<ShortcutActionId, ShortcutActionDef> =

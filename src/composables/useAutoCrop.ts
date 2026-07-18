@@ -20,6 +20,12 @@ type StoredSettingGroup = {
 type AutoCropOptions = {
     isFileLoaded: () => boolean;
     onMessage?: (text: string) => void;
+    // Per-file crop memory. When a file has a remembered crop it's restored
+    // immediately (no re-detection); newly detected/cleared crops are reported
+    // back so they can be remembered.
+    mediaKey?: () => string;
+    getSavedCrop?: (key: string) => string | null;
+    onCropChanged?: (key: string, value: string) => void;
 };
 
 const CROPDETECT_LABEL = "soia-cropdetect";
@@ -92,10 +98,23 @@ export const useAutoCrop = (options: AutoCropOptions) => {
         }
     };
 
+    const currentKey = () => options.mediaKey?.() ?? "";
+
     const clearCrop = async () => {
         // Set the property directly so it applies to the current frame
         // immediately (file-local-options only reliably apply at load time).
         await runCommand(["set", "video-crop", ""]);
+    };
+
+    // Restore a remembered crop rect ("WxH+X+Y") without running detection.
+    const applySavedCrop = async (value: string) => {
+        const applied = await runCommand(["set", "video-crop", value]);
+        if (!applied) return;
+        const match = value.match(/^(\d+)x(\d+)/);
+        if (match) {
+            await fitWindowToAspect(Number(match[1]), Number(match[2]));
+        }
+        options.onMessage?.(`Crop restored · ${value}`);
     };
 
     // After cropping, reshape the window to the cropped picture's aspect ratio
@@ -165,6 +184,7 @@ export const useAutoCrop = (options: AutoCropOptions) => {
         const applied = await runCommand(["set", "video-crop", value]);
         if (applied) {
             options.onMessage?.(`Auto-crop · ${value}`);
+            options.onCropChanged?.(currentKey(), value);
             await fitWindowToAspect(meta.w, meta.h);
         } else {
             options.onMessage?.(
@@ -253,6 +273,12 @@ export const useAutoCrop = (options: AutoCropOptions) => {
 
     const onFileLoaded = async () => {
         await cleanup();
+        // A remembered crop wins over (and skips) auto-detection.
+        const saved = options.getSavedCrop?.(currentKey()) ?? null;
+        if (saved) {
+            await applySavedCrop(saved);
+            return;
+        }
         if (!enabled.value) return;
         if (!(await isCropable(AUTO_DELAY_SECONDS + DETECT_SECONDS))) return;
 
@@ -273,6 +299,8 @@ export const useAutoCrop = (options: AutoCropOptions) => {
     const clear = async () => {
         await cleanup();
         await clearCrop();
+        // Forget any remembered crop for this file so it isn't restored later.
+        options.onCropChanged?.(currentKey(), "");
         // Restore the window to the video's native aspect so clearing a crop
         // doesn't leave a mismatched (e.g. 4:3) window letterboxing the video.
         const width = await getNumberProp("width");
