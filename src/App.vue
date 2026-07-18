@@ -530,6 +530,7 @@ const { onKeydown, onDoubleClick, bindings: shortcutBindings } = usePlaybackShor
         toggleAlwaysOnTop,
         toggleFavorite: onToggleFavorite,
         cycleAspectRatio: () => onCycleAspectRatio(),
+        fitWindowToVideo: () => fitWindowToVideoDisplay(),
         windowSizeUp: () => stepWindowSize(1.1),
         windowSizeDown: () => stepWindowSize(0.9),
         showProgress: showProgressOverlay,
@@ -556,8 +557,45 @@ const autoCrop = useAutoCrop({
     onCropChanged: geometry.setCrop,
 });
 
+const readMpvNumber = async (name: string): Promise<number | null> => {
+    try {
+        const raw = await invoke<string | null>("mpv_get_property_string", {
+            name,
+        });
+        if (raw == null) return null;
+        const parsed = Number.parseFloat(raw);
+        return Number.isFinite(parsed) ? parsed : null;
+    } catch {
+        return null;
+    }
+};
+
+// Reshape the window to the video's current display aspect (mpv `dwidth`/
+// `dheight` already account for crop + aspect override), removing the letterbox/
+// pillarbox bars that appear when the window shape no longer matches.
+const fitWindowToVideoDisplay = async () => {
+    const dw = await readMpvNumber("dwidth");
+    const dh = await readMpvNumber("dheight");
+    if (!dw || !dh) return;
+    try {
+        const win = getCurrentWindow();
+        if ((await win.isFullscreen()) || (await win.isMaximized())) return;
+        const size = await win.innerSize();
+        if (!size.height) return;
+        let targetWidth = Math.round(size.height * (dw / dh));
+        const monitor = await currentMonitor();
+        if (monitor) targetWidth = Math.min(targetWidth, monitor.size.width);
+        if (targetWidth > 0 && targetWidth !== size.width) {
+            await win.setSize(new PhysicalSize(targetWidth, size.height));
+        }
+    } catch (error) {
+        console.warn("[window] fit-to-video failed", error);
+    }
+};
+
 const onCycleAspectRatio = async () => {
     const label = await geometry.cycleAspect();
+    await fitWindowToVideoDisplay();
     showMessageOverlay(`Aspect: ${label}`);
 };
 

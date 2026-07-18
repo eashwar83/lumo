@@ -53,6 +53,7 @@ export type ShortcutActionId =
     | "toggleAlwaysOnTop"
     | "toggleFavorite"
     | "cycleAspectRatio"
+    | "fitWindowToVideo"
     | "windowSizeUp"
     | "windowSizeDown";
 
@@ -97,6 +98,7 @@ export const SHORTCUT_ACTIONS: ShortcutActionDef[] = [
     { id: "autoCropNow", label: "Auto-crop now", group: "Playback", defaultChord: "KeyC" },
     { id: "clearCrop", label: "Clear crop", group: "Playback", defaultChord: "Shift+KeyC" },
     { id: "cycleAspectRatio", label: "Cycle aspect ratio", group: "Playback", defaultChord: "KeyE" },
+    { id: "fitWindowToVideo", label: "Fit window to video", group: "Playback", defaultChord: "KeyG" },
 
     { id: "volumeUp", label: "Volume up", group: "Volume", defaultChord: "ArrowUp" },
     { id: "volumeDown", label: "Volume down", group: "Volume", defaultChord: "ArrowDown" },

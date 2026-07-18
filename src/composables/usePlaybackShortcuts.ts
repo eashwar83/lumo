@@ -56,6 +56,7 @@ export type PlaybackShortcutActions = {
     toggleAlwaysOnTop?: () => Promise<void> | void;
     toggleFavorite?: () => Promise<void> | void;
     cycleAspectRatio?: () => Promise<void> | void;
+    fitWindowToVideo?: () => Promise<void> | void;
     windowSizeUp?: () => Promise<void> | void;
     windowSizeDown?: () => Promise<void> | void;
     showProgress?: () => void;
@@ -347,6 +348,10 @@ export const usePlaybackShortcuts = (
         cycleAspectRatio: {
             enabled: () => Boolean(actions.cycleAspectRatio) && isFileLoaded(),
             run: () => actions.cycleAspectRatio?.(),
+        },
+        fitWindowToVideo: {
+            enabled: () => Boolean(actions.fitWindowToVideo) && isFileLoaded(),
+            run: () => actions.fitWindowToVideo?.(),
         },
         windowSizeUp: {
             enabled: () => Boolean(actions.windowSizeUp),
