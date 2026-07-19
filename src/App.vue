@@ -1182,7 +1182,7 @@ useAppStartupBindings({
         />
 
         <PlaylistPeekButton
-            v-show="!isPlaylistOpen"
+            v-show="!isPlaylistOpen && !isCurvesOpen"
             :disabled="
                 tracks.showAudioMenu.value ||
                 tracks.showSubMenu.value ||
