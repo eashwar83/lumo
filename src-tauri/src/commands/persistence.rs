@@ -561,6 +561,7 @@ struct GlslLayers {
     upscale: Vec<String>,
     grade: Vec<String>,
     sharpen: Vec<String>,
+    grain: Vec<String>,
 }
 
 static GLSL_LAYERS: std::sync::Mutex<GlslLayers> = std::sync::Mutex::new(GlslLayers {
@@ -568,14 +569,16 @@ static GLSL_LAYERS: std::sync::Mutex<GlslLayers> = std::sync::Mutex::new(GlslLay
     upscale: Vec::new(),
     grade: Vec::new(),
     sharpen: Vec::new(),
+    grain: Vec::new(),
 });
 
 fn rebuild_combined_glsl(mpv_guard: &crate::mpv::MpvHandle) -> Result<(), String> {
     let layers = GLSL_LAYERS.lock().map_err(|_| "glsl layer lock poisoned".to_string())?;
-    // Order: upscale (prescale hooks) -> grade (colour) -> sharpen -> manual.
+    // Order: upscale -> grade (colour) -> sharpen -> grain (final) -> manual.
     let mut combined = layers.upscale.clone();
     combined.extend(layers.grade.iter().cloned());
     combined.extend(layers.sharpen.iter().cloned());
+    combined.extend(layers.grain.iter().cloned());
     combined.extend(layers.manual.iter().cloned());
     apply_runtime_glsl_shaders(mpv_guard, &combined)
 }
@@ -706,6 +709,52 @@ fn write_color_grade_shader(
         color_grade_shader_source(exposure, temperature, tint, highlights, shadows),
     )
     .map_err(|err| err.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+// Animated, luminance-aware film grain on MAIN/RGB. The `random` uniform mpv
+// provides changes every frame, so the grain shifts like real film; a midtone
+// weight keeps it out of clipped highlights/shadows. amount 0..100 -> ~0..0.18.
+fn grain_shader_source(amount: f64) -> String {
+    let strength = (amount / 100.0).clamp(0.0, 1.0) * 0.18;
+    format!(
+        "//!HOOK MAIN\n\
+//!BIND HOOKED\n\
+//!DESC Lumo film grain (amount={amount:.1})\n\
+float lumo_grain_hash(vec2 p) {{\n\
+    p = fract(p * vec2(123.34, 456.21));\n\
+    p += dot(p, p + 45.32);\n\
+    return fract(p.x * p.y);\n\
+}}\n\
+vec4 hook() {{\n\
+    vec4 col = HOOKED_tex(HOOKED_pos);\n\
+    vec2 uv = HOOKED_pos * HOOKED_size + random * 1000.0;\n\
+    float n = lumo_grain_hash(uv) - 0.5;\n\
+    float l = dot(col.rgb, vec3(0.299, 0.587, 0.114));\n\
+    float w = mix(0.35, 1.0, 1.0 - abs(l - 0.5) * 2.0);\n\
+    col.rgb += n * {strength:.5} * w;\n\
+    return vec4(clamp(col.rgb, 0.0, 1.0), col.a);\n\
+}}\n"
+    )
+}
+
+static GRAIN_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn write_grain_shader(app: &tauri::AppHandle, amount: f64) -> Result<String, String> {
+    let dir = app.path().app_cache_dir().map_err(|err| err.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with("lumo_grain") && name.ends_with(".glsl") {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+    let seq = GRAIN_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let path = dir.join(format!("lumo_grain_{seq}.glsl"));
+    std::fs::write(&path, grain_shader_source(amount)).map_err(|err| err.to_string())?;
     Ok(path.to_string_lossy().into_owned())
 }
 
@@ -936,6 +985,28 @@ pub(crate) fn apply_color_grade_shader(
             .lock()
             .map_err(|_| "glsl layer lock poisoned".to_string())?;
         layers.grade = grade;
+    }
+    with_mpv(&state, |mpv_guard| rebuild_combined_glsl(mpv_guard))?;
+    Ok(())
+}
+
+// GPU film grain. amount <= 0 clears it.
+#[tauri::command]
+pub(crate) fn apply_grain_shader(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    amount: f64,
+) -> Result<(), String> {
+    let grain = if amount > 0.0 {
+        vec![write_grain_shader(&app, amount)?]
+    } else {
+        Vec::new()
+    };
+    {
+        let mut layers = GLSL_LAYERS
+            .lock()
+            .map_err(|_| "glsl layer lock poisoned".to_string())?;
+        layers.grain = grain;
     }
     with_mpv(&state, |mpv_guard| rebuild_combined_glsl(mpv_guard))?;
     Ok(())

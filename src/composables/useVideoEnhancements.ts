@@ -46,6 +46,7 @@ export type StoredVideoEnhancements = {
     tint?: number;
     highlights?: number;
     shadows?: number;
+    grain?: number;
 };
 
 export type VideoEnhancementsState = {
@@ -62,6 +63,8 @@ export type VideoEnhancementsState = {
     tint: number;
     highlights: number;
     shadows: number;
+    /** Film grain intensity, 0..100. */
+    grain: number;
 };
 
 // mpv gpu renderer properties per preset. All are runtime-changeable, so the
@@ -113,6 +116,7 @@ const DEFAULT_STATE: VideoEnhancementsState = {
     tint: 0,
     highlights: 0,
     shadows: 0,
+    grain: 0,
 };
 
 const clamp = (value: number, min: number, max: number) =>
@@ -143,6 +147,7 @@ type LookState = {
     tint: number;
     highlights: number;
     shadows: number;
+    grain: number;
 };
 
 const DEFAULT_LOOK: LookState = {
@@ -155,6 +160,7 @@ const DEFAULT_LOOK: LookState = {
     tint: 0,
     highlights: 0,
     shadows: 0,
+    grain: 0,
 };
 
 const PER_FILE_LOOK_MAX = 300;
@@ -194,6 +200,7 @@ export const useVideoEnhancements = (options: VideoEnhancementsOptions = {}) => 
         tint: state.tint,
         highlights: state.highlights,
         shadows: state.shadows,
+        grain: state.grain,
     });
 
     const writeLook = (look: LookState) => {
@@ -206,6 +213,7 @@ export const useVideoEnhancements = (options: VideoEnhancementsOptions = {}) => 
         state.tint = look.tint;
         state.highlights = look.highlights;
         state.shadows = look.shadows;
+        state.grain = look.grain;
     };
 
     const setProp = async (name: string, value: string) => {
@@ -326,6 +334,32 @@ export const useVideoEnhancements = (options: VideoEnhancementsOptions = {}) => 
         persistLook();
     };
 
+    // Animated GPU film grain. amount<=0 clears it on the backend.
+    const applyGrain = async () => {
+        try {
+            await invoke("apply_grain_shader", {
+                amount: clamp(state.grain, 0, 100),
+            });
+        } catch (error) {
+            console.warn("[enhance] apply grain failed", error);
+        }
+    };
+
+    let grainTimer: number | null = null;
+    const scheduleGrain = () => {
+        if (grainTimer) window.clearTimeout(grainTimer);
+        grainTimer = window.setTimeout(() => {
+            grainTimer = null;
+            void applyGrain();
+        }, 120);
+    };
+
+    const setGrain = (value: number) => {
+        state.grain = clamp(Math.round(value), 0, 100);
+        scheduleGrain();
+        persistLook();
+    };
+
     // Only the denoise (hqdn3d) lavfi filter needs software frames now, so hwdec
     // copy-back is tied to denoise alone; sharpening is GPU and stays hw-decoded.
     const syncHwdec = async () => {
@@ -425,6 +459,7 @@ export const useVideoEnhancements = (options: VideoEnhancementsOptions = {}) => 
         await applyDeinterlace();
         await applySharpen();
         await applyColorGrade();
+        await applyGrain();
     };
 
     // Load the look for a file (per-file entry, or the global look when Global is
@@ -466,6 +501,7 @@ export const useVideoEnhancements = (options: VideoEnhancementsOptions = {}) => 
         tint: clamp(Math.round(stored.tint ?? 0), -100, 100),
         highlights: clamp(Math.round(stored.highlights ?? 0), -100, 100),
         shadows: clamp(Math.round(stored.shadows ?? 0), -100, 100),
+        grain: clamp(Math.round(stored.grain ?? 0), 0, 100),
     });
 
     const load = async (
@@ -536,6 +572,7 @@ export const useVideoEnhancements = (options: VideoEnhancementsOptions = {}) => 
         setDeinterlace,
         setAiUpscale,
         setColorGrade,
+        setGrain,
         setMessageHandler,
         onFileLoaded,
         applyLookForMedia,

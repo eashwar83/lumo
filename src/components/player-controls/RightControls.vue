@@ -1152,6 +1152,18 @@ watch(
                                 @reset="props.enhancements.setSharpenRadius(5)"
                             />
 
+                            <ControlSlider
+                                label="Film Grain"
+                                :value="props.enhancements.state.grain"
+                                :min="0"
+                                :max="100"
+                                :step="1"
+                                unit="%"
+                                :precision="0"
+                                @change="props.enhancements.setGrain($event)"
+                                @reset="props.enhancements.setGrain(0)"
+                            />
+
                             <button
                                 class="enh__toggle"
                                 type="button"

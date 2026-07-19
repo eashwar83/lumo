@@ -322,6 +322,8 @@ pub struct VideoPresetValues {
     pub highlights: Option<f64>,
     #[serde(default)]
     pub shadows: Option<f64>,
+    #[serde(default)]
+    pub grain: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -354,6 +356,8 @@ pub struct PerFileEnhance {
     pub highlights: Option<f64>,
     #[serde(default)]
     pub shadows: Option<f64>,
+    #[serde(default)]
+    pub grain: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
