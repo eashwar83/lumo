@@ -863,6 +863,13 @@ const onFileLoaded = async () => {
     void enhancements.onFileLoaded(currentMediaKey());
     await geometry.applyAspectForMedia(currentMediaKey());
     void applyWindowSizingForMedia();
+    // Pre-render seek-bar thumbnails in the background for local files.
+    if (player.state.playback.duration > 0) {
+        void invoke("generate_seek_thumbnails", {
+            path: player.state.media.url,
+            duration: player.state.playback.duration,
+        }).catch(() => {});
+    }
     void autoCrop.onFileLoaded();
     void autoloadFolder.onFileLoaded(player.state.media.url);
 };
@@ -1068,6 +1075,7 @@ useAppStartupBindings({
             :is-playing="player.state.playback.isPlaying"
             :current-time="player.state.playback.currentTime"
             :duration="player.state.playback.duration"
+            :media-path="player.state.media.url"
             :is-live-playback="player.state.media.isLivePlayback"
             :volume="player.state.playback.volume"
             :progress-percent="player.progressPercent.value"

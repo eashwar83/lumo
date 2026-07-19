@@ -1,10 +1,13 @@
 mod event_loop;
 mod ffi;
 mod handle;
+mod thumbnails;
 mod ytdlp_resolver;
 mod ytdlp_settings;
 mod stream_https;
 mod stream_proxy;
+
+pub(crate) use thumbnails::generate_thumbnails;
 
 #[cfg(target_os = "macos")]
 pub(crate) use ffi::SoiaUtils;

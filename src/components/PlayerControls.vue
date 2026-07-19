@@ -13,6 +13,7 @@ const props = defineProps<{
     currentTime: number;
     duration: number;
     isLivePlayback: boolean;
+    mediaPath?: string;
     progressPercent: number;
     bufferedPercent: number;
     volume: number;
@@ -222,6 +223,7 @@ onUnmounted(() => {
             <SeekBar
                 v-if="!isLivePlayback"
                 :duration="duration"
+                :media-path="mediaPath"
                 :progress-percent="progressPercent"
                 :buffered-percent="bufferedPercent"
                 :format-time="formatTime"

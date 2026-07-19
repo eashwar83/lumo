@@ -428,6 +428,122 @@ pub(crate) async fn analyze_frame_for_enhance(
     .map_err(|e| format!("Auto-enhance task failed: {e}"))?
 }
 
+// --- Seek-bar thumbnails --------------------------------------------------
+//
+// A background second libmpv instance pre-renders ~120 downscaled JPEG frames
+// per local file into a per-file cache dir; the seek bar reads the nearest one
+// on hover. Generation is fire-and-forget and deduplicated per path.
+
+const SEEK_THUMB_COUNT: u32 = 120;
+
+fn seek_thumb_cache_dir(app: &tauri::AppHandle, path: &str) -> Result<PathBuf, String> {
+    use std::hash::{Hash, Hasher};
+    use tauri::Manager;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    path.hash(&mut hasher);
+    let key = format!("{:016x}", hasher.finish());
+    let base = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| e.to_string())?
+        .join("seek_thumbs")
+        .join(key);
+    Ok(base)
+}
+
+static SEEK_THUMB_INFLIGHT: std::sync::Mutex<Option<std::collections::HashSet<String>>> =
+    std::sync::Mutex::new(None);
+
+fn is_local_media(path: &str) -> bool {
+    let lower = path.trim().to_ascii_lowercase();
+    !(lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || lower.starts_with("rtsp://")
+        || lower.starts_with("rtmp://")
+        || lower.starts_with("smb://")
+        || lower.starts_with("webdav://"))
+}
+
+#[tauri::command]
+pub(crate) fn generate_seek_thumbnails(
+    app: tauri::AppHandle,
+    path: String,
+    duration: f64,
+) -> Result<(), String> {
+    if path.trim().is_empty() || duration <= 0.0 || !is_local_media(&path) {
+        return Ok(());
+    }
+    let dir = seek_thumb_cache_dir(&app, &path)?;
+
+    // Already generated? (a populated cache dir)
+    if std::fs::read_dir(&dir)
+        .map(|mut rd| rd.next().is_some())
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
+
+    // Deduplicate concurrent/repeat generation for the same path.
+    {
+        let mut guard = SEEK_THUMB_INFLIGHT
+            .lock()
+            .map_err(|_| "thumb lock poisoned".to_string())?;
+        let set = guard.get_or_insert_with(std::collections::HashSet::new);
+        if set.contains(&path) {
+            return Ok(());
+        }
+        set.insert(path.clone());
+    }
+
+    std::thread::spawn(move || {
+        let _ = crate::mpv::generate_thumbnails(&path, &dir, duration, SEEK_THUMB_COUNT);
+        if let Ok(mut guard) = SEEK_THUMB_INFLIGHT.lock() {
+            if let Some(set) = guard.as_mut() {
+                set.remove(&path);
+            }
+        }
+    });
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn get_seek_thumbnail(
+    app: tauri::AppHandle,
+    path: String,
+    fraction: f64,
+) -> Result<Option<String>, String> {
+    use base64::Engine as _;
+    if !is_local_media(&path) {
+        return Ok(None);
+    }
+    let dir = seek_thumb_cache_dir(&app, &path)?;
+    let mut files: Vec<PathBuf> = match std::fs::read_dir(&dir) {
+        Ok(rd) => rd
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| {
+                p.extension()
+                    .and_then(|x| x.to_str())
+                    .map(|x| x.eq_ignore_ascii_case("jpg"))
+                    .unwrap_or(false)
+            })
+            .collect(),
+        Err(_) => return Ok(None),
+    };
+    if files.is_empty() {
+        return Ok(None);
+    }
+    files.sort();
+    let frac = fraction.clamp(0.0, 1.0);
+    let index = ((frac * (files.len() as f64 - 1.0)).round() as usize).min(files.len() - 1);
+    let bytes = match std::fs::read(&files[index]) {
+        Ok(b) => b,
+        Err(_) => return Ok(None),
+    };
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(Some(format!("data:image/jpeg;base64,{encoded}")))
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RuntimeVersions {

@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { invoke } from "@tauri-apps/api/core";
 
 const props = defineProps<{
     duration: number;
+    mediaPath?: string;
     progressPercent: number;
     bufferedPercent: number;
     formatTime: (seconds: number) => string;
@@ -21,6 +23,72 @@ const dragPercent = ref<number | null>(null);
 const showHoverTime = ref(false);
 const hoverTime = ref(0);
 const hoverPercent = ref(0);
+
+// --- Seek-bar thumbnail preview -------------------------------------------
+const thumbUrl = ref<string | null>(null);
+// Bucket the hover fraction so we only fetch when crossing to a new frame.
+const THUMB_BUCKETS = 120;
+let lastThumbBucket = -1;
+let thumbTimer: number | null = null;
+const thumbCache = new Map<number, string | null>();
+
+const isLocalPath = (p?: string): boolean =>
+    !!p && !/^(https?|rtsp|rtmp|smb|webdav):\/\//i.test(p);
+
+const fetchThumb = async (fraction: number) => {
+    const path = props.mediaPath;
+    if (!isLocalPath(path)) {
+        thumbUrl.value = null;
+        return;
+    }
+    const bucket = Math.max(
+        0,
+        Math.min(THUMB_BUCKETS - 1, Math.round(fraction * (THUMB_BUCKETS - 1))),
+    );
+    if (bucket === lastThumbBucket) return;
+    lastThumbBucket = bucket;
+    if (thumbCache.has(bucket)) {
+        thumbUrl.value = thumbCache.get(bucket) ?? null;
+        return;
+    }
+    try {
+        const url = await invoke<string | null>("get_seek_thumbnail", {
+            path,
+            fraction: bucket / (THUMB_BUCKETS - 1),
+        });
+        thumbCache.set(bucket, url ?? null);
+        // Only apply if the user is still hovering this bucket.
+        if (lastThumbBucket === bucket) thumbUrl.value = url ?? null;
+    } catch {
+        thumbUrl.value = null;
+    }
+};
+
+const scheduleThumb = (fraction: number) => {
+    if (thumbTimer) window.clearTimeout(thumbTimer);
+    thumbTimer = window.setTimeout(() => {
+        thumbTimer = null;
+        void fetchThumb(fraction);
+    }, 40);
+};
+
+const clearThumb = () => {
+    if (thumbTimer) {
+        window.clearTimeout(thumbTimer);
+        thumbTimer = null;
+    }
+    lastThumbBucket = -1;
+    thumbUrl.value = null;
+};
+
+// Reset the per-file cache when the media changes.
+watch(
+    () => props.mediaPath,
+    () => {
+        thumbCache.clear();
+        clearThumb();
+    },
+);
 
 const clampRatio = (value: number) => Math.min(1, Math.max(0, value));
 
@@ -44,6 +112,7 @@ const updateHoverByClientX = (clientX: number) => {
         dragPercent.value = hoverPercent.value;
     }
     showHoverTime.value = true;
+    scheduleThumb(ratio);
 };
 
 const updateHoverTime = (event: MouseEvent) => {
@@ -54,6 +123,7 @@ const updateHoverTime = (event: MouseEvent) => {
 const hideHoverTime = () => {
     if (isDragging.value) return;
     showHoverTime.value = false;
+    clearThumb();
 };
 
 const stopDragging = (event?: PointerEvent) => {
@@ -136,6 +206,7 @@ onMounted(() => {
 
 onUnmounted(() => {
     stopDragging();
+    clearThumb();
     window.removeEventListener("keydown", onKeydown);
 });
 </script>
@@ -152,10 +223,19 @@ onUnmounted(() => {
     >
         <div
             v-if="showHoverTime"
-            class="time-tooltip"
+            class="seek-preview"
             :style="{ left: hoverPercent + '%' }"
         >
-            {{ formatTime(hoverTime) }}
+            <img
+                v-if="thumbUrl"
+                class="seek-preview__img"
+                :src="thumbUrl"
+                alt=""
+                draggable="false"
+            />
+            <div class="seek-preview__time" :class="{ 'seek-preview__time--solo': !thumbUrl }">
+                {{ formatTime(hoverTime) }}
+            </div>
         </div>
         <div class="progress-bg">
             <div
@@ -250,17 +330,36 @@ onUnmounted(() => {
     transform: translate(-50%, -50%) scale(1.35);
 }
 
-.time-tooltip {
+.seek-preview {
     position: absolute;
-    bottom: 12px;
+    bottom: 14px;
     transform: translateX(-50%);
-    background: rgba(28, 28, 28, 0.85);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    pointer-events: none;
+    z-index: 5;
+}
+
+.seek-preview__img {
+    width: 168px;
+    height: auto;
+    max-height: 108px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    background: #000;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+    display: block;
+}
+
+.seek-preview__time {
+    background: rgba(28, 28, 28, 0.9);
     color: #fff;
     font-size: 12px;
-    padding: 4px 6px;
+    padding: 3px 7px;
     border-radius: 6px;
-    pointer-events: none;
     white-space: nowrap;
-    z-index: 5;
+    font-variant-numeric: tabular-nums;
 }
 </style>
