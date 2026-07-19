@@ -434,21 +434,81 @@ pub(crate) async fn analyze_frame_for_enhance(
 // per local file into a per-file cache dir; the seek bar reads the nearest one
 // on hover. Generation is fire-and-forget and deduplicated per path.
 
-const SEEK_THUMB_COUNT: u32 = 120;
+// Adaptive: one frame every N seconds (configurable), clamped so short clips
+// still get a few and very long files don't generate thousands.
+const SEEK_THUMB_DEFAULT_INTERVAL: f64 = 25.0;
+const SEEK_THUMB_MIN: u32 = 40;
+const SEEK_THUMB_MAX: u32 = 400;
+// Keep at most this many per-file thumbnail caches; evict the oldest beyond it.
+const SEEK_THUMB_MAX_CACHES: usize = 40;
 
-fn seek_thumb_cache_dir(app: &tauri::AppHandle, path: &str) -> Result<PathBuf, String> {
-    use std::hash::{Hash, Hasher};
+fn seek_thumb_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     use tauri::Manager;
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    path.hash(&mut hasher);
-    let key = format!("{:016x}", hasher.finish());
-    let base = app
+    Ok(app
         .path()
         .app_cache_dir()
         .map_err(|e| e.to_string())?
-        .join("seek_thumbs")
-        .join(key);
-    Ok(base)
+        .join("seek_thumbs"))
+}
+
+fn seek_thumb_interval(app: &tauri::AppHandle) -> f64 {
+    crate::store::ui_state_store::load_setting_value(app, "SEEK_THUMB_INTERVAL")
+        .ok()
+        .flatten()
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|v| *v > 0.0)
+        .unwrap_or(SEEK_THUMB_DEFAULT_INTERVAL)
+}
+
+fn seek_thumbnails_enabled(app: &tauri::AppHandle) -> bool {
+    crate::store::ui_state_store::load_setting_value(app, "SEEK_THUMBNAILS_ENABLED")
+        .ok()
+        .flatten()
+        .map(|v| v.trim() != "Off")
+        .unwrap_or(true)
+}
+
+// Cache dir keyed by path + interval, so changing the interval regenerates.
+fn seek_thumb_cache_dir(
+    app: &tauri::AppHandle,
+    path: &str,
+    interval: f64,
+) -> Result<PathBuf, String> {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    path.hash(&mut hasher);
+    (interval.round() as i64).hash(&mut hasher);
+    let key = format!("{:016x}", hasher.finish());
+    Ok(seek_thumb_root(app)?.join(key))
+}
+
+// Evict oldest per-file caches once we exceed the cap (by directory mtime).
+fn prune_seek_thumb_caches(app: &tauri::AppHandle) {
+    let Ok(root) = seek_thumb_root(app) else {
+        return;
+    };
+    let Ok(entries) = std::fs::read_dir(&root) else {
+        return;
+    };
+    let mut dirs: Vec<(std::time::SystemTime, PathBuf)> = entries
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .map(|e| {
+            let mtime = e
+                .metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::UNIX_EPOCH);
+            (mtime, e.path())
+        })
+        .collect();
+    if dirs.len() <= SEEK_THUMB_MAX_CACHES {
+        return;
+    }
+    dirs.sort_by_key(|(mtime, _)| *mtime);
+    let remove = dirs.len() - SEEK_THUMB_MAX_CACHES;
+    for (_, path) in dirs.into_iter().take(remove) {
+        let _ = std::fs::remove_dir_all(&path);
+    }
 }
 
 static SEEK_THUMB_INFLIGHT: std::sync::Mutex<Option<std::collections::HashSet<String>>> =
@@ -470,10 +530,16 @@ pub(crate) fn generate_seek_thumbnails(
     path: String,
     duration: f64,
 ) -> Result<(), String> {
-    if path.trim().is_empty() || duration <= 0.0 || !is_local_media(&path) {
+    if path.trim().is_empty()
+        || duration <= 0.0
+        || !is_local_media(&path)
+        || !seek_thumbnails_enabled(&app)
+    {
         return Ok(());
     }
-    let dir = seek_thumb_cache_dir(&app, &path)?;
+    let interval = seek_thumb_interval(&app);
+    let dir = seek_thumb_cache_dir(&app, &path, interval)?;
+    let count = ((duration / interval).round() as u32).clamp(SEEK_THUMB_MIN, SEEK_THUMB_MAX);
 
     // Already generated? (a populated cache dir)
     if std::fs::read_dir(&dir)
@@ -483,23 +549,26 @@ pub(crate) fn generate_seek_thumbnails(
         return Ok(());
     }
 
-    // Deduplicate concurrent/repeat generation for the same path.
+    prune_seek_thumb_caches(&app);
+
+    // Deduplicate concurrent/repeat generation for the same cache.
+    let inflight_key = dir.to_string_lossy().to_string();
     {
         let mut guard = SEEK_THUMB_INFLIGHT
             .lock()
             .map_err(|_| "thumb lock poisoned".to_string())?;
         let set = guard.get_or_insert_with(std::collections::HashSet::new);
-        if set.contains(&path) {
+        if set.contains(&inflight_key) {
             return Ok(());
         }
-        set.insert(path.clone());
+        set.insert(inflight_key.clone());
     }
 
     std::thread::spawn(move || {
-        let _ = crate::mpv::generate_thumbnails(&path, &dir, duration, SEEK_THUMB_COUNT);
+        let _ = crate::mpv::generate_thumbnails(&path, &dir, duration, count);
         if let Ok(mut guard) = SEEK_THUMB_INFLIGHT.lock() {
             if let Some(set) = guard.as_mut() {
-                set.remove(&path);
+                set.remove(&inflight_key);
             }
         }
     });
@@ -516,7 +585,7 @@ pub(crate) fn get_seek_thumbnail(
     if !is_local_media(&path) {
         return Ok(None);
     }
-    let dir = seek_thumb_cache_dir(&app, &path)?;
+    let dir = seek_thumb_cache_dir(&app, &path, seek_thumb_interval(&app))?;
     let mut files: Vec<PathBuf> = match std::fs::read_dir(&dir) {
         Ok(rd) => rd
             .flatten()

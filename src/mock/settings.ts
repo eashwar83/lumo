@@ -106,6 +106,8 @@ export const DISABLE_SUBTITLES_SETTING_LABEL = "DISABLE_SUBTITLES";
 export const AUTO_CROP_SETTING_LABEL = "AUTO_CROP_BLACK_BARS";
 export const AUTO_CROP_LIMIT_SETTING_LABEL = "AUTO_CROP_LIMIT";
 export const WINDOW_SIZE_LOCK_SETTING_LABEL = "WINDOW_SIZE_LOCK";
+export const SEEK_THUMBNAILS_ENABLED_SETTING_LABEL = "SEEK_THUMBNAILS_ENABLED";
+export const SEEK_THUMB_INTERVAL_SETTING_LABEL = "SEEK_THUMB_INTERVAL";
 export const AUTOLOAD_FOLDER_SETTING_LABEL = "AUTOLOAD_FOLDER";
 export const SCREENSHOT_DIR_SETTING_LABEL = "SCREENSHOT_DIR";
 export const OPENSUBTITLES_ENABLED_SETTING_LABEL = "OPENSUBTITLES_ENABLED";
@@ -493,6 +495,29 @@ export const defaultSettingGroups: SettingGroup[] = [
                 type: "path" as const,
                 placeholder: "Log path unavailable",
                 browseTitle: "Open log file folder",
+            },
+        ],
+    },
+    {
+        title: "Advanced",
+        items: [
+            {
+                label: SEEK_THUMBNAILS_ENABLED_SETTING_LABEL,
+                displayLabel: "Seek-Bar Thumbnails",
+                value: "On",
+                type: "toggle",
+                onValue: "On",
+                offValue: "Off",
+            },
+            {
+                label: SEEK_THUMB_INTERVAL_SETTING_LABEL,
+                displayLabel: "Thumbnail Interval",
+                value: "25",
+                type: "slider",
+                min: 5,
+                max: 120,
+                step: 5,
+                unit: "s",
             },
         ],
     },
