@@ -1,5 +1,71 @@
 # Changelog
 
+## [1.0.0-beta] - 2026-07-19 — Lumo
+
+First public beta of **Lumo**, a fork of [Soia](https://github.com/FengZeng/soia)
+rebuilt around a rich, per-video picture-quality and personalization workflow.
+Everything below is new in Lumo on top of the upstream player.
+
+### Picture quality & grading
+
+- **Auto Enhance** — one-press smart auto-correction. Samples the current frame
+  and automatically fixes levels (contrast), exposure (brightness), colour cast
+  (white balance), and dull colour (saturation), then fills the sliders so you
+  can fine-tune. Algorithmic — fast and reliable, no cloud, no wait.
+- **Colour grade** — GPU sliders for Exposure, Temperature, Tint, Highlights and
+  Shadows (alongside Brightness/Contrast/Saturation/Gamma/Hue).
+- **Sharpness** — GPU unsharp mask with independent Amount and Radius (crisp
+  edges through to a broad local-contrast / "HDR" glow). No decode penalty.
+- **Film Grain** — animated, luminance-aware GPU grain for a filmic texture.
+- **Denoise** and **Deinterlace** toggles for noisy / interlaced sources.
+- **Quality presets** (Fast / Balanced / High) for mpv's scaler and debanding.
+- **AI Upscaling** — one-click bundled Anime4K (anime) and ravu (live-action).
+
+### Looks & presets
+
+- **Presets** — 8 built-in looks (Punch, Warm, Cool, Vivid, Calm, B&W, B&W Warm,
+  Vintage) plus save-your-own named custom presets (a reusable library).
+- **Per-video memory** — the full look (brightness/contrast/saturation/gamma/hue
+  + colour grade + sharpen/denoise/deinterlace/grain) is remembered per file and
+  restored on reopen. A Reset button clears the current video's look; a Global
+  toggle applies one look to every video instead.
+
+### Seek-bar thumbnails
+
+- **Hover previews** on the seek bar. A background headless mpv instance
+  pre-renders frames per local file (no playback interruption), cached to disk.
+- **Adaptive & configurable** — one frame every N seconds (Settings → Advanced),
+  with an on/off toggle and automatic cache cleanup.
+
+### Favourites
+
+- Favourite videos while watching (top-bar heart, `B` shortcut), a Favourites
+  thumbnail-grid view, and a Favourites list in the playlist drawer so prev/next
+  can walk your favourites.
+
+### Window & framing
+
+- **Aspect-ratio cycle** (`E`): Default / 16:9 / 4:3 / 21:9 / 2.35:1, remembered
+  per file; the window auto-fits to remove letterboxing.
+- **Fit window to video** (`G`), remembered per file.
+- **Step window resize** (`Alt` +/−) keeping aspect.
+- **Window size lock** — keep one window size across all videos (toggleable).
+
+### Crop & playlist
+
+- **Auto-Crop Black Bars** with an adjustable black threshold for noisy / analog
+  sources; the detected crop is remembered per file.
+- **Auto-Load Folder to Playlist** — playing a local file loads its whole folder.
+
+### Shortcuts & polish
+
+- **Configurable keyboard shortcuts** — every action rebindable, with a live
+  help overlay.
+- **Screenshots** with a configurable folder (JPG fallback for builds without a
+  PNG encoder).
+- Faster cold start; telemetry / auto-updater phone-home removed.
+- The installer no longer ticks "Create desktop shortcut" by default.
+
 ## [0.2.8] - 2026-07-11
 
 ### Features

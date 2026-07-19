@@ -1,6 +1,6 @@
 [package]
 name = "lumo"
-version = "0.2.9"
+version = "1.0.0"
 description = "Lumo — a modern mpv-based video player"
 license = "GPL-3.0-only"
 authors = ["FengZeng"]

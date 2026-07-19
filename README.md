@@ -51,19 +51,74 @@
 
 ## 🚀 What's new in Lumo
 
-Lumo adds a set of enhancements on top of the upstream Soia player:
+Lumo rebuilds the upstream Soia player around a rich, **per-video** picture-
+quality and personalization workflow. Everything below is new in Lumo.
 
-- **Configurable keyboard shortcuts** — every player action is rebindable from
-  Settings → Keyboard Shortcuts (chord capture with modifiers, conflict
-  handling, and a live help overlay).
-- **Auto-Crop Black Bars** — mpv `cropdetect` → `video-crop`, with fit-window-to-
-  video and manual crop shortcuts (`C` / `Shift+C`).
+### 🎨 Picture quality & grading
+
+Open the **Video** popover (gear icon) in the player bar.
+
+- **Auto Enhance** — one press samples the current frame and automatically fixes
+  levels (contrast), exposure (brightness), colour cast (white balance), and
+  dull colour (saturation), filling the sliders so you can fine-tune.
+  Algorithmic — fast and reliable, no cloud, no wait.
+- **Colour grade** — GPU sliders for **Exposure, Temperature, Tint, Highlights,
+  Shadows**, alongside Brightness / Contrast / Saturation / Gamma / Hue.
+- **Sharpness** — GPU unsharp mask with independent **Amount** and **Radius**
+  (crisp edges → broad local-contrast / "HDR" glow), with no decode penalty.
+- **Film Grain** — animated, luminance-aware GPU grain for a filmic texture.
+- **Denoise** / **Deinterlace** toggles for noisy or interlaced sources.
+- **Quality presets** (Fast / Balanced / High) for mpv's scaler and debanding.
+- **AI Upscaling** — one-click bundled **Anime4K** (anime) and **ravu**
+  (live-action) upscalers.
+
+### 🎞 Looks & presets
+
+- **Presets** — 8 built-in looks (Punch, Warm, Cool, Vivid, Calm, B&W, B&W Warm,
+  Vintage) plus **save your own** named custom presets (a reusable library).
+- **Per-video memory** — the full look (brightness/contrast/saturation/gamma/hue
+  + colour grade + sharpen/denoise/deinterlace/grain) is remembered **per file**
+  and restored on reopen. A **Reset** button clears the current video's look; a
+  **Global** toggle applies one look to every video instead.
+
+### ⏱ Seek-bar thumbnails
+
+- **Hover previews** on the seek bar, pre-rendered in the background per local
+  file (no playback interruption) and cached to disk.
+- **Adaptive & configurable** — a frame every N seconds (Settings → Advanced),
+  with an on/off toggle and automatic cache cleanup.
+
+### ❤️ Favourites
+
+- Favourite videos while watching (top-bar heart, `B` shortcut), a **Favourites**
+  thumbnail-grid view, and a Favourites list in the playlist drawer so prev/next
+  can walk your favourites.
+
+### 🖼 Window & framing
+
+- **Aspect-ratio cycle** (`E`): Default / 16:9 / 4:3 / 21:9 / 2.35:1, remembered
+  per file; the window auto-fits to remove letterboxing.
+- **Fit window to video** (`G`), remembered per file.
+- **Step window resize** (`Alt` +/−) keeping aspect, and a **window size lock**
+  to keep one size across all videos (toggleable).
+
+### ✂️ Crop, playlist & shortcuts
+
+- **Auto-Crop Black Bars** — mpv `cropdetect` → `video-crop`, with an adjustable
+  black threshold for noisy/analog sources; the detected crop is remembered per
+  file. Manual crop shortcuts (`C` / `Shift+C`).
 - **Auto-Load Folder to Playlist** — playing a local file loads its whole folder
-  into the playlist so prev/next walk the folder sequence.
-- **Faster cold start** — the startup auth/update ping is non-blocking and
-  network discovery is deferred, cutting launch time dramatically.
-- **No phone-home** — the upstream startup telemetry ping and auto-updater have
-  been removed.
+  so prev/next walk the folder sequence.
+- **Configurable keyboard shortcuts** — every action rebindable from Settings →
+  Keyboard Shortcuts, with a live help overlay.
+- **Screenshots** with a configurable folder.
+
+### ⚡ Under the hood
+
+- **Faster cold start** — non-blocking startup ping and deferred network
+  discovery.
+- **No phone-home** — the upstream telemetry ping and auto-updater have been
+  removed.
 
 ## Install
 
