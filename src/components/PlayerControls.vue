@@ -84,6 +84,7 @@ const emit = defineEmits<{
     (e: "set-global-color-adjustments-enabled", enabled: boolean): void;
     (e: "auto-enhance"): void;
     (e: "reset-video-settings"): void;
+    (e: "open-curves"): void;
     (e: "select-audio", track: MediaTrack): void;
     (e: "select-sub-track", payload: { target: SubtitleTarget; track: MediaTrack }): void;
     (e: "set-active-sub-target", target: SubtitleTarget): void;
@@ -313,6 +314,7 @@ onUnmounted(() => {
                         "
                         @auto-enhance="emit('auto-enhance')"
                         @reset-video-settings="emit('reset-video-settings')"
+                        @open-curves="emit('open-curves')"
                         @select-audio="emit('select-audio', $event)"
                         @select-sub-track="emit('select-sub-track', $event)"
                         @set-active-sub-target="emit('set-active-sub-target', $event)"

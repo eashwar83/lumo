@@ -1,5 +1,10 @@
 import { onMounted, reactive } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import {
+    buildCurvesLut,
+    isIdentityCurves,
+    parseCurves,
+} from "../utils/curves";
 import { createDebouncedUiStateSaver, loadUiState } from "./useUiStateStore";
 
 // Video-quality enhancements driven entirely through the existing mpv bridge
@@ -47,6 +52,7 @@ export type StoredVideoEnhancements = {
     highlights?: number;
     shadows?: number;
     grain?: number;
+    curves?: string;
 };
 
 export type VideoEnhancementsState = {
@@ -65,6 +71,8 @@ export type VideoEnhancementsState = {
     shadows: number;
     /** Film grain intensity, 0..100. */
     grain: number;
+    /** RGB tone curves, serialized (empty = identity). */
+    curves: string;
 };
 
 // mpv gpu renderer properties per preset. All are runtime-changeable, so the
@@ -117,6 +125,7 @@ const DEFAULT_STATE: VideoEnhancementsState = {
     highlights: 0,
     shadows: 0,
     grain: 0,
+    curves: "",
 };
 
 const clamp = (value: number, min: number, max: number) =>
@@ -148,6 +157,7 @@ type LookState = {
     highlights: number;
     shadows: number;
     grain: number;
+    curves: string;
 };
 
 const DEFAULT_LOOK: LookState = {
@@ -161,6 +171,7 @@ const DEFAULT_LOOK: LookState = {
     highlights: 0,
     shadows: 0,
     grain: 0,
+    curves: "",
 };
 
 const PER_FILE_LOOK_MAX = 300;
@@ -201,6 +212,7 @@ export const useVideoEnhancements = (options: VideoEnhancementsOptions = {}) => 
         highlights: state.highlights,
         shadows: state.shadows,
         grain: state.grain,
+        curves: state.curves,
     });
 
     const writeLook = (look: LookState) => {
@@ -214,6 +226,7 @@ export const useVideoEnhancements = (options: VideoEnhancementsOptions = {}) => 
         state.highlights = look.highlights;
         state.shadows = look.shadows;
         state.grain = look.grain;
+        state.curves = look.curves;
     };
 
     const setProp = async (name: string, value: string) => {
@@ -360,6 +373,36 @@ export const useVideoEnhancements = (options: VideoEnhancementsOptions = {}) => 
         persistLook();
     };
 
+    // RGB tone curves: bake the combined LUT and hand it to the GPU shader
+    // (empty LUT = identity = cleared).
+    const applyCurves = async () => {
+        const curves = parseCurves(state.curves);
+        const lut = isIdentityCurves(curves)
+            ? []
+            : Array.from(buildCurvesLut(curves));
+        try {
+            await invoke("apply_curves_shader", { lut });
+        } catch (error) {
+            console.warn("[enhance] apply curves failed", error);
+        }
+    };
+
+    let curvesTimer: number | null = null;
+    const scheduleCurves = () => {
+        if (curvesTimer) window.clearTimeout(curvesTimer);
+        curvesTimer = window.setTimeout(() => {
+            curvesTimer = null;
+            void applyCurves();
+        }, 40);
+    };
+
+    // `json` is the serialized curves ("" = identity).
+    const setCurves = (json: string) => {
+        state.curves = json;
+        scheduleCurves();
+        persistLook();
+    };
+
     // Only the denoise (hqdn3d) lavfi filter needs software frames now, so hwdec
     // copy-back is tied to denoise alone; sharpening is GPU and stays hw-decoded.
     const syncHwdec = async () => {
@@ -460,6 +503,7 @@ export const useVideoEnhancements = (options: VideoEnhancementsOptions = {}) => 
         await applySharpen();
         await applyColorGrade();
         await applyGrain();
+        await applyCurves();
     };
 
     // Load the look for a file (per-file entry, or the global look when Global is
@@ -502,6 +546,7 @@ export const useVideoEnhancements = (options: VideoEnhancementsOptions = {}) => 
         highlights: clamp(Math.round(stored.highlights ?? 0), -100, 100),
         shadows: clamp(Math.round(stored.shadows ?? 0), -100, 100),
         grain: clamp(Math.round(stored.grain ?? 0), 0, 100),
+        curves: typeof stored.curves === "string" ? stored.curves : "",
     });
 
     const load = async (
@@ -573,6 +618,7 @@ export const useVideoEnhancements = (options: VideoEnhancementsOptions = {}) => 
         setAiUpscale,
         setColorGrade,
         setGrain,
+        setCurves,
         setMessageHandler,
         onFileLoaded,
         applyLookForMedia,

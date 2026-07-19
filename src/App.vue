@@ -27,6 +27,7 @@ import { useAutoCrop } from "./composables/useAutoCrop";
 import { useVideoGeometry } from "./composables/useVideoGeometry";
 import { useWindowSizeLock } from "./composables/useWindowSizeLock";
 import { useVideoPresets } from "./composables/useVideoPresets";
+import CurvesPanel from "./components/CurvesPanel.vue";
 import { useAutoloadFolder } from "./composables/useAutoloadFolder";
 import { usePlaybackFlow } from "./composables/usePlaybackFlow";
 import { useAppUiPersistence } from "./composables/useAppUiPersistence";
@@ -278,6 +279,7 @@ const { onSeek, onSeekRelative } = usePlaybackSeekActions({
 });
 
 const isShortcutsHelpOpen = ref(false);
+const isCurvesOpen = ref(false);
 const isAlwaysOnTop = ref(false);
 const areSubtitlesVisible = ref(true);
 
@@ -1148,6 +1150,7 @@ useAppStartupBindings({
             @set-global-color-adjustments-enabled="onSetGlobalColorAdjustments"
             @auto-enhance="onAutoEnhance"
             @reset-video-settings="onResetVideoSettings"
+            @open-curves="isCurvesOpen = true"
             @select-audio="tracks.selectAudio"
             @select-sub-track="tracks.selectSubTrack"
             @set-active-sub-target="tracks.setActiveSubTarget"
@@ -1250,6 +1253,12 @@ useAppStartupBindings({
             :open="isShortcutsHelpOpen"
             :bindings="shortcutBindings"
             @close="isShortcutsHelpOpen = false"
+        />
+
+        <CurvesPanel
+            :enhancements="enhancements"
+            :visible="isCurvesOpen"
+            @close="isCurvesOpen = false"
         />
 
         <WindowResizeRegions

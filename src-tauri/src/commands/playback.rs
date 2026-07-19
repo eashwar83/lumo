@@ -644,6 +644,88 @@ pub(crate) fn get_seek_thumbnail(
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct FrameHistogram {
+    r: Vec<f64>,
+    g: Vec<f64>,
+    b: Vec<f64>,
+    luma: Vec<f64>,
+}
+
+// Per-channel 256-bin histogram of the current frame (for the curves editor).
+// Each bin is normalised 0..1 against that channel's peak.
+#[tauri::command]
+pub(crate) async fn capture_frame_histogram(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<FrameHistogram, String> {
+    use tauri::Manager;
+
+    let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
+    let sample = cache_dir.join("curves_sample.jpg");
+    let sample_str = sample.to_string_lossy().to_string();
+
+    let mpv_player = state.mpv_player.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _ = std::fs::remove_file(&sample_str);
+        {
+            let mpv_guard = mpv_player.lock().map_err(|e| e.to_string())?;
+            mpv_command_checked(
+                &mpv_guard,
+                &["screenshot-to-file", &sample_str, "video"],
+            )?;
+        }
+        let file = std::fs::File::open(&sample_str)
+            .map_err(|e| format!("Could not read frame sample: {e}"))?;
+        let decoder = image::codecs::jpeg::JpegDecoder::new(std::io::BufReader::new(file))
+            .map_err(|e| format!("Could not decode frame: {e}"))?;
+        let rgb = image::DynamicImage::from_decoder(decoder)
+            .map_err(|e| format!("Could not read frame pixels: {e}"))?
+            .to_rgb8();
+        let _ = std::fs::remove_file(&sample_str);
+
+        let (w, h) = rgb.dimensions();
+        if w == 0 || h == 0 {
+            return Err("Empty frame".to_string());
+        }
+        let total = (w as u64) * (h as u64);
+        let step = ((total / 200_000).max(1)) as usize;
+
+        let mut hr = [0u64; 256];
+        let mut hg = [0u64; 256];
+        let mut hb = [0u64; 256];
+        let mut hl = [0u64; 256];
+        for (i, px) in rgb.pixels().enumerate() {
+            if i % step != 0 {
+                continue;
+            }
+            hr[px[0] as usize] += 1;
+            hg[px[1] as usize] += 1;
+            hb[px[2] as usize] += 1;
+            let luma = (0.299 * px[0] as f64 + 0.587 * px[1] as f64 + 0.114 * px[2] as f64)
+                .round()
+                .clamp(0.0, 255.0) as usize;
+            hl[luma] += 1;
+        }
+
+        let normalize = |bins: [u64; 256]| -> Vec<f64> {
+            let peak = bins.iter().copied().max().unwrap_or(1).max(1) as f64;
+            bins.iter().map(|&c| c as f64 / peak).collect()
+        };
+
+        Ok(FrameHistogram {
+            r: normalize(hr),
+            g: normalize(hg),
+            b: normalize(hb),
+            luma: normalize(hl),
+        })
+    })
+    .await
+    .map_err(|e| format!("Histogram task failed: {e}"))?
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct RuntimeVersions {
     soia_version: String,
     mpv_version: Option<String>,

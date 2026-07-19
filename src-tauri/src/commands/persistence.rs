@@ -560,6 +560,7 @@ struct GlslLayers {
     manual: Vec<String>,
     upscale: Vec<String>,
     grade: Vec<String>,
+    curves: Vec<String>,
     sharpen: Vec<String>,
     grain: Vec<String>,
 }
@@ -568,15 +569,17 @@ static GLSL_LAYERS: std::sync::Mutex<GlslLayers> = std::sync::Mutex::new(GlslLay
     manual: Vec::new(),
     upscale: Vec::new(),
     grade: Vec::new(),
+    curves: Vec::new(),
     sharpen: Vec::new(),
     grain: Vec::new(),
 });
 
 fn rebuild_combined_glsl(mpv_guard: &crate::mpv::MpvHandle) -> Result<(), String> {
     let layers = GLSL_LAYERS.lock().map_err(|_| "glsl layer lock poisoned".to_string())?;
-    // Order: upscale -> grade (colour) -> sharpen -> grain (final) -> manual.
+    // Order: upscale -> grade -> curves (colour) -> sharpen -> grain -> manual.
     let mut combined = layers.upscale.clone();
     combined.extend(layers.grade.iter().cloned());
+    combined.extend(layers.curves.iter().cloned());
     combined.extend(layers.sharpen.iter().cloned());
     combined.extend(layers.grain.iter().cloned());
     combined.extend(layers.manual.iter().cloned());
@@ -755,6 +758,56 @@ fn write_grain_shader(app: &tauri::AppHandle, amount: f64) -> Result<String, Str
     let seq = GRAIN_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let path = dir.join(format!("lumo_grain_{seq}.glsl"));
     std::fs::write(&path, grain_shader_source(amount)).map_err(|err| err.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+// RGB tone-curve shader. The frontend bakes a 256-entry combined LUT (RGBA8,
+// 1024 bytes); we embed it as an mpv //!TEXTURE and remap each channel through
+// it. LINEAR filtering smooths between LUT entries.
+fn curves_shader_source(lut: &[u8]) -> String {
+    let mut hex = String::with_capacity(lut.len() * 2);
+    for byte in lut {
+        hex.push_str(&format!("{byte:02x}"));
+    }
+    format!(
+        "//!TEXTURE LUMO_CURVES\n\
+//!SIZE 256 1\n\
+//!FORMAT rgba8\n\
+//!FILTER LINEAR\n\
+//!BORDER CLAMP\n\
+{hex}\n\
+\n\
+//!HOOK MAIN\n\
+//!BIND HOOKED\n\
+//!BIND LUMO_CURVES\n\
+//!DESC Lumo curves\n\
+vec4 hook() {{\n\
+    vec4 c = HOOKED_tex(HOOKED_pos);\n\
+    c.r = LUMO_CURVES_tex(vec2(clamp(c.r, 0.0, 1.0), 0.5)).r;\n\
+    c.g = LUMO_CURVES_tex(vec2(clamp(c.g, 0.0, 1.0), 0.5)).g;\n\
+    c.b = LUMO_CURVES_tex(vec2(clamp(c.b, 0.0, 1.0), 0.5)).b;\n\
+    return vec4(clamp(c.rgb, 0.0, 1.0), c.a);\n\
+}}\n"
+    )
+}
+
+static CURVES_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn write_curves_shader(app: &tauri::AppHandle, lut: &[u8]) -> Result<String, String> {
+    let dir = app.path().app_cache_dir().map_err(|err| err.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with("lumo_curves") && name.ends_with(".glsl") {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+    let seq = CURVES_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let path = dir.join(format!("lumo_curves_{seq}.glsl"));
+    std::fs::write(&path, curves_shader_source(lut)).map_err(|err| err.to_string())?;
     Ok(path.to_string_lossy().into_owned())
 }
 
@@ -1007,6 +1060,29 @@ pub(crate) fn apply_grain_shader(
             .lock()
             .map_err(|_| "glsl layer lock poisoned".to_string())?;
         layers.grain = grain;
+    }
+    with_mpv(&state, |mpv_guard| rebuild_combined_glsl(mpv_guard))?;
+    Ok(())
+}
+
+// RGB tone curves. An empty (or non-1024-byte) LUT clears the curves; otherwise
+// the baked LUT is embedded in a shader and loaded as the curves layer.
+#[tauri::command]
+pub(crate) fn apply_curves_shader(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    lut: Vec<u8>,
+) -> Result<(), String> {
+    let curves = if lut.len() == 256 * 4 {
+        vec![write_curves_shader(&app, &lut)?]
+    } else {
+        Vec::new()
+    };
+    {
+        let mut layers = GLSL_LAYERS
+            .lock()
+            .map_err(|_| "glsl layer lock poisoned".to_string())?;
+        layers.curves = curves;
     }
     with_mpv(&state, |mpv_guard| rebuild_combined_glsl(mpv_guard))?;
     Ok(())

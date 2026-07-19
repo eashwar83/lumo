@@ -81,6 +81,7 @@ const emit = defineEmits<{
     (e: "set-global-color-adjustments-enabled", enabled: boolean): void;
     (e: "auto-enhance"): void;
     (e: "reset-video-settings"): void;
+    (e: "open-curves"): void;
     (e: "select-audio", track: MediaTrack): void;
     (e: "select-sub-track", payload: { target: SubtitleTarget; track: MediaTrack }): void;
     (e: "set-active-sub-target", target: SubtitleTarget): void;
@@ -1073,7 +1074,16 @@ watch(
                         />
 
                         <div class="enh">
-                            <div class="enh__heading">Colour grade</div>
+                            <div class="enh__seg-row">
+                                <span class="enh__heading">Colour grade</span>
+                                <button
+                                    class="curves-open-btn"
+                                    type="button"
+                                    @click.stop="emit('open-curves')"
+                                >
+                                    Curves…
+                                </button>
+                            </div>
                             <ControlSlider
                                 v-for="grade in COLOR_GRADE_CONTROLS"
                                 :key="grade.key"
@@ -1473,6 +1483,22 @@ watch(
 
 .track-menu__mode-switch--on .track-menu__mode-thumb {
     transform: translateX(12px);
+}
+
+.curves-open-btn {
+    border: 1px solid rgba(143, 179, 255, 0.4);
+    background: rgba(143, 179, 255, 0.14);
+    color: #cbd9ff;
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.curves-open-btn:hover {
+    background: rgba(143, 179, 255, 0.28);
 }
 
 .auto-enhance-btn {

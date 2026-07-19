@@ -262,6 +262,10 @@ pub struct VideoEnhancementsState {
     pub highlights: Option<f64>,
     #[serde(default)]
     pub shadows: Option<f64>,
+    #[serde(default)]
+    pub grain: Option<f64>,
+    #[serde(default)]
+    pub curves: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -322,8 +326,6 @@ pub struct VideoPresetValues {
     pub highlights: Option<f64>,
     #[serde(default)]
     pub shadows: Option<f64>,
-    #[serde(default)]
-    pub grain: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -335,7 +337,7 @@ pub struct CustomVideoPreset {
     pub values: VideoPresetValues,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Default)]
+#[derive(Serialize, Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct PerFileEnhance {
     #[serde(default)]
@@ -358,6 +360,8 @@ pub struct PerFileEnhance {
     pub shadows: Option<f64>,
     #[serde(default)]
     pub grain: Option<f64>,
+    #[serde(default)]
+    pub curves: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
