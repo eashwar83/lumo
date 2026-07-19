@@ -193,12 +193,11 @@ export type ChannelHistograms = {
     luma: number[];
 };
 
-// Find the black/white input points (in 0..1) of a histogram by clipping a
-// small percentage at each end. Bins may be peak-normalised; the CDF ratio is
-// scale-invariant so that's fine.
+// Black/white input points (0..1) by clipping a small % at each end. Bins may
+// be peak-normalised; the CDF ratio is scale-invariant so that's fine.
 const channelLevels = (
     bins: number[],
-    clip = 0.004,
+    clip = 0.0025,
 ): { black: number; white: number } => {
     const n = bins.length;
     const total = bins.reduce((a, b) => a + b, 0) || 1;
@@ -224,32 +223,102 @@ const channelLevels = (
     return { black, white };
 };
 
-// A levels-stretch curve mapping [black, white] -> [0, 1], as editable control
-// points (endpoints pinned at the corners).
-const levelsPoints = (black: number, white: number): CurvePoint[] => {
-    const pts: CurvePoint[] = [{ x: 0, y: 0 }];
-    if (black > 0.012) pts.push({ x: Math.min(black, 0.85), y: 0 });
-    if (white < 0.988 && white > black + 0.06) {
-        pts.push({ x: Math.max(white, 0.15), y: 1 });
+// Mean of a histogram (0..1). Peak-normalisation cancels in the ratio.
+const histogramMean = (bins: number[]): number => {
+    const n = bins.length;
+    let sum = 0;
+    let weight = 0;
+    for (let i = 0; i < n; i++) {
+        sum += bins[i] * i;
+        weight += bins[i];
     }
-    pts.push({ x: 1, y: 1 });
-    return pts.length >= 2 ? pts : identityPoints();
+    return weight > 0 ? sum / weight / (n - 1) : 0.5;
 };
 
-// Photoshop-style "auto colour": stretch each channel to its own black/white
-// points — this both boosts contrast and neutralises colour casts. The master
-// (RGB) curve is left identity so the per-channel work isn't doubled.
-export const autoCurvesFromHistogram = (
-    hist: ChannelHistograms,
-): Curves => {
-    const r = channelLevels(hist.r);
-    const g = channelLevels(hist.g);
-    const b = channelLevels(hist.b);
+const median01 = (bins: number[]): number => {
+    const n = bins.length;
+    const total = bins.reduce((a, b) => a + b, 0) || 1;
+    let acc = 0;
+    for (let i = 0; i < n; i++) {
+        acc += bins[i];
+        if (acc / total >= 0.5) return i / (n - 1);
+    }
+    return 0.5;
+};
+
+// A gentle "auto" grade: contrast + brightness via a luma curve on the MASTER
+// channel (preserves hue), plus a soft gray-world white balance on R/G/B. Every
+// adjustment is applied partway and clamped, so it lifts a flat/cast video
+// without overcooking. Videos already well-graded barely change.
+export const autoCurvesFromHistogram = (hist: ChannelHistograms): Curves => {
+    const CONTRAST_STRENGTH = 0.6; // how far to pull black/white toward the clip
+    const GAMMA_STRENGTH = 0.3; // how far to nudge the midtone toward 0.5
+    const WB_STRENGTH = 0.5; // how much of a colour cast to remove
+    const WB_MIN = 0.86;
+    const WB_MAX = 1.16;
+
+    // --- Master: luma contrast + midtone lift ---
+    const lum = channelLevels(hist.luma);
+    const black = lum.black * CONTRAST_STRENGTH;
+    const white = 1 - (1 - lum.white) * CONTRAST_STRENGTH;
+    const span = Math.max(0.05, white - black);
+
+    const master: CurvePoint[] = [{ x: 0, y: 0 }];
+    if (black > 0.015) master.push({ x: Math.min(black, 0.4), y: 0 });
+
+    const median = median01(hist.luma);
+    if (median > 0.05 && median < 0.95) {
+        const mapped = Math.min(1, Math.max(0, (median - black) / span));
+        const targetY = mapped + (0.5 - mapped) * GAMMA_STRENGTH;
+        const midX = median;
+        const prevX = master[master.length - 1].x;
+        if (
+            midX > prevX + 0.04 &&
+            midX < white - 0.04 &&
+            Math.abs(targetY - mapped) > 0.015
+        ) {
+            master.push({
+                x: midX,
+                y: Math.min(0.97, Math.max(0.03, targetY)),
+            });
+        }
+    }
+
+    if (white < 0.985) master.push({ x: Math.max(white, 0.6), y: 1 });
+    master.push({ x: 1, y: 1 });
+
+    // --- Per-channel: gentle gray-world white balance (gain) ---
+    const meanR = histogramMean(hist.r);
+    const meanG = histogramMean(hist.g);
+    const meanB = histogramMean(hist.b);
+    const target = (meanR + meanG + meanB) / 3 || 0.5;
+
+    const gain = (mean: number): number => {
+        if (mean <= 0.02) return 1;
+        const factor = 1 + WB_STRENGTH * (target / mean - 1);
+        return Math.min(WB_MAX, Math.max(WB_MIN, factor));
+    };
+    const gainCurve = (k: number): CurvePoint[] => {
+        if (Math.abs(k - 1) < 0.015) return identityPoints();
+        if (k > 1) {
+            const x1 = Math.min(0.995, 1 / k);
+            return [
+                { x: 0, y: 0 },
+                { x: x1, y: 1 },
+                { x: 1, y: 1 },
+            ];
+        }
+        return [
+            { x: 0, y: 0 },
+            { x: 1, y: k },
+        ];
+    };
+
     return {
-        rgb: identityPoints(),
-        r: levelsPoints(r.black, r.white),
-        g: levelsPoints(g.black, g.white),
-        b: levelsPoints(b.black, b.white),
+        rgb: master.length >= 2 ? master : identityPoints(),
+        r: gainCurve(gain(meanR)),
+        g: gainCurve(gain(meanG)),
+        b: gainCurve(gain(meanB)),
     };
 };
 
