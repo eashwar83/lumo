@@ -3,6 +3,7 @@ import { nextTick, onMounted, onUnmounted, ref } from "vue";
 import type { MediaTrack } from "../types/media";
 import type { SubtitleTarget } from "../composables/useSubtitleState";
 import type { VideoEnhancementsController } from "../composables/useVideoEnhancements";
+import type { VideoPresetsController } from "../composables/useVideoPresets";
 import SeekBar from "./player-controls/SeekBar.vue";
 import LeftControls from "./player-controls/LeftControls.vue";
 import RightControls from "./player-controls/RightControls.vue";
@@ -33,6 +34,7 @@ const props = defineProps<{
     hue: number;
     globalColorAdjustmentsEnabled: boolean;
     enhancements: VideoEnhancementsController;
+    videoPresets: VideoPresetsController;
     isLoopOne: boolean;
     audioTracks: MediaTrack[];
     showAudioMenu: boolean;
@@ -266,6 +268,7 @@ onUnmounted(() => {
                             globalColorAdjustmentsEnabled
                         "
                         :enhancements="enhancements"
+                        :video-presets="videoPresets"
                         :is-loop-one="isLoopOne"
                         :audio-tracks="audioTracks"
                         :show-audio-menu="showAudioMenu"

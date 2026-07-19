@@ -10,6 +10,10 @@ import type {
     QualityPreset,
     VideoEnhancementsController,
 } from "../../composables/useVideoEnhancements";
+import type {
+    VideoPreset,
+    VideoPresetsController,
+} from "../../composables/useVideoPresets";
 import {
     getAudioTrackDetails,
     getAudioTrackHoverTitle,
@@ -35,6 +39,7 @@ const props = defineProps<{
     hue: number;
     globalColorAdjustmentsEnabled: boolean;
     enhancements: VideoEnhancementsController;
+    videoPresets: VideoPresetsController;
     isLoopOne: boolean;
     audioTracks: MediaTrack[];
     showAudioMenu: boolean;
@@ -106,6 +111,23 @@ const COLOR_GRADE_CONTROLS: { key: ColorGradeKey; label: string }[] = [
     { key: "highlights", label: "Highlights" },
     { key: "shadows", label: "Shadows" },
 ];
+
+const presetSaving = ref(false);
+const presetName = ref("");
+const onApplyPreset = (item: VideoPreset) => {
+    void props.videoPresets.apply(item);
+};
+const onConfirmSavePreset = () => {
+    const name = presetName.value.trim();
+    if (!name) return;
+    props.videoPresets.saveCurrent(name);
+    presetName.value = "";
+    presetSaving.value = false;
+};
+const onCancelSavePreset = () => {
+    presetName.value = "";
+    presetSaving.value = false;
+};
 
 const autoEnhanceBusy = ref(false);
 const onAutoEnhanceClick = () => {
@@ -924,6 +946,71 @@ watch(
                             </svg>
                             <span>{{ autoEnhanceBusy ? "Enhancing…" : "Auto Enhance" }}</span>
                         </button>
+
+                        <div class="presets">
+                            <div class="presets__head">
+                                <span class="enh__heading">Presets</span>
+                                <button
+                                    v-if="!presetSaving"
+                                    class="presets__save-toggle"
+                                    type="button"
+                                    @click.stop="presetSaving = true"
+                                >
+                                    + Save
+                                </button>
+                            </div>
+                            <div
+                                v-if="presetSaving"
+                                class="presets__save-row"
+                            >
+                                <input
+                                    v-model="presetName"
+                                    class="presets__input"
+                                    type="text"
+                                    placeholder="Preset name"
+                                    maxlength="24"
+                                    @keydown.enter.stop="onConfirmSavePreset"
+                                    @keydown.stop
+                                />
+                                <button
+                                    class="presets__btn presets__btn--ok"
+                                    type="button"
+                                    @click.stop="onConfirmSavePreset"
+                                >
+                                    Save
+                                </button>
+                                <button
+                                    class="presets__btn"
+                                    type="button"
+                                    @click.stop="onCancelSavePreset"
+                                >
+                                    ✕
+                                </button>
+                            </div>
+                            <div class="presets__grid">
+                                <div
+                                    v-for="item in props.videoPresets.allPresets.value"
+                                    :key="item.id"
+                                    class="presets__chip"
+                                    role="button"
+                                    tabindex="0"
+                                    @click.stop="onApplyPreset(item)"
+                                    @keydown.enter.stop="onApplyPreset(item)"
+                                >
+                                    <span class="presets__chip-name">{{ item.name }}</span>
+                                    <button
+                                        v-if="!item.builtIn"
+                                        class="presets__chip-del"
+                                        type="button"
+                                        aria-label="Delete preset"
+                                        @click.stop="props.videoPresets.remove(item.id)"
+                                    >
+                                        ✕
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
                         <ControlSlider
                             label="Brightness"
                             :value="brightness"
@@ -1408,6 +1495,112 @@ watch(
     width: 16px;
     height: 16px;
     color: #8fb3ff;
+}
+
+/* --- Presets --- */
+.presets {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.presets__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.presets__save-toggle {
+    border: none;
+    background: transparent;
+    color: #8fb3ff;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 6px;
+}
+
+.presets__save-toggle:hover {
+    background: rgba(143, 179, 255, 0.16);
+}
+
+.presets__save-row {
+    display: flex;
+    gap: 6px;
+}
+
+.presets__input {
+    flex: 1 1 auto;
+    min-width: 0;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 7px;
+    color: #fff;
+    font-size: 12.5px;
+    padding: 6px 8px;
+    outline: none;
+}
+
+.presets__input:focus {
+    border-color: rgba(143, 179, 255, 0.6);
+}
+
+.presets__btn {
+    border: none;
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.9);
+    border-radius: 7px;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.presets__btn--ok {
+    background: #8fb3ff;
+    color: #10233f;
+}
+
+.presets__grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.presets__chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: rgba(255, 255, 255, 0.09);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 999px;
+    padding: 5px 11px;
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.92);
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.presets__chip:hover {
+    background: rgba(143, 179, 255, 0.2);
+    border-color: rgba(143, 179, 255, 0.45);
+}
+
+.presets__chip-del {
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 11px;
+    line-height: 1;
+    padding: 0;
+    cursor: pointer;
+}
+
+.presets__chip-del:hover {
+    color: #ff6b8a;
 }
 
 /* --- Enhance section (video quality) --- */

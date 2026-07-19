@@ -26,6 +26,7 @@ import { usePlaybackShortcuts } from "./composables/usePlaybackShortcuts";
 import { useAutoCrop } from "./composables/useAutoCrop";
 import { useVideoGeometry } from "./composables/useVideoGeometry";
 import { useWindowSizeLock } from "./composables/useWindowSizeLock";
+import { useVideoPresets } from "./composables/useVideoPresets";
 import { useAutoloadFolder } from "./composables/useAutoloadFolder";
 import { usePlaybackFlow } from "./composables/usePlaybackFlow";
 import { useAppUiPersistence } from "./composables/useAppUiPersistence";
@@ -654,6 +655,36 @@ const onResetVideoSettings = async () => {
     showMessageOverlay("Video settings reset");
 };
 
+// Video-look presets (built-in + custom). Applying sets the current video's
+// colour look; saving snapshots it into a reusable named preset.
+const videoPresets = useVideoPresets({
+    applyValues: async (v) => {
+        await adjustments.setBrightness(v.brightness);
+        await adjustments.setContrast(v.contrast);
+        await adjustments.setSaturation(v.saturation);
+        await adjustments.setGamma(v.gamma);
+        await adjustments.setHue(v.hue);
+        enhancements.setColorGrade("exposure", v.exposure);
+        enhancements.setColorGrade("temperature", v.temperature);
+        enhancements.setColorGrade("tint", v.tint);
+        enhancements.setColorGrade("highlights", v.highlights);
+        enhancements.setColorGrade("shadows", v.shadows);
+    },
+    readCurrentValues: () => ({
+        brightness: adjustments.brightness.value,
+        contrast: adjustments.contrast.value,
+        saturation: adjustments.saturation.value,
+        gamma: adjustments.gamma.value,
+        hue: adjustments.hue.value,
+        exposure: enhancements.state.exposure,
+        temperature: enhancements.state.temperature,
+        tint: enhancements.state.tint,
+        highlights: enhancements.state.highlights,
+        shadows: enhancements.state.shadows,
+    }),
+    onApplied: (name) => showMessageOverlay(`Preset: ${name}`),
+});
+
 const onAutoEnhance = async () => {
     if (!player.state.media.isFileLoaded) return;
     showMessageOverlay("Auto Enhance…");
@@ -1063,6 +1094,7 @@ useAppStartupBindings({
                 adjustments.globalColorAdjustmentsEnabled.value
             "
             :enhancements="enhancements"
+            :video-presets="videoPresets"
             :is-loop-one="isLoopOne"
             :audio-tracks="tracks.audioTracks.value"
             :show-audio-menu="tracks.showAudioMenu.value"

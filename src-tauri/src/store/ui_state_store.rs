@@ -63,6 +63,8 @@ pub struct UiState {
         Option<std::collections::HashMap<String, PerFileColorAdjust>>,
     #[serde(default)]
     pub per_file_enhance: Option<std::collections::HashMap<String, PerFileEnhance>>,
+    #[serde(default)]
+    pub custom_video_presets: Option<Vec<CustomVideoPreset>>,
 }
 
 impl Default for UiState {
@@ -86,6 +88,7 @@ impl Default for UiState {
             window_locked_size: None,
             per_file_color_adjustments: None,
             per_file_enhance: None,
+            custom_video_presets: None,
         }
     }
 }
@@ -115,6 +118,9 @@ impl UiState {
                 .per_file_color_adjustments
                 .or(self.per_file_color_adjustments),
             per_file_enhance: incoming.per_file_enhance.or(self.per_file_enhance),
+            custom_video_presets: incoming
+                .custom_video_presets
+                .or(self.custom_video_presets),
         }
     }
 }
@@ -291,6 +297,40 @@ pub struct PerFileColorAdjust {
     pub gamma: Option<f64>,
     #[serde(default)]
     pub hue: Option<f64>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoPresetValues {
+    #[serde(default)]
+    pub brightness: Option<f64>,
+    #[serde(default)]
+    pub contrast: Option<f64>,
+    #[serde(default)]
+    pub saturation: Option<f64>,
+    #[serde(default)]
+    pub gamma: Option<f64>,
+    #[serde(default)]
+    pub hue: Option<f64>,
+    #[serde(default)]
+    pub exposure: Option<f64>,
+    #[serde(default)]
+    pub temperature: Option<f64>,
+    #[serde(default)]
+    pub tint: Option<f64>,
+    #[serde(default)]
+    pub highlights: Option<f64>,
+    #[serde(default)]
+    pub shadows: Option<f64>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomVideoPreset {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub values: VideoPresetValues,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Default)]
