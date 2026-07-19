@@ -252,11 +252,7 @@ pub(crate) async fn take_screenshot(
     std::fs::create_dir_all(&target_dir)
         .map_err(|error| format!("Failed to create screenshot folder: {error}"))?;
 
-    let mode = if include_subtitles.unwrap_or(true) {
-        "subtitles"
-    } else {
-        "video"
-    };
+    let want_subs = include_subtitles.unwrap_or(true);
     let mpv_player = state.mpv_player.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mpv_guard = mpv_player.lock().map_err(|error| error.to_string())?;
@@ -274,37 +270,70 @@ pub(crate) async fn take_screenshot(
             format_screenshot_position(position)
         );
 
-        // Prefer lossless PNG, but some libmpv/ffmpeg builds ship without the
-        // PNG encoder (screenshot-to-file then fails with "Could not open
-        // libavcodec encoder"). Fall back to JPG, which these builds support.
+        // For a clean (no-subtitle) shot at window resolution, hide subtitles
+        // for the capture, then restore. (window mode renders everything shown.)
+        let sub_backup = if !want_subs {
+            let prev = mpv_guard
+                .get_property_string("sub-visibility")
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "yes".to_string());
+            let _ = mpv_command_checked(&mpv_guard, &["set", "sub-visibility", "no"]);
+            // Let the frame redraw without subtitles before capturing.
+            std::thread::sleep(Duration::from_millis(90));
+            Some(prev)
+        } else {
+            None
+        };
+
+        // `window` captures the actual rendered output — window resolution WITH
+        // all GPU enhancements (colour grade, sharpen, upscale, grain) — instead
+        // of the small decoded source frame. Fall back to the source-resolution
+        // mode if the VO can't read back the window. PNG first, JPG fallback for
+        // builds whose ffmpeg lacks a PNG encoder.
+        let source_mode = if want_subs { "subtitles" } else { "video" };
+        let modes = ["window", source_mode];
+
         let mut last_error = "Failed to write screenshot".to_string();
-        for extension in ["png", "jpg"] {
-            let mut file_path = target_dir.join(format!("{stem}.{extension}"));
-            let mut counter = 2;
-            while file_path.exists() {
-                file_path = target_dir.join(format!("{stem} ({counter}).{extension}"));
-                counter += 1;
-            }
-            let file_path_str = file_path.to_string_lossy().to_string();
-            match mpv_command_checked(&mpv_guard, &["screenshot-to-file", &file_path_str, mode]) {
-                Ok(()) => {
-                    let file_name = file_path
-                        .file_name()
-                        .map(|name| name.to_string_lossy().to_string())
-                        .unwrap_or_else(|| file_path_str.clone());
-                    return Ok(ScreenshotResult {
-                        path: file_path_str,
-                        file_name,
-                    });
+        let mut result: Option<ScreenshotResult> = None;
+        'capture: for mode in modes {
+            for extension in ["png", "jpg"] {
+                let mut file_path = target_dir.join(format!("{stem}.{extension}"));
+                let mut counter = 2;
+                while file_path.exists() {
+                    file_path = target_dir.join(format!("{stem} ({counter}).{extension}"));
+                    counter += 1;
                 }
-                Err(error) => {
-                    // Remove any empty/partial file the failed attempt may have left.
-                    let _ = std::fs::remove_file(&file_path);
-                    last_error = error;
+                let file_path_str = file_path.to_string_lossy().to_string();
+                match mpv_command_checked(
+                    &mpv_guard,
+                    &["screenshot-to-file", &file_path_str, mode],
+                ) {
+                    Ok(()) => {
+                        let file_name = file_path
+                            .file_name()
+                            .map(|name| name.to_string_lossy().to_string())
+                            .unwrap_or_else(|| file_path_str.clone());
+                        result = Some(ScreenshotResult {
+                            path: file_path_str,
+                            file_name,
+                        });
+                        break 'capture;
+                    }
+                    Err(error) => {
+                        let _ = std::fs::remove_file(&file_path);
+                        last_error = error;
+                    }
                 }
             }
         }
-        Err(last_error)
+
+        if let Some(prev) = sub_backup {
+            let _ = mpv_command_checked(&mpv_guard, &["set", "sub-visibility", &prev]);
+        }
+
+        result.ok_or(last_error)
     })
     .await
     .map_err(|error| format!("Screenshot task failed: {error}"))?
