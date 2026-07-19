@@ -724,6 +724,98 @@ pub(crate) async fn capture_frame_histogram(
     .map_err(|e| format!("Histogram task failed: {e}"))?
 }
 
+// Sample ~20 frames across the whole video (headless second mpv), aggregate a
+// per-channel histogram over all of them, and return it normalised. Used by the
+// curves editor's "Auto" to derive robust auto-levels curves.
+#[tauri::command]
+pub(crate) async fn analyze_video_curves(
+    app: tauri::AppHandle,
+    path: String,
+    duration: f64,
+) -> Result<FrameHistogram, String> {
+    use tauri::Manager;
+
+    if path.trim().is_empty() || duration <= 0.0 || !is_local_media(&path) {
+        return Err("Auto curves needs a local file".to_string());
+    }
+    let dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| e.to_string())?
+        .join("curves_analyze");
+
+    tauri::async_runtime::spawn_blocking(move || {
+        // Fresh dir each run.
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+
+        crate::mpv::generate_thumbnails(&path, &dir, duration, 20)?;
+
+        let mut hr = [0u64; 256];
+        let mut hg = [0u64; 256];
+        let mut hb = [0u64; 256];
+        let mut hl = [0u64; 256];
+        let mut frames = 0u32;
+
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.extension().and_then(|x| x.to_str()).map(|x| {
+                    x.eq_ignore_ascii_case("jpg")
+                }) != Some(true)
+                {
+                    continue;
+                }
+                let file = match std::fs::File::open(&p) {
+                    Ok(f) => f,
+                    Err(_) => continue,
+                };
+                let decoder =
+                    match image::codecs::jpeg::JpegDecoder::new(std::io::BufReader::new(file)) {
+                        Ok(d) => d,
+                        Err(_) => continue,
+                    };
+                let rgb = match image::DynamicImage::from_decoder(decoder) {
+                    Ok(img) => img.to_rgb8(),
+                    Err(_) => continue,
+                };
+                for px in rgb.pixels() {
+                    hr[px[0] as usize] += 1;
+                    hg[px[1] as usize] += 1;
+                    hb[px[2] as usize] += 1;
+                    let luma = (0.299 * px[0] as f64
+                        + 0.587 * px[1] as f64
+                        + 0.114 * px[2] as f64)
+                        .round()
+                        .clamp(0.0, 255.0) as usize;
+                    hl[luma] += 1;
+                }
+                frames += 1;
+            }
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+
+        if frames == 0 {
+            return Err("Could not sample any frames".to_string());
+        }
+
+        let normalize = |bins: [u64; 256]| -> Vec<f64> {
+            let peak = bins.iter().copied().max().unwrap_or(1).max(1) as f64;
+            bins.iter().map(|&c| c as f64 / peak).collect()
+        };
+
+        Ok(FrameHistogram {
+            r: normalize(hr),
+            g: normalize(hg),
+            b: normalize(hb),
+            luma: normalize(hl),
+        })
+    })
+    .await
+    .map_err(|e| format!("Auto-curves task failed: {e}"))?
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RuntimeVersions {

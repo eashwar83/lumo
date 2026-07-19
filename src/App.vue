@@ -1277,6 +1277,8 @@ useAppStartupBindings({
         <CurvesPanel
             :enhancements="enhancements"
             :visible="isCurvesOpen"
+            :media-path="player.state.media.url"
+            :duration="player.state.playback.duration"
             @close="isCurvesOpen = false"
         />
 

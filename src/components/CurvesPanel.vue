@@ -2,6 +2,8 @@
 import { computed, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
+    autoCurvesFromHistogram,
+    type ChannelHistograms,
     type CurveChannel,
     type CurvePoint,
     type Curves,
@@ -16,6 +18,8 @@ import type { VideoEnhancementsController } from "../composables/useVideoEnhance
 const props = defineProps<{
     enhancements: VideoEnhancementsController;
     visible: boolean;
+    mediaPath?: string;
+    duration?: number;
 }>();
 
 const emit = defineEmits<{ (e: "close"): void }>();
@@ -189,6 +193,35 @@ const resetAll = () => {
     emitChange();
 };
 
+const autoBusy = ref(false);
+const autoError = ref("");
+// Sample ~20 frames across the video, derive auto-levels curves, apply them.
+const onAuto = async () => {
+    if (autoBusy.value) return;
+    const path = props.mediaPath;
+    const duration = props.duration ?? 0;
+    if (!path || duration <= 0) return;
+    autoBusy.value = true;
+    autoError.value = "";
+    try {
+        const hist = await invoke<ChannelHistograms>("analyze_video_curves", {
+            path,
+            duration,
+        });
+        const auto = autoCurvesFromHistogram(hist);
+        curves.rgb = auto.rgb;
+        curves.r = auto.r;
+        curves.g = auto.g;
+        curves.b = auto.b;
+        emitChange();
+    } catch (error) {
+        autoError.value = "Auto failed";
+        console.warn("[curves] auto failed", error);
+    } finally {
+        autoBusy.value = false;
+    }
+};
+
 const loadFromState = () => {
     const parsed = parseCurves(props.enhancements.state.curves);
     curves.rgb = parsed.rgb;
@@ -246,6 +279,19 @@ watch(
                     {{ ch.label }}
                 </button>
             </div>
+
+            <button
+                class="curves__auto"
+                type="button"
+                :disabled="autoBusy"
+                @click="onAuto"
+            >
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M7.5 5.6 5 7l1.4-2.5L5 2l2.5 1.4L10 2 8.6 4.5 10 7zM19 9l-1.3 2.9L15 13l2.7 1.1L19 17l1.3-2.9L23 13l-2.7-1.1zM11.5 11.5 9 6 6.5 11.5 1 14l5.5 2.5L9 22l2.5-5.5L17 14z" />
+                </svg>
+                <span>{{ autoBusy ? "Analyzing 20 frames…" : "Auto" }}</span>
+            </button>
+            <div v-if="autoError" class="curves__auto-error">{{ autoError }}</div>
 
             <div class="curves__editor">
                 <svg
@@ -392,6 +438,44 @@ watch(
     background: color-mix(in srgb, var(--chan) 26%, transparent);
     border-color: var(--chan);
     color: #fff;
+}
+
+.curves__auto {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    padding: 9px 12px;
+    border: 1px solid rgba(143, 179, 255, 0.4);
+    border-radius: 9px;
+    background: rgba(143, 179, 255, 0.16);
+    color: #dbe6ff;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.curves__auto:hover:not(:disabled) {
+    background: rgba(143, 179, 255, 0.3);
+}
+
+.curves__auto:disabled {
+    opacity: 0.65;
+    cursor: default;
+}
+
+.curves__auto svg {
+    width: 16px;
+    height: 16px;
+    color: #8fb3ff;
+}
+
+.curves__auto-error {
+    font-size: 11.5px;
+    color: #ff8a8a;
+    text-align: center;
 }
 
 .curves__editor {

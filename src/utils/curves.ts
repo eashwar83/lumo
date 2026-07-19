@@ -184,6 +184,75 @@ export const parseCurves = (json: string | undefined | null): Curves => {
     }
 };
 
+// --- Auto (from an aggregate histogram) -------------------------------------
+
+export type ChannelHistograms = {
+    r: number[];
+    g: number[];
+    b: number[];
+    luma: number[];
+};
+
+// Find the black/white input points (in 0..1) of a histogram by clipping a
+// small percentage at each end. Bins may be peak-normalised; the CDF ratio is
+// scale-invariant so that's fine.
+const channelLevels = (
+    bins: number[],
+    clip = 0.004,
+): { black: number; white: number } => {
+    const n = bins.length;
+    const total = bins.reduce((a, b) => a + b, 0) || 1;
+    let acc = 0;
+    let black = 0;
+    for (let i = 0; i < n; i++) {
+        acc += bins[i];
+        if (acc / total >= clip) {
+            black = i / (n - 1);
+            break;
+        }
+    }
+    acc = 0;
+    let white = 1;
+    for (let i = n - 1; i >= 0; i--) {
+        acc += bins[i];
+        if (acc / total >= clip) {
+            white = i / (n - 1);
+            break;
+        }
+    }
+    if (white <= black) white = Math.min(1, black + 0.05);
+    return { black, white };
+};
+
+// A levels-stretch curve mapping [black, white] -> [0, 1], as editable control
+// points (endpoints pinned at the corners).
+const levelsPoints = (black: number, white: number): CurvePoint[] => {
+    const pts: CurvePoint[] = [{ x: 0, y: 0 }];
+    if (black > 0.012) pts.push({ x: Math.min(black, 0.85), y: 0 });
+    if (white < 0.988 && white > black + 0.06) {
+        pts.push({ x: Math.max(white, 0.15), y: 1 });
+    }
+    pts.push({ x: 1, y: 1 });
+    return pts.length >= 2 ? pts : identityPoints();
+};
+
+// Photoshop-style "auto colour": stretch each channel to its own black/white
+// points — this both boosts contrast and neutralises colour casts. The master
+// (RGB) curve is left identity so the per-channel work isn't doubled.
+export const autoCurvesFromHistogram = (
+    hist: ChannelHistograms,
+): Curves => {
+    const r = channelLevels(hist.r);
+    const g = channelLevels(hist.g);
+    const b = channelLevels(hist.b);
+    return {
+        rgb: identityPoints(),
+        r: levelsPoints(r.black, r.white),
+        g: levelsPoints(g.black, g.white),
+        b: levelsPoints(b.black, b.white),
+    };
+};
+
 export const cloneCurves = (curves: Curves): Curves => ({
     rgb: curves.rgb.map((p) => ({ ...p })),
     r: curves.r.map((p) => ({ ...p })),

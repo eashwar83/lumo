@@ -444,6 +444,7 @@ pub fn run() {
             commands::playback::take_screenshot,
             commands::playback::analyze_frame_for_enhance,
             commands::playback::capture_frame_histogram,
+            commands::playback::analyze_video_curves,
             commands::playback::generate_seek_thumbnails,
             commands::playback::get_seek_thumbnail,
             commands::window::set_window_controls_visible,
