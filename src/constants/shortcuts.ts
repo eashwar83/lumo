@@ -55,7 +55,8 @@ export type ShortcutActionId =
     | "cycleAspectRatio"
     | "fitWindowToVideo"
     | "windowSizeUp"
-    | "windowSizeDown";
+    | "windowSizeDown"
+    | "toggleCurves";
 
 export type ShortcutActionGroup =
     | "Playback"
@@ -99,6 +100,7 @@ export const SHORTCUT_ACTIONS: ShortcutActionDef[] = [
     { id: "clearCrop", label: "Clear crop", group: "Playback", defaultChord: "Shift+KeyC" },
     { id: "cycleAspectRatio", label: "Cycle aspect ratio", group: "Playback", defaultChord: "KeyE" },
     { id: "fitWindowToVideo", label: "Fit window to video", group: "Playback", defaultChord: "KeyG" },
+    { id: "toggleCurves", label: "Toggle curves editor", group: "Interface & Window", defaultChord: "KeyU" },
 
     { id: "volumeUp", label: "Volume up", group: "Volume", defaultChord: "ArrowUp" },
     { id: "volumeDown", label: "Volume down", group: "Volume", defaultChord: "ArrowDown" },

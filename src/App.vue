@@ -535,6 +535,7 @@ const { onKeydown, onDoubleClick, bindings: shortcutBindings } = usePlaybackShor
         toggleFavorite: onToggleFavorite,
         cycleAspectRatio: () => onCycleAspectRatio(),
         fitWindowToVideo: () => onFitWindowToVideo(),
+        toggleCurves: () => toggleCurves(),
         windowSizeUp: () => stepWindowSize(1.1),
         windowSizeDown: () => stepWindowSize(0.9),
         showProgress: showProgressOverlay,
@@ -644,6 +645,24 @@ const onSetGlobalColorAdjustments = async (enabled: boolean) => {
     await adjustments.setGlobalColorAdjustmentsEnabled(enabled);
     await enhancements.reapplyLook();
 };
+
+// Curves panel and the playlist drawer share the right edge, so they're
+// mutually exclusive — opening one closes the other.
+const openCurves = () => {
+    closePlaylist();
+    isCurvesOpen.value = true;
+};
+const toggleCurves = () => {
+    if (isCurvesOpen.value) {
+        isCurvesOpen.value = false;
+        return;
+    }
+    if (!player.state.media.isFileLoaded) return;
+    openCurves();
+};
+watch(isPlaylistOpen, (open) => {
+    if (open) isCurvesOpen.value = false;
+});
 
 // Reset the current video's full look: colour adjustments + colour grade +
 // sharpen/denoise/deinterlace. Quality preset & AI Upscale (global) are kept.
@@ -1150,7 +1169,7 @@ useAppStartupBindings({
             @set-global-color-adjustments-enabled="onSetGlobalColorAdjustments"
             @auto-enhance="onAutoEnhance"
             @reset-video-settings="onResetVideoSettings"
-            @open-curves="isCurvesOpen = true"
+            @open-curves="openCurves"
             @select-audio="tracks.selectAudio"
             @select-sub-track="tracks.selectSubTrack"
             @set-active-sub-target="tracks.setActiveSubTarget"

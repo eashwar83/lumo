@@ -328,11 +328,12 @@ watch(
     bottom: 0;
     width: 320px;
     max-width: 88vw;
-    z-index: 60;
+    z-index: 115;
     display: flex;
     flex-direction: column;
     gap: 14px;
-    padding: 18px 18px 24px;
+    /* Extra top padding clears the window title-bar controls (z-index 120). */
+    padding: 46px 18px 24px;
     background: rgba(18, 20, 24, 0.9);
     backdrop-filter: blur(24px);
     -webkit-backdrop-filter: blur(24px);
