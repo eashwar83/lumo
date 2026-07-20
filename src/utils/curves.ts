@@ -246,36 +246,51 @@ const median01 = (bins: number[]): number => {
     return 0.5;
 };
 
-// A gentle "auto" grade: contrast + brightness via a luma curve on the MASTER
-// channel (preserves hue), plus a soft gray-world white balance on R/G/B. Every
-// adjustment is applied partway and clamped, so it lifts a flat/cast video
-// without overcooking. Videos already well-graded barely change.
+// A conservative "auto" grade built on the principle: only fix a genuine
+// problem, and never invent one. On already-decent footage it is near-identity.
+//
+//   1. LEVELS  — pull black/white to the real clip points. Only ever expands
+//      headroom that already exists, so it can't wash out or crush anything.
+//   2. MIDTONE — a gentle lift, but ONLY when the footage is truly under-
+//      exposed after the level stretch. A merely "dark"/moody grade is left
+//      alone (mistaking dark for underexposed is what flattened films before).
+//   3. WHITE BALANCE — NOT gray-world (which fights every warm/cool artistic
+//      grade and adds a cast of its own). We only touch colour when there's a
+//      *strong* global cast — the kind a broken/aged source has — and even then
+//      only at low strength and tightly capped. A normal graded film's channel
+//      imbalance is below threshold and is left untouched.
 export const autoCurvesFromHistogram = (hist: ChannelHistograms): Curves => {
-    const CONTRAST_STRENGTH = 0.6; // how far to pull black/white toward the clip
-    const GAMMA_STRENGTH = 0.3; // how far to nudge the midtone toward 0.5
-    const WB_STRENGTH = 0.5; // how much of a colour cast to remove
-    const WB_MIN = 0.86;
-    const WB_MAX = 1.16;
+    const LEVEL_CLIP = 0.0025; // fraction clipped at each end for levels
+    const LEVEL_STRENGTH = 0.9; // how far to pull black/white to the clip point
+    const DARK_MEDIAN = 0.18; // post-stretch median below this = underexposed
+    const MIDTONE_TARGET = 0.3; // comfortable midtone to lift a dark image toward
+    const MIDTONE_STRENGTH = 0.3; // partial lift, so it never overshoots
+    const WB_CAST_THRESHOLD = 0.08; // only correct a cast bigger than 8%
+    const WB_STRENGTH = 0.25; // fraction of the cast to remove
+    const WB_CAP = 0.06; // hard cap on per-channel correction (±6%)
 
-    // --- Master: luma contrast + midtone lift ---
-    const lum = channelLevels(hist.luma);
-    const black = lum.black * CONTRAST_STRENGTH;
-    const white = 1 - (1 - lum.white) * CONTRAST_STRENGTH;
+    // --- Master: auto-levels on luma ---
+    const lum = channelLevels(hist.luma, LEVEL_CLIP);
+    const black = lum.black * LEVEL_STRENGTH;
+    const white = 1 - (1 - lum.white) * LEVEL_STRENGTH;
     const span = Math.max(0.05, white - black);
 
     const master: CurvePoint[] = [{ x: 0, y: 0 }];
-    if (black > 0.015) master.push({ x: Math.min(black, 0.4), y: 0 });
+    if (black > 0.02) master.push({ x: Math.min(black, 0.4), y: 0 });
 
+    // --- Midtone lift: only for genuinely underexposed footage ---
     const median = median01(hist.luma);
-    if (median > 0.05 && median < 0.95) {
-        const mapped = Math.min(1, Math.max(0, (median - black) / span));
-        const targetY = mapped + (0.5 - mapped) * GAMMA_STRENGTH;
+    const stretchedMedian = clamp01((median - black) / span);
+    if (median > 0.03 && stretchedMedian < DARK_MEDIAN) {
+        const targetY =
+            stretchedMedian +
+            (MIDTONE_TARGET - stretchedMedian) * MIDTONE_STRENGTH;
         const midX = median;
         const prevX = master[master.length - 1].x;
         if (
             midX > prevX + 0.04 &&
             midX < white - 0.04 &&
-            Math.abs(targetY - mapped) > 0.015
+            targetY - stretchedMedian > 0.01
         ) {
             master.push({
                 x: midX,
@@ -287,16 +302,20 @@ export const autoCurvesFromHistogram = (hist: ChannelHistograms): Curves => {
     if (white < 0.985) master.push({ x: Math.max(white, 0.6), y: 1 });
     master.push({ x: 1, y: 1 });
 
-    // --- Per-channel: gentle gray-world white balance (gain) ---
+    // --- White balance: only remove a strong global cast ---
     const meanR = histogramMean(hist.r);
     const meanG = histogramMean(hist.g);
     const meanB = histogramMean(hist.b);
-    const target = (meanR + meanG + meanB) / 3 || 0.5;
+    const avg = (meanR + meanG + meanB) / 3 || 0.5;
+    const devR = meanR / avg - 1;
+    const devG = meanG / avg - 1;
+    const devB = meanB / avg - 1;
+    const maxDev = Math.max(Math.abs(devR), Math.abs(devG), Math.abs(devB));
 
-    const gain = (mean: number): number => {
-        if (mean <= 0.02) return 1;
-        const factor = 1 + WB_STRENGTH * (target / mean - 1);
-        return Math.min(WB_MAX, Math.max(WB_MIN, factor));
+    const gainFor = (dev: number): number => {
+        if (maxDev <= WB_CAST_THRESHOLD) return 1; // no meaningful cast
+        const g = 1 - dev * WB_STRENGTH;
+        return Math.min(1 + WB_CAP, Math.max(1 - WB_CAP, g));
     };
     const gainCurve = (k: number): CurvePoint[] => {
         if (Math.abs(k - 1) < 0.015) return identityPoints();
@@ -316,9 +335,9 @@ export const autoCurvesFromHistogram = (hist: ChannelHistograms): Curves => {
 
     return {
         rgb: master.length >= 2 ? master : identityPoints(),
-        r: gainCurve(gain(meanR)),
-        g: gainCurve(gain(meanG)),
-        b: gainCurve(gain(meanB)),
+        r: gainCurve(gainFor(devR)),
+        g: gainCurve(gainFor(devG)),
+        b: gainCurve(gainFor(devB)),
     };
 };
 

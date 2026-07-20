@@ -28,6 +28,7 @@ import { useVideoGeometry } from "./composables/useVideoGeometry";
 import { useWindowSizeLock } from "./composables/useWindowSizeLock";
 import { useVideoPresets } from "./composables/useVideoPresets";
 import CurvesPanel from "./components/CurvesPanel.vue";
+import SettingsPanel from "./panels/SettingsPanel.vue";
 import { useAutoloadFolder } from "./composables/useAutoloadFolder";
 import { usePlaybackFlow } from "./composables/usePlaybackFlow";
 import { useAppUiPersistence } from "./composables/useAppUiPersistence";
@@ -179,11 +180,12 @@ const shouldUseTransparentVideoMode = computed(
         player.state.media.isFileLoaded &&
         !shouldKeepPlaybackBackgroundOpaque.value,
 );
-const sideNavActivePanel = computed(() =>
-    isLoading.value && clearNavSelectionDuringLoad.value
+const sideNavActivePanel = computed(() => {
+    if (isSettingsOpen.value) return "settings";
+    return isLoading.value && clearNavSelectionDuringLoad.value
         ? null
-        : navActivePanel.value,
-);
+        : navActivePanel.value;
+});
 const {
     isLoadingOverlayVisible,
     loadingDownloadSpeedBps,
@@ -264,12 +266,19 @@ const onSideNavNavigate = async (
     panel: "home" | "history" | "favorites" | "network" | "settings",
 ) => {
     clearNavSelectionDuringLoad.value = false;
+    // Settings opens as a modal over live playback — it must not stop the video
+    // or swap out the main panel like the other nav destinations do.
+    if (panel === "settings") {
+        openSettings();
+        return;
+    }
+    isSettingsOpen.value = false;
     await onNavAction(panel);
 };
 
 const openSettingsFromPlaybackContextMenu = async () => {
     clearNavSelectionDuringLoad.value = false;
-    await onNavAction("settings");
+    openSettings();
 };
 
 const { onSeek, onSeekRelative } = usePlaybackSeekActions({
@@ -280,6 +289,7 @@ const { onSeek, onSeekRelative } = usePlaybackSeekActions({
 
 const isShortcutsHelpOpen = ref(false);
 const isCurvesOpen = ref(false);
+const isSettingsOpen = ref(false);
 const isAlwaysOnTop = ref(false);
 const areSubtitlesVisible = ref(true);
 
@@ -650,6 +660,7 @@ const onSetGlobalColorAdjustments = async (enabled: boolean) => {
 // mutually exclusive — opening one closes the other.
 const openCurves = () => {
     closePlaylist();
+    isSettingsOpen.value = false;
     isCurvesOpen.value = true;
 };
 const toggleCurves = () => {
@@ -661,7 +672,30 @@ const toggleCurves = () => {
     openCurves();
 };
 watch(isPlaylistOpen, (open) => {
-    if (open) isCurvesOpen.value = false;
+    if (open) {
+        isCurvesOpen.value = false;
+        isSettingsOpen.value = false;
+    }
+});
+
+// Settings is a modal overlay that floats over live playback (it never stops
+// the video). It's mutually exclusive with the curves panel and playlist.
+const openSettings = () => {
+    closePlaylist();
+    isCurvesOpen.value = false;
+    isSettingsOpen.value = true;
+};
+const closeSettings = () => {
+    isSettingsOpen.value = false;
+};
+// The update-note "install" flow sets activePanel to the settings id to reveal
+// the update UI. Settings is no longer a main panel, so translate that into
+// opening the overlay and keep the main panel state valid.
+watch(activePanel, (panel) => {
+    if (panel === "settings") {
+        activePanel.value = "home";
+        openSettings();
+    }
 });
 
 // Reset the current video's full look: colour adjustments + colour grade +
@@ -1281,6 +1315,8 @@ useAppStartupBindings({
             :duration="player.state.playback.duration"
             @close="isCurvesOpen = false"
         />
+
+        <SettingsPanel :visible="isSettingsOpen" @close="closeSettings" />
 
         <WindowResizeRegions
             v-if="isLinuxPlatform && !player.state.window.isFullscreen"

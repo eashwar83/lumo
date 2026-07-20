@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import {
     autoCurvesFromHistogram,
     type ChannelHistograms,
+    cloneCurves,
     type CurveChannel,
     type CurvePoint,
     type Curves,
@@ -13,6 +14,13 @@ import {
     parseCurves,
     serializeCurves,
 } from "../utils/curves";
+import {
+    BUILT_IN_CURVE_PRESETS,
+    blendCurvesTowardIdentity,
+    CURVE_PRESET_CATEGORY_ORDER,
+    type CurvePreset,
+} from "../utils/curvePresets";
+import { useCurvePresets } from "../composables/useCurvePresets";
 import type { VideoEnhancementsController } from "../composables/useVideoEnhancements";
 
 const props = defineProps<{
@@ -122,6 +130,7 @@ const nearestPointIndex = (p: CurvePoint): number | null => {
 
 const onPointerDown = (event: PointerEvent) => {
     event.preventDefault();
+    clearPresetLink();
     const p = eventToCurve(event);
     const pts = points.value;
     const hit = nearestPointIndex(p);
@@ -175,16 +184,19 @@ const onPointerUp = () => {
 const onPointDblClick = (index: number) => {
     const pts = points.value;
     if (index <= 0 || index >= pts.length - 1) return;
+    clearPresetLink();
     pts.splice(index, 1);
     emitChange();
 };
 
 const resetChannel = () => {
+    clearPresetLink();
     curves[channel.value] = identityPoints();
     emitChange();
 };
 
 const resetAll = () => {
+    clearPresetLink();
     const fresh = defaultCurves();
     curves.rgb = fresh.rgb;
     curves.r = fresh.r;
@@ -209,6 +221,7 @@ const onAuto = async () => {
             duration,
         });
         const auto = autoCurvesFromHistogram(hist);
+        clearPresetLink();
         curves.rgb = auto.rgb;
         curves.r = auto.r;
         curves.g = auto.g;
@@ -220,6 +233,77 @@ const onAuto = async () => {
     } finally {
         autoBusy.value = false;
     }
+};
+
+// --- Presets ---------------------------------------------------------------
+
+const curvePresets = useCurvePresets();
+
+// When a preset is applied we keep its full-strength curves as the "base" so the
+// Strength slider can re-derive the displayed curves from it (never compounding)
+// by blending toward identity. Hand-editing a point clears the link (below), so
+// the slider only shows while a preset is genuinely active.
+const activePresetBase = ref<Curves | null>(null);
+const activePresetName = ref("");
+const strength = ref(100);
+
+const presetGroups = computed(() =>
+    CURVE_PRESET_CATEGORY_ORDER.map((category) => ({
+        category,
+        items: BUILT_IN_CURVE_PRESETS.filter((p) => p.category === category),
+    })).filter((group) => group.items.length > 0),
+);
+
+const setCurvesFrom = (next: Curves) => {
+    curves.rgb = next.rgb.map((p) => ({ ...p }));
+    curves.r = next.r.map((p) => ({ ...p }));
+    curves.g = next.g.map((p) => ({ ...p }));
+    curves.b = next.b.map((p) => ({ ...p }));
+};
+
+const applyStrength = () => {
+    if (!activePresetBase.value) return;
+    setCurvesFrom(
+        blendCurvesTowardIdentity(activePresetBase.value, strength.value / 100),
+    );
+    emitChange();
+};
+
+const applyPresetCurves = (name: string, source: Curves) => {
+    activePresetBase.value = cloneCurves(source);
+    activePresetName.value = name;
+    strength.value = 100;
+    setCurvesFrom(source);
+    emitChange();
+};
+
+const applyPreset = (item: CurvePreset) => {
+    applyPresetCurves(item.name, item.curves);
+};
+
+// Hand-editing (dragging/adding/removing points, reset, auto) means the user has
+// taken over — drop the preset link so the Strength slider disappears.
+const clearPresetLink = () => {
+    activePresetBase.value = null;
+    activePresetName.value = "";
+};
+
+watch(strength, () => applyStrength());
+
+// --- Save / remove custom presets ---
+const presetSaving = ref(false);
+const presetName = ref("");
+
+const onConfirmSavePreset = () => {
+    const name = presetName.value.trim();
+    if (!name) return;
+    curvePresets.saveCurrent(name, curves);
+    presetName.value = "";
+    presetSaving.value = false;
+};
+const onCancelSavePreset = () => {
+    presetName.value = "";
+    presetSaving.value = false;
 };
 
 const loadFromState = () => {
@@ -243,6 +327,10 @@ watch(
     () => props.visible,
     (open) => {
         if (open) {
+            clearPresetLink();
+            strength.value = 100;
+            presetSaving.value = false;
+            presetName.value = "";
             loadFromState();
             void fetchHistogram();
         }
@@ -362,6 +450,115 @@ watch(
                     Reset All
                 </button>
             </div>
+
+            <div v-if="activePresetBase" class="curves__strength">
+                <div class="curves__strength-head">
+                    <span class="curves__strength-label">
+                        Strength<template v-if="activePresetName">
+                            · {{ activePresetName }}</template
+                        >
+                    </span>
+                    <span class="curves__strength-value">{{ strength }}%</span>
+                </div>
+                <input
+                    v-model.number="strength"
+                    class="curves__strength-input"
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="1"
+                    :style="{ '--v': `${strength}%` }"
+                />
+            </div>
+
+            <div class="curves__presets">
+                <div class="curves__presets-head">
+                    <span class="curves__presets-title">Presets</span>
+                    <button
+                        v-if="!presetSaving"
+                        class="curves__presets-save"
+                        type="button"
+                        @click="presetSaving = true"
+                    >
+                        + Save
+                    </button>
+                </div>
+
+                <div v-if="presetSaving" class="curves__presets-saverow">
+                    <input
+                        v-model="presetName"
+                        class="curves__presets-input"
+                        type="text"
+                        placeholder="Preset name"
+                        maxlength="24"
+                        @keydown.enter.stop="onConfirmSavePreset"
+                        @keydown.stop
+                    />
+                    <button
+                        class="curves__presets-btn curves__presets-btn--ok"
+                        type="button"
+                        @click="onConfirmSavePreset"
+                    >
+                        Save
+                    </button>
+                    <button
+                        class="curves__presets-btn"
+                        type="button"
+                        @click="onCancelSavePreset"
+                    >
+                        Cancel
+                    </button>
+                </div>
+
+                <div
+                    v-for="group in presetGroups"
+                    :key="group.category"
+                    class="curves__presets-group"
+                >
+                    <div class="curves__presets-cat">{{ group.category }}</div>
+                    <div class="curves__presets-chips">
+                        <button
+                            v-for="item in group.items"
+                            :key="item.id"
+                            class="curves__chip"
+                            type="button"
+                            @click="applyPreset(item)"
+                        >
+                            {{ item.name }}
+                        </button>
+                    </div>
+                </div>
+
+                <div
+                    v-if="curvePresets.customPresets.value.length"
+                    class="curves__presets-group"
+                >
+                    <div class="curves__presets-cat">My Presets</div>
+                    <div class="curves__presets-chips">
+                        <div
+                            v-for="item in curvePresets.customPresets.value"
+                            :key="item.id"
+                            class="curves__chip curves__chip--custom"
+                            role="button"
+                            tabindex="0"
+                            @click="applyPresetCurves(item.name, item.curves)"
+                            @keydown.enter="
+                                applyPresetCurves(item.name, item.curves)
+                            "
+                        >
+                            <span class="curves__chip-name">{{ item.name }}</span>
+                            <button
+                                class="curves__chip-del"
+                                type="button"
+                                aria-label="Delete preset"
+                                @click.stop="curvePresets.remove(item.id)"
+                            >
+                                ✕
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </transition>
 </template>
@@ -380,6 +577,7 @@ watch(
     gap: 14px;
     /* Extra top padding clears the window title-bar controls (z-index 120). */
     padding: 46px 18px 24px;
+    overflow-y: auto;
     background: rgba(18, 20, 24, 0.9);
     backdrop-filter: blur(24px);
     -webkit-backdrop-filter: blur(24px);
@@ -479,6 +677,9 @@ watch(
 }
 
 .curves__editor {
+    /* Never let the flex column collapse the square editor when the window is
+       short — keep its size and let the panel scroll instead. */
+    flex: 0 0 auto;
     aspect-ratio: 1 / 1;
     background: rgba(0, 0, 0, 0.35);
     border: 1px solid rgba(255, 255, 255, 0.14);
@@ -562,5 +763,231 @@ watch(
 .curves-slide-leave-to {
     transform: translateX(20px);
     opacity: 0;
+}
+
+/* --- Strength slider --- */
+.curves__strength {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding: 10px 12px;
+    border: 1px solid rgba(143, 179, 255, 0.32);
+    border-radius: 9px;
+    background: rgba(143, 179, 255, 0.1);
+}
+
+.curves__strength-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+}
+
+.curves__strength-label {
+    color: #dbe6ff;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.curves__strength-value {
+    color: rgba(219, 230, 255, 0.75);
+    font-variant-numeric: tabular-nums;
+    flex: 0 0 auto;
+    padding-left: 8px;
+}
+
+.curves__strength-input {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 4px;
+    border-radius: 999px;
+    background: linear-gradient(
+        to right,
+        #8fb3ff var(--v, 100%),
+        rgba(255, 255, 255, 0.18) var(--v, 100%)
+    );
+    cursor: pointer;
+}
+
+.curves__strength-input::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #dbe6ff;
+    border: 1px solid rgba(0, 0, 0, 0.2);
+    cursor: pointer;
+}
+
+/* --- Presets --- */
+.curves__presets {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding-top: 4px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.curves__presets-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.curves__presets-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.curves__presets-save {
+    border: none;
+    background: transparent;
+    color: #8fb3ff;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 2px 4px;
+}
+
+.curves__presets-save:hover {
+    color: #b7ccff;
+}
+
+.curves__presets-saverow {
+    display: flex;
+    gap: 6px;
+}
+
+.curves__presets-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 6px 9px;
+    border-radius: 7px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.06);
+    color: #fff;
+    font-size: 12.5px;
+}
+
+.curves__presets-input:focus {
+    outline: none;
+    border-color: rgba(143, 179, 255, 0.6);
+}
+
+.curves__presets-btn {
+    flex: 0 0 auto;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+    border-radius: 7px;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.curves__presets-btn:hover {
+    background: rgba(255, 255, 255, 0.16);
+}
+
+.curves__presets-btn--ok {
+    border-color: rgba(143, 179, 255, 0.5);
+    background: rgba(143, 179, 255, 0.2);
+    color: #dbe6ff;
+}
+
+.curves__presets-group {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
+
+.curves__presets-cat {
+    font-size: 10.5px;
+    font-weight: 650;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.42);
+}
+
+.curves__presets-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+}
+
+.curves__chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: rgba(255, 255, 255, 0.07);
+    color: rgba(255, 255, 255, 0.92);
+    border-radius: 999px;
+    padding: 6px 12px;
+    font-size: 12.5px;
+    font-weight: 550;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.curves__chip:hover {
+    background: rgba(143, 179, 255, 0.22);
+    border-color: rgba(143, 179, 255, 0.4);
+}
+
+.curves__chip--custom {
+    padding-right: 6px;
+}
+
+.curves__chip-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 140px;
+}
+
+.curves__chip-del {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 10px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.curves__chip-del:hover {
+    background: rgba(255, 120, 120, 0.35);
+    color: #fff;
+}
+
+/* Light theme */
+:root[data-theme="light"] .curves__presets-title,
+:root[data-theme="light"] .curves__presets-cat {
+    color: rgba(27, 39, 54, 0.55);
+}
+
+:root[data-theme="light"] .curves__chip {
+    border-color: rgba(0, 0, 0, 0.14);
+    background: rgba(0, 0, 0, 0.04);
+    color: rgba(27, 39, 54, 0.9);
+}
+
+:root[data-theme="light"] .curves__chip:hover {
+    background: rgba(47, 107, 216, 0.14);
+    border-color: rgba(47, 107, 216, 0.35);
 }
 </style>

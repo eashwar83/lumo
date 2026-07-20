@@ -65,6 +65,8 @@ pub struct UiState {
     pub per_file_enhance: Option<std::collections::HashMap<String, PerFileEnhance>>,
     #[serde(default)]
     pub custom_video_presets: Option<Vec<CustomVideoPreset>>,
+    #[serde(default)]
+    pub custom_curve_presets: Option<Vec<CustomCurvePreset>>,
 }
 
 impl Default for UiState {
@@ -89,6 +91,7 @@ impl Default for UiState {
             per_file_color_adjustments: None,
             per_file_enhance: None,
             custom_video_presets: None,
+            custom_curve_presets: None,
         }
     }
 }
@@ -121,6 +124,9 @@ impl UiState {
             custom_video_presets: incoming
                 .custom_video_presets
                 .or(self.custom_video_presets),
+            custom_curve_presets: incoming
+                .custom_curve_presets
+                .or(self.custom_curve_presets),
         }
     }
 }
@@ -335,6 +341,16 @@ pub struct CustomVideoPreset {
     pub name: String,
     #[serde(default)]
     pub values: VideoPresetValues,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomCurvePreset {
+    pub id: String,
+    pub name: String,
+    // Serialized curves payload (see serializeCurves on the frontend).
+    #[serde(default)]
+    pub data: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]

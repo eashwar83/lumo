@@ -102,13 +102,19 @@ export const useWindowSizeLock = (options: WindowSizeLockOptions = {}) => {
 
     // Apply the locked size to the window without centering. Returns true when a
     // lock exists (so the caller skips the native auto-resize); false otherwise.
+    // A maximized window is unmaximized first: the lock's contract is "every
+    // video opens at the locked size", so it must win even when the window was
+    // restored maximized on startup (otherwise the first video after a restart
+    // stays maximized). Fullscreen is left untouched.
     const applyLocked = async (): Promise<boolean> => {
         if (!enabled) return false;
         if (!lockedSize) return false;
         const win = getCurrentWindow();
         if (await win.isFullscreen().catch(() => false)) return true;
-        if (await win.isMaximized().catch(() => false)) return true;
         await runProgrammatic(async () => {
+            if (await win.isMaximized().catch(() => false)) {
+                await win.unmaximize().catch(() => {});
+            }
             await win.setSize(new LogicalSize(lockedSize!.width, lockedSize!.height));
         });
         return true;

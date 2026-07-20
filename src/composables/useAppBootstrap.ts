@@ -132,12 +132,12 @@ export const useAppBootstrap = () => {
     };
 
     const normalizeStoredPanel = (panel: string): SideActionId => {
-        if (panel === "setting") return "settings";
-        if (panel === "home") return "home";
+        // Settings is now a modal overlay, not a main panel — never restore into
+        // it (that would leave the main area blank). Fall back to home.
         if (panel === "history") return "history";
         if (panel === "favorites") return "favorites";
         if (panel === "network") return "network";
-        return "settings";
+        return "home";
     };
 
     onMounted(async () => {

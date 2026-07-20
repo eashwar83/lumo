@@ -1,10 +1,23 @@
 # Changelog
 
-## [1.0.0-beta] - 2026-07-19 — Lumo
+## [1.0.0] - 2026-07-21 — Lumo
 
-First public beta of **Lumo**, a fork of [Soia](https://github.com/FengZeng/soia)
+First stable release of **Lumo**, a fork of [Soia](https://github.com/FengZeng/soia)
 rebuilt around a rich, per-video picture-quality and personalization workflow.
 Everything below is new in Lumo on top of the upstream player.
+
+### RGB tone curves
+
+- **Curves editor** — a per-channel (RGB master + Red / Green / Blue) tone-curve
+  panel with a live GPU preview, an overlaid histogram, and draggable control
+  points. Curves are remembered per file and restored on reopen.
+- **Auto** — analyses ~20 frames across the video and derives a gentle,
+  hue-preserving auto-grade (auto-levels, an underexposure-only midtone lift, and
+  a cast correction that only fires on a genuine colour cast). Fully offline.
+- **Curve presets** — 18 built-in looks grouped by Tone / Warm / Cool /
+  Cinematic (Soft/Medium/Strong contrast, Matte, Teal & Orange, Bleach, Cross,
+  Sepia, Vintage, and more), each with a **Strength** slider to dial the effect
+  0–100%, plus save-your-own custom curve presets.
 
 ### Picture quality & grading
 
@@ -57,14 +70,22 @@ Everything below is new in Lumo on top of the upstream player.
   sources; the detected crop is remembered per file.
 - **Auto-Load Folder to Playlist** — playing a local file loads its whole folder.
 
-### Shortcuts & polish
+### Settings & shortcuts
 
+- **Redesigned Settings** — a clean category-rail modal (General / Playback /
+  Video / Subtitles / Shortcuts / Network / Advanced / About) that opens over the
+  live video **without stopping playback**, instead of the old full-screen panel.
 - **Configurable keyboard shortcuts** — every action rebindable, with a live
   help overlay.
 - **Screenshots** with a configurable folder (JPG fallback for builds without a
   PNG encoder).
 - Faster cold start; telemetry / auto-updater phone-home removed.
 - The installer no longer ticks "Create desktop shortcut" by default.
+
+### Fixes
+
+- The window-size lock now correctly re-applies the remembered size to the first
+  video after a restart, even when the window was restored maximized.
 
 ## [0.2.8] - 2026-07-11
 

@@ -6,7 +6,6 @@ import HomePanel from "../panels/HomePanel.vue";
 import HistoryPanel from "../panels/HistoryPanel.vue";
 import FavoritesPanel from "../panels/FavoritesPanel.vue";
 import NetworkPanel from "../panels/NetworkPanel.vue";
-import SettingsPanel from "../panels/SettingsPanel.vue";
 
 const props = defineProps<{
     isFileLoaded: boolean;
@@ -86,8 +85,6 @@ const showPanels = () => !props.isFileLoaded;
                 :is-visible="showPanels() && props.mode === 'network'"
                 @play-network="emit('play-network', $event)"
             />
-
-            <SettingsPanel v-if="showPanels() && props.mode === 'settings'" />
         </div>
     </div>
 </template>
