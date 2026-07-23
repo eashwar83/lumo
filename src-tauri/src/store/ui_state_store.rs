@@ -67,6 +67,19 @@ pub struct UiState {
     pub custom_video_presets: Option<Vec<CustomVideoPreset>>,
     #[serde(default)]
     pub custom_curve_presets: Option<Vec<CustomCurvePreset>>,
+    #[serde(default)]
+    pub audio_enhancements: Option<AudioEnhancementsState>,
+    #[serde(default)]
+    pub per_file_transform:
+        Option<std::collections::HashMap<String, PerFileTransform>>,
+    #[serde(default)]
+    pub skip_markers: Option<std::collections::HashMap<String, SkipMarkers>>,
+    #[serde(default)]
+    pub skip_markers_auto: Option<bool>,
+    #[serde(default)]
+    pub menu_bar_visible: Option<bool>,
+    #[serde(default)]
+    pub custom_shortcuts: Option<Vec<CustomShortcut>>,
 }
 
 impl Default for UiState {
@@ -92,6 +105,12 @@ impl Default for UiState {
             per_file_enhance: None,
             custom_video_presets: None,
             custom_curve_presets: None,
+            audio_enhancements: None,
+            per_file_transform: None,
+            skip_markers: None,
+            skip_markers_auto: None,
+            menu_bar_visible: None,
+            custom_shortcuts: None,
         }
     }
 }
@@ -127,6 +146,12 @@ impl UiState {
             custom_curve_presets: incoming
                 .custom_curve_presets
                 .or(self.custom_curve_presets),
+            audio_enhancements: incoming.audio_enhancements.or(self.audio_enhancements),
+            per_file_transform: incoming.per_file_transform.or(self.per_file_transform),
+            skip_markers: incoming.skip_markers.or(self.skip_markers),
+            skip_markers_auto: incoming.skip_markers_auto.or(self.skip_markers_auto),
+            menu_bar_visible: incoming.menu_bar_visible.or(self.menu_bar_visible),
+            custom_shortcuts: incoming.custom_shortcuts.or(self.custom_shortcuts),
         }
     }
 }
@@ -272,6 +297,77 @@ pub struct VideoEnhancementsState {
     pub grain: Option<f64>,
     #[serde(default)]
     pub curves: Option<String>,
+}
+
+/// Audio processing: night mode (dynamic-range compression), dialogue presence
+/// boost, post-volume gain and the 10-band graphic EQ. Global, not per file.
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioEnhancementsState {
+    #[serde(default)]
+    pub night_mode: Option<String>,
+    #[serde(default)]
+    pub dialogue_boost: Option<f64>,
+    #[serde(default)]
+    pub gain: Option<f64>,
+    #[serde(default)]
+    pub eq_enabled: Option<bool>,
+    #[serde(default)]
+    pub eq_bands: Option<Vec<f64>>,
+    #[serde(default)]
+    pub eq_preset: Option<String>,
+}
+
+/// A user-defined keyboard shortcut built in Settings. `kind` selects which of
+/// the optional fields apply: a registry command, a numeric adjustment, or a
+/// raw mpv command line.
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomShortcut {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub chord: Option<String>,
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub command_id: Option<String>,
+    #[serde(default)]
+    pub mode: Option<String>,
+    #[serde(default)]
+    pub amount: Option<f64>,
+    #[serde(default)]
+    pub mpv_command: Option<String>,
+}
+
+/// Intro / credits markers, keyed by folder so every episode of a series in the
+/// same directory shares them. `credits_from_end` is measured backwards from the
+/// end of the file so it survives episodes of differing length.
+#[derive(Serialize, Deserialize, Clone, Copy, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SkipMarkers {
+    #[serde(default)]
+    pub intro_start: Option<f64>,
+    #[serde(default)]
+    pub intro_end: Option<f64>,
+    #[serde(default)]
+    pub credits_from_end: Option<f64>,
+}
+
+/// Per-file zoom / pan / rotate (mpv `video-zoom`, `video-pan-x/y`,
+/// `video-rotate`). Kept separate from `PerFileVideo` so the aspect/crop memory
+/// stays independent of the interactive transform.
+#[derive(Serialize, Deserialize, Clone, Copy, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PerFileTransform {
+    #[serde(default)]
+    pub zoom: Option<f64>,
+    #[serde(default)]
+    pub pan_x: Option<f64>,
+    #[serde(default)]
+    pub pan_y: Option<f64>,
+    #[serde(default)]
+    pub rotate: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]

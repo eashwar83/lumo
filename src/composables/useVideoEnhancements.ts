@@ -39,8 +39,32 @@ export const COLOR_GRADE_KEYS: ColorGradeKey[] = [
     "shadows",
 ];
 
+// Debanding strength. Old, heavily compressed transfers show flat-area banding
+// far more than they show softness, and mpv's debander is otherwise pinned by
+// the quality preset with no way to push it.
+export type DebandLevel = "off" | "light" | "medium" | "strong";
+
+export const DEBAND_LABELS: Record<DebandLevel, string> = {
+    off: "Off",
+    light: "Light",
+    medium: "Medium",
+    strong: "Strong",
+};
+
+// iterations / threshold / range / grain — mpv's four deband knobs.
+const DEBAND_SETTINGS: Record<
+    Exclude<DebandLevel, "off">,
+    { iterations: string; threshold: string; range: string; grain: string }
+> = {
+    light: { iterations: "1", threshold: "32", range: "16", grain: "0" },
+    medium: { iterations: "2", threshold: "48", range: "20", grain: "16" },
+    // Heavy smoothing plus grain to hide what the debander can't reach.
+    strong: { iterations: "4", threshold: "72", range: "24", grain: "32" },
+};
+
 export type StoredVideoEnhancements = {
     qualityPreset?: QualityPreset;
+    deband?: DebandLevel;
     sharpenAmount?: number;
     sharpenRadius?: number;
     aiUpscale?: AiUpscaleMode;
@@ -57,6 +81,8 @@ export type StoredVideoEnhancements = {
 
 export type VideoEnhancementsState = {
     qualityPreset: QualityPreset;
+    /** Debanding strength, independent of the quality preset. */
+    deband: DebandLevel;
     /** 0 = off .. 100 = strongest (maps to unsharp luma amount 0..2). */
     sharpenAmount: number;
     /** Unsharp matrix size in px (odd, 3..15). */
@@ -114,6 +140,7 @@ const DENOISE_LABEL = "lumo-denoise";
 
 const DEFAULT_STATE: VideoEnhancementsState = {
     qualityPreset: "balanced",
+    deband: "off",
     sharpenAmount: 0,
     sharpenRadius: 5,
     denoise: false,
@@ -252,6 +279,7 @@ export const useVideoEnhancements = (options: VideoEnhancementsOptions = {}) => 
         persistedSaver.saveDebounced({
             videoEnhancements: {
                 qualityPreset: state.qualityPreset,
+                deband: state.deband,
                 aiUpscale: state.aiUpscale,
                 ...globalLook,
             },
@@ -291,6 +319,25 @@ export const useVideoEnhancements = (options: VideoEnhancementsOptions = {}) => 
         await Promise.all(
             Object.entries(config).map(([name, value]) => setProp(name, value)),
         );
+        // Deband is part of the same property set, so re-assert it after the
+        // preset writes its own value.
+        await applyDeband();
+    };
+
+    // An explicit deband level overrides whatever the quality preset set; "off"
+    // hands control back to the preset.
+    const applyDeband = async () => {
+        if (state.deband === "off") {
+            const preset = QUALITY_PRESETS[state.qualityPreset];
+            await setProp("deband", preset.deband ?? "no");
+            return;
+        }
+        const config = DEBAND_SETTINGS[state.deband];
+        await setProp("deband", "yes");
+        await setProp("deband-iterations", config.iterations);
+        await setProp("deband-threshold", config.threshold);
+        await setProp("deband-range", config.range);
+        await setProp("deband-grain", config.grain);
     };
 
     // GPU unsharp shader (no CPU copy-back). Amount 0..100 -> shader amount
@@ -403,10 +450,14 @@ export const useVideoEnhancements = (options: VideoEnhancementsOptions = {}) => 
         persistLook();
     };
 
-    // Only the denoise (hqdn3d) lavfi filter needs software frames now, so hwdec
-    // copy-back is tied to denoise alone; sharpening is GPU and stays hw-decoded.
+    // Filters that run on the CPU need decoded frames in normal memory, which
+    // non-copy hardware decoding doesn't provide — they silently fail to attach
+    // otherwise. Both denoise (hqdn3d) and deinterlace (mpv inserts bwdif) are
+    // such filters, so either one forces hwdec copy-back. Sharpening is a GPU
+    // shader and stays fully hardware-decoded.
     const syncHwdec = async () => {
-        const want = state.denoise ? "auto-copy" : "auto";
+        const needsSoftwareFrames = state.denoise || state.deinterlace;
+        const want = needsSoftwareFrames ? "auto-copy" : "auto";
         if (want === lastHwdec) return;
         await runCommand(["set", "hwdec", want]);
         lastHwdec = want;
@@ -422,7 +473,10 @@ export const useVideoEnhancements = (options: VideoEnhancementsOptions = {}) => 
         }
     };
 
+    // Deinterlacing needs software frames, so the hwdec mode has to be settled
+    // before the filter is inserted (same ordering constraint as denoise).
     const applyDeinterlace = async () => {
+        await syncHwdec();
         await setProp("deinterlace", state.deinterlace ? "yes" : "no");
     };
 
@@ -446,6 +500,35 @@ export const useVideoEnhancements = (options: VideoEnhancementsOptions = {}) => 
         state.qualityPreset = preset;
         await applyQualityPreset();
         persistGlobal();
+    };
+
+    const setDeband = async (level: DebandLevel) => {
+        state.deband = level;
+        await applyDeband();
+        persistGlobal();
+        onMessage?.(
+            level === "off" ? "Deband off" : `Deband · ${DEBAND_LABELS[level]}`,
+        );
+    };
+
+    // One-click treatment for old, heavily compressed SD transfers: the visible
+    // damage there is banding and blocking, not softness, so debanding leads,
+    // denoise cleans the mosquito noise, a gentle unsharp restores some edge
+    // definition without amplifying the artefacts, and a little grain masks
+    // whatever smoothing left behind.
+    const applyOldFilmRestore = async () => {
+        state.deband = "strong";
+        state.denoise = true;
+        state.sharpenAmount = 25;
+        state.sharpenRadius = 3;
+        state.grain = 12;
+        await applyDeband();
+        await rebuildVideoFilters();
+        await applySharpen();
+        await applyGrain();
+        persistLook();
+        persistGlobal();
+        onMessage?.("Old Film Restore applied");
     };
 
     const setSharpenAmount = (value: number) => {
@@ -554,6 +637,9 @@ export const useVideoEnhancements = (options: VideoEnhancementsOptions = {}) => 
         storedPerFile?: Record<string, Partial<LookState>>,
     ) => {
         if (stored) {
+            if (stored.deband && ["off","light","medium","strong"].includes(stored.deband)) {
+                state.deband = stored.deband;
+            }
             if (isQualityPreset(stored.qualityPreset)) {
                 state.qualityPreset = stored.qualityPreset;
             }
@@ -611,6 +697,8 @@ export const useVideoEnhancements = (options: VideoEnhancementsOptions = {}) => 
     return {
         state,
         setQualityPreset,
+        setDeband,
+        applyOldFilmRestore,
         setSharpenAmount,
         setSharpenRadius,
         setDenoise,

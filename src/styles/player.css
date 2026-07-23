@@ -301,3 +301,27 @@
     width: 0;
     height: 0;
 } */
+
+/* --- application menu bar -------------------------------------------------
+   The menu row is fixed to the top of the client area. Everything else that is
+   also pinned to top: 0 (the header, the right-edge drawers) is pushed down by
+   its height so nothing is hidden underneath it. These selectors deliberately
+   carry an extra class so they outrank the components' own scoped rules. */
+
+.soia-container {
+    --menu-bar-height: 30px;
+}
+
+.soia-container.has-menu-bar .top-bar,
+.soia-container.has-menu-bar .playlist-drawer,
+.soia-container.has-menu-bar .curves,
+.soia-container.has-menu-bar .eq {
+    top: var(--menu-bar-height);
+}
+
+/* The panels reserve top padding for the window controls; with the menu bar
+   above them that allowance is already covered. */
+.soia-container.has-menu-bar .curves,
+.soia-container.has-menu-bar .eq {
+    padding-top: 18px;
+}

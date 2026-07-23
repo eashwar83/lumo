@@ -6,6 +6,8 @@ use std::sync::{Arc, Mutex};
 mod app_bootstrap;
 mod check_update;
 mod commands;
+mod contact_sheet;
+mod scenes;
 mod media_extensions;
 mod mpv;
 mod network;
@@ -446,6 +448,13 @@ pub fn run() {
             commands::playback::capture_frame_histogram,
             commands::playback::analyze_video_curves,
             commands::playback::generate_seek_thumbnails,
+            commands::playback::regenerate_seek_thumbnails,
+            commands::playback::export_contact_sheet,
+            commands::playback::export_clip,
+            commands::playback::clip_export_available,
+            commands::playback::open_export_folder,
+            commands::playback::get_media_poster,
+            commands::playback::get_scene_index,
             commands::playback::get_seek_thumbnail,
             commands::window::set_window_controls_visible,
             commands::window::apply_window_appearance,
@@ -498,6 +507,8 @@ pub fn run() {
             commands::persistence::apply_color_grade_shader,
             commands::persistence::apply_grain_shader,
             commands::persistence::apply_curves_shader,
+            commands::persistence::apply_split_compare,
+            commands::persistence::set_split_compare_position,
             commands::persistence::resolve_shader_candidates,
             commands::persistence::resolve_existing_shader_files,
             commands::persistence::get_media_association_status,

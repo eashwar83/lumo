@@ -4,6 +4,7 @@ import type { MediaTrack } from "../types/media";
 import type { SubtitleTarget } from "../composables/useSubtitleState";
 import type { VideoEnhancementsController } from "../composables/useVideoEnhancements";
 import type { VideoPresetsController } from "../composables/useVideoPresets";
+import type { VideoTransformController } from "../composables/useVideoTransform";
 import SeekBar from "./player-controls/SeekBar.vue";
 import LeftControls from "./player-controls/LeftControls.vue";
 import RightControls from "./player-controls/RightControls.vue";
@@ -14,6 +15,10 @@ const props = defineProps<{
     duration: number;
     isLivePlayback: boolean;
     mediaPath?: string;
+    thumbReloadToken?: number;
+    abPointA?: number | null;
+    abPointB?: number | null;
+    sceneMarks?: number[];
     progressPercent: number;
     bufferedPercent: number;
     volume: number;
@@ -36,9 +41,12 @@ const props = defineProps<{
     globalColorAdjustmentsEnabled: boolean;
     enhancements: VideoEnhancementsController;
     videoPresets: VideoPresetsController;
+    slomoFactor: number;
+    transform: VideoTransformController;
     isLoopOne: boolean;
     audioTracks: MediaTrack[];
     showAudioMenu: boolean;
+    audioEnhanceActive: boolean;
     subTracks: MediaTrack[];
     dualSubEnabled: boolean;
     secondarySubId: MediaTrack["id"];
@@ -84,7 +92,9 @@ const emit = defineEmits<{
     (e: "set-global-color-adjustments-enabled", enabled: boolean): void;
     (e: "auto-enhance"): void;
     (e: "reset-video-settings"): void;
+    (e: "set-slomo-factor", value: number): void;
     (e: "open-curves"): void;
+    (e: "open-audio-panel"): void;
     (e: "select-audio", track: MediaTrack): void;
     (e: "select-sub-track", payload: { target: SubtitleTarget; track: MediaTrack }): void;
     (e: "set-active-sub-target", target: SubtitleTarget): void;
@@ -221,14 +231,20 @@ onUnmounted(() => {
         :class="{ 'ui-hidden': props.isHidden }"
     >
         <div class="player-controls-content">
+            <!-- A-B / clip strip: rides with the controls so it auto-hides too. -->
+            <slot name="above-seek" />
             <SeekBar
                 v-if="!isLivePlayback"
                 :duration="duration"
                 :media-path="mediaPath"
+                :thumb-reload-token="thumbReloadToken"
                 :progress-percent="progressPercent"
                 :buffered-percent="bufferedPercent"
                 :format-time="formatTime"
                 :controls-visible="controlsVisible"
+                :ab-point-a="abPointA"
+                :ab-point-b="abPointB"
+                :scene-marks="sceneMarks"
                 @seek="emit('seek', $event)"
             />
             <div ref="controlsViewportRef" class="controls-main-viewport">
@@ -272,9 +288,12 @@ onUnmounted(() => {
                         "
                         :enhancements="enhancements"
                         :video-presets="videoPresets"
+                        :slomo-factor="slomoFactor"
+                        :transform="transform"
                         :is-loop-one="isLoopOne"
                         :audio-tracks="audioTracks"
                         :show-audio-menu="showAudioMenu"
+                        :audio-enhance-active="audioEnhanceActive"
                         :sub-tracks="subTracks"
                         :dual-sub-enabled="dualSubEnabled"
                         :secondary-sub-id="secondarySubId"
@@ -314,7 +333,9 @@ onUnmounted(() => {
                         "
                         @auto-enhance="emit('auto-enhance')"
                         @reset-video-settings="emit('reset-video-settings')"
+                        @set-slomo-factor="emit('set-slomo-factor', $event)"
                         @open-curves="emit('open-curves')"
+                        @open-audio-panel="emit('open-audio-panel')"
                         @select-audio="emit('select-audio', $event)"
                         @select-sub-track="emit('select-sub-track', $event)"
                         @set-active-sub-target="emit('set-active-sub-target', $event)"

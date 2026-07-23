@@ -23,11 +23,32 @@ import ContextMenu from "./components/ContextMenu.vue";
 import OnlineSubtitleDialog from "./components/OnlineSubtitleDialog.vue";
 import WindowResizeRegions from "./components/WindowResizeRegions.vue";
 import { usePlaybackShortcuts } from "./composables/usePlaybackShortcuts";
+import { useUltraSlomo } from "./composables/useUltraSlomo";
 import { useAutoCrop } from "./composables/useAutoCrop";
 import { useVideoGeometry } from "./composables/useVideoGeometry";
+import { useVideoTransform } from "./composables/useVideoTransform";
 import { useWindowSizeLock } from "./composables/useWindowSizeLock";
 import { useVideoPresets } from "./composables/useVideoPresets";
+import ClipBar from "./components/ClipBar.vue";
+import MenuBar from "./components/menu/MenuBar.vue";
+import { useAppMenu, menuShortcut } from "./composables/useAppMenu";
+import { useCommandRegistry } from "./composables/useCommandRegistry";
+import { useCustomShortcuts } from "./composables/useCustomShortcuts";
+import CommandPalette from "./components/CommandPalette.vue";
+import SplitCompareOverlay from "./components/SplitCompareOverlay.vue";
+import { useSplitCompare } from "./composables/useSplitCompare";
+import { useSubtitleSyncByEar } from "./composables/useSubtitleSyncByEar";
+import { useSceneIndex } from "./composables/useSceneIndex";
+import {
+    createDebouncedUiStateSaver,
+    loadUiState,
+} from "./composables/useUiStateStore";
 import CurvesPanel from "./components/CurvesPanel.vue";
+import EqualizerPanel from "./components/EqualizerPanel.vue";
+import SkipPrompt from "./components/SkipPrompt.vue";
+import { useAbRange } from "./composables/useAbRange";
+import { useSkipMarkers } from "./composables/useSkipMarkers";
+import { useAudioEnhancements } from "./composables/useAudioEnhancements";
 import SettingsPanel from "./panels/SettingsPanel.vue";
 import { useAutoloadFolder } from "./composables/useAutoloadFolder";
 import { usePlaybackFlow } from "./composables/usePlaybackFlow";
@@ -289,7 +310,9 @@ const { onSeek, onSeekRelative } = usePlaybackSeekActions({
 
 const isShortcutsHelpOpen = ref(false);
 const isCurvesOpen = ref(false);
+const isAudioPanelOpen = ref(false);
 const isSettingsOpen = ref(false);
+const audio = useAudioEnhancements();
 const isAlwaysOnTop = ref(false);
 const areSubtitlesVisible = ref(true);
 
@@ -509,7 +532,13 @@ const onToggleFavoritesView = () => {
     }
 };
 
-const { onKeydown, onDoubleClick, bindings: shortcutBindings } = usePlaybackShortcuts(
+// Ultra Slo-Mo: hold a key (default X) to ramp into smooth, interpolated slow
+// motion; release to ramp back. The factor picker lives in the video menu.
+const ultraSlomo = useUltraSlomo({
+    isFileLoaded: () => player.state.media.isFileLoaded,
+});
+
+const { onKeydown, onKeyup, onDoubleClick, bindings: shortcutBindings } = usePlaybackShortcuts(
     {
         state: player.state,
         togglePlayPause: player.togglePlayPause,
@@ -546,8 +575,25 @@ const { onKeydown, onDoubleClick, bindings: shortcutBindings } = usePlaybackShor
         cycleAspectRatio: () => onCycleAspectRatio(),
         fitWindowToVideo: () => onFitWindowToVideo(),
         toggleCurves: () => toggleCurves(),
+        cycleNightMode: () => audio.cycleNightMode(),
+        toggleAudioPanel: () => toggleAudioPanel(),
+        zoomIn: () => transform.zoomIn(),
+        zoomOut: () => transform.zoomOut(),
+        rotateVideo: () => transform.rotateBy(90),
+        resetTransform: () => transform.reset(),
+        abRangeCycle: () => abRange.cycle(),
+        abRangeClear: () => abRange.clear(),
+        skipIntro: () => {
+            if (skipMarkers.promptKind.value === "credits") {
+                void skipMarkers.skipCredits();
+            } else if (skipMarkers.promptKind.value === "intro") {
+                void skipMarkers.skipIntro();
+            }
+        },
         windowSizeUp: () => stepWindowSize(1.1),
         windowSizeDown: () => stepWindowSize(0.9),
+        startUltraSlomo: () => void ultraSlomo.start(),
+        stopUltraSlomo: () => void ultraSlomo.stop(),
         showProgress: showProgressOverlay,
         toggleShortcutsHelp: () => {
             isShortcutsHelpOpen.value = !isShortcutsHelpOpen.value;
@@ -558,11 +604,123 @@ const { onKeydown, onDoubleClick, bindings: shortcutBindings } = usePlaybackShor
             return true;
         },
         isShortcutsHelpOpen: () => isShortcutsHelpOpen.value,
+        closeTopOverlay: () => closeTopOverlay(),
+
+        // File & Export — the same handlers the Media menu uses.
+        openFile: () => requestOpenFilePicker(),
+        openFileOrFolder: () => void openFileOrFolderPicker(),
+        openNetworkStream: () => void onSideNavNavigate("network"),
+        showRecent: () => void onSideNavNavigate("history"),
+        showFavourites: () => void onSideNavNavigate("favorites"),
+        addToPlaylist: () => requestAddPlaylistItem(),
+        saveContactSheet: () => void onExportContactSheet(),
+        exportClip: () => exportClipFromRange(false),
+        exportGif: () => exportClipFromRange(true),
+        openExportFolder: () => void openExportFolder(),
+        quitApp: () => quitApp(),
+        commandPalette: () => {
+            isPaletteOpen.value = !isPaletteOpen.value;
+        },
+        toggleSplitCompare: () => void splitCompare.toggle(),
+        syncSubtitlesByEar: () => void subtitleSync.syncNow(),
+        nextScene: () => void sceneIndex.next(player.state.playback.currentTime),
+        previousScene: () =>
+            void sceneIndex.previous(player.state.playback.currentTime),
+        runCustomShortcut: (chord) => customShortcuts.runChord(chord),
+        canExportRange: () => abRange.hasRange.value && isLocalMediaPath.value,
+        canExportClip: () => isClipExportAvailable.value,
+        isLocalMedia: () => isLocalMediaPath.value,
     },
 );
 
 const currentMediaKey = () => player.state.media.url;
 const geometry = useVideoGeometry();
+const transform = useVideoTransform();
+transform.setMessageHandler(showMessageOverlay);
+
+// A-B range: loops the selection, and supplies the source range for clip/GIF
+// export and for saving a series' intro/credits markers.
+const abRange = useAbRange({
+    getPosition: () => player.state.playback.currentTime,
+    getDuration: () => player.state.playback.duration,
+    isFileLoaded: () => player.state.media.isFileLoaded,
+    onMessage: showMessageOverlay,
+});
+
+const skipMarkers = useSkipMarkers({
+    getPosition: () => player.state.playback.currentTime,
+    getDuration: () => player.state.playback.duration,
+    onMessage: showMessageOverlay,
+    seekTo: (seconds) => onSeek(seconds),
+    playNext: () => onNextTrack(),
+});
+
+// Re-check the intro/credits windows as playback advances. Cheap: it bails
+// immediately when the current folder has no markers.
+watch(
+    () => player.state.playback.currentTime,
+    () => skipMarkers.evaluate(),
+);
+
+// Hard ceiling on GIF length; the practical limit is the resolution-aware
+// pixel budget the backend enforces (mirrored in ClipBar).
+const GIF_MAX_SECONDS = 60;
+// Export runs through a headless mpv encode pass, so it needs a real file.
+const isLocalMediaPath = computed(
+    () =>
+        !!player.state.media.url.trim() &&
+        !/^(https?|rtsp|rtmp|smb|webdav):\/\//i.test(player.state.media.url),
+);
+const isExportingClip = ref(false);
+// Video clips are re-encoded by a full ffmpeg; the bundled playback ffmpeg has
+// no muxers or encoders. GIF export is in-process and always available.
+const isClipExportAvailable = ref(false);
+const refreshClipExportAvailability = async () => {
+    try {
+        isClipExportAvailable.value = await invoke<boolean>("clip_export_available");
+    } catch {
+        isClipExportAvailable.value = false;
+    }
+};
+// Detection spawns `ffmpeg -version`, so don't do it at launch — wait until a
+// range exists and the export buttons could actually be used.
+watch(
+    () => abRange.hasRange.value,
+    (hasRange) => {
+        if (hasRange) void refreshClipExportAvailability();
+    },
+);
+const onExportClip = async (payload: { asGif: boolean; gifWidth: number }) => {
+    if (isExportingClip.value) return;
+    const { asGif, gifWidth } = payload;
+    const path = player.state.media.url.trim();
+    const start = abRange.pointA.value;
+    const end = abRange.pointB.value;
+    if (!path || start === null || end === null) return;
+    isExportingClip.value = true;
+    // A full-resolution GIF can take a while to quantize, so keep the notice up.
+    showMessageOverlay(asGif ? "Rendering GIF…" : "Exporting clip…", 20000);
+    try {
+        const result = await invoke<{ path: string; fileName: string }>(
+            "export_clip",
+            {
+                path,
+                title: player.state.media.title,
+                start,
+                end,
+                gif: asGif,
+                gifWidth,
+                gifFps: 12,
+            },
+        );
+        showMessageOverlay(`Saved · ${result.fileName}`, 3200);
+    } catch (error) {
+        console.warn("[clip] export failed", error);
+        showMessageOverlay(`Export failed: ${error}`, 3600);
+    } finally {
+        isExportingClip.value = false;
+    }
+};
 
 // Locked window size (persists across videos). A genuine user drag updates the
 // lock and drops the current file's per-file "fit" flag it just overrode.
@@ -656,11 +814,87 @@ const onSetGlobalColorAdjustments = async (enabled: boolean) => {
     await enhancements.reapplyLook();
 };
 
+// --- zoom & pan interaction ------------------------------------------------
+// Ctrl+wheel zooms about the cursor; once zoomed, a left-drag on the video pans
+// (window dragging is suppressed for the duration — see useWindowDragRegion).
+
+// Anything in this list is real UI, not the video surface.
+const isVideoSurfaceTarget = (target: EventTarget | null): boolean => {
+    if (!(target instanceof Element)) return false;
+    return !target.closest(
+        [
+            "button",
+            "input",
+            "textarea",
+            "select",
+            "a[href]",
+            "[role='menu']",
+            "[role='menuitem']",
+            "[role='slider']",
+            "[contenteditable='true']",
+            "[data-window-no-drag]",
+            ".top-bar",
+            ".player-controls-content",
+            ".playlist-drawer",
+            ".side-actions-nav",
+            ".track-menu-container",
+        ].join(", "),
+    );
+};
+
+const onVideoWheel = (event: WheelEvent) => {
+    if (!event.ctrlKey) return;
+    if (!player.state.media.isFileLoaded) return;
+    if (!isVideoSurfaceTarget(event.target)) return;
+    event.preventDefault();
+    // Anchor the zoom on the cursor so the point under it stays put.
+    const anchorX = event.clientX / Math.max(1, window.innerWidth);
+    const anchorY = event.clientY / Math.max(1, window.innerHeight);
+    const steps = event.deltaY > 0 ? -1 : 1;
+    transform.zoomBy(steps * transform.ZOOM_STEP, anchorX, anchorY);
+    showMessageOverlay(`Zoom ${transform.zoomPercent.value}%`);
+};
+
+let panPointerId: number | null = null;
+let panLastX = 0;
+let panLastY = 0;
+
+const onVideoPanPointerMove = (event: PointerEvent) => {
+    if (event.pointerId !== panPointerId) return;
+    // Pan is expressed in window-size fractions, matching mpv's video-pan-*.
+    transform.panBy(
+        (event.clientX - panLastX) / Math.max(1, window.innerWidth),
+        (event.clientY - panLastY) / Math.max(1, window.innerHeight),
+    );
+    panLastX = event.clientX;
+    panLastY = event.clientY;
+};
+
+const endVideoPan = () => {
+    panPointerId = null;
+    window.removeEventListener("pointermove", onVideoPanPointerMove);
+    window.removeEventListener("pointerup", endVideoPan);
+    window.removeEventListener("pointercancel", endVideoPan);
+};
+
+const onVideoPanPointerDown = (event: PointerEvent) => {
+    if (event.button !== 0) return;
+    if (!transform.isZoomed.value) return;
+    if (!isVideoSurfaceTarget(event.target)) return;
+    panPointerId = event.pointerId;
+    panLastX = event.clientX;
+    panLastY = event.clientY;
+    window.addEventListener("pointermove", onVideoPanPointerMove);
+    window.addEventListener("pointerup", endVideoPan);
+    window.addEventListener("pointercancel", endVideoPan);
+};
+
 // Curves panel and the playlist drawer share the right edge, so they're
 // mutually exclusive — opening one closes the other.
 const openCurves = () => {
     closePlaylist();
     isSettingsOpen.value = false;
+    isAudioPanelOpen.value = false;
     isCurvesOpen.value = true;
 };
 const toggleCurves = () => {
@@ -674,19 +908,39 @@ const toggleCurves = () => {
 watch(isPlaylistOpen, (open) => {
     if (open) {
         isCurvesOpen.value = false;
+        isAudioPanelOpen.value = false;
         isSettingsOpen.value = false;
     }
 });
+
+// The audio panel shares the right edge with curves and the playlist drawer.
+const openAudioPanel = () => {
+    closePlaylist();
+    isSettingsOpen.value = false;
+    isCurvesOpen.value = false;
+    isAudioPanelOpen.value = true;
+};
+const toggleAudioPanel = () => {
+    if (isAudioPanelOpen.value) {
+        isAudioPanelOpen.value = false;
+        return;
+    }
+    openAudioPanel();
+};
 
 // Settings is a modal overlay that floats over live playback (it never stops
 // the video). It's mutually exclusive with the curves panel and playlist.
 const openSettings = () => {
     closePlaylist();
     isCurvesOpen.value = false;
+    isAudioPanelOpen.value = false;
     isSettingsOpen.value = true;
 };
 const closeSettings = () => {
     isSettingsOpen.value = false;
+    // The ffmpeg path may have just been set, which enables clip export — but
+    // only re-probe if there's a range whose buttons depend on the answer.
+    if (abRange.hasRange.value) void refreshClipExportAvailability();
 };
 // The update-note "install" flow sets activePanel to the settings id to reveal
 // the update UI. Settings is no longer a main panel, so translate that into
@@ -818,6 +1072,7 @@ const applyWindowSizingForMedia = async () => {
 };
 
 enhancements.setMessageHandler(showMessageOverlay);
+audio.setMessageHandler(showMessageOverlay);
 
 const autoloadFolder = useAutoloadFolder({ playlist: playlistState });
 
@@ -853,7 +1108,11 @@ const {
     onAppTouchStartCapture,
     onDragRegionMouseDown,
     onDragRegionTouchStart,
-} = useWindowDragRegion();
+} = useWindowDragRegion({
+    // While zoomed in, a left-drag on the video pans the image rather than
+    // moving the window (see onVideoPanPointerDown).
+    shouldSuppress: () => transform.isZoomed.value,
+});
 const { mediaInfo, statusBadges } = useMediaInfo(player);
 const currentOrLastPlaybackUrl = computed(
     () => player.state.media.url || player.state.media.lastLoadedUrl,
@@ -862,19 +1121,418 @@ const playlistEntriesWithProgress = usePlaylistEntriesWithProgress(
     orderedPlaylist,
     history.history,
 );
+// Force-rebuild the current video's seek-bar thumbnails (e.g. when the cached
+// set came out wrong). Bumping the token clears the seek bar's in-memory cache
+// so the freshly generated frames are fetched on the next hover.
+const thumbReloadToken = ref(0);
+const onRegenerateThumbnails = async () => {
+    const path = player.state.media.url.trim();
+    const duration = player.state.playback.duration;
+    if (!path || duration <= 0) return;
+    showMessageOverlay("Regenerating thumbnails…");
+    try {
+        await invoke("regenerate_seek_thumbnails", { path, duration });
+        thumbReloadToken.value += 1;
+        showMessageOverlay("Thumbnails regenerated");
+    } catch (error) {
+        console.warn("[thumbnails] regenerate failed", error);
+        showMessageOverlay("Thumbnail regeneration failed");
+    }
+};
+
+// Tile evenly-spaced frames into one timestamped JPEG next to the screenshots.
+// Extraction runs a headless mpv pass, so it takes a few seconds on long files.
+const isExportingContactSheet = ref(false);
+const onExportContactSheet = async () => {
+    if (isExportingContactSheet.value) return;
+    const path = player.state.media.url.trim();
+    const duration = player.state.playback.duration;
+    if (!path || duration <= 0) return;
+    isExportingContactSheet.value = true;
+    showMessageOverlay("Building contact sheet…", 6000);
+    try {
+        const result = await invoke<{ path: string; fileName: string }>(
+            "export_contact_sheet",
+            { path, title: player.state.media.title, duration },
+        );
+        showMessageOverlay(`Contact sheet saved · ${result.fileName}`, 3200);
+    } catch (error) {
+        console.warn("[contact-sheet] export failed", error);
+        showMessageOverlay(`Contact sheet failed: ${error}`, 3600);
+    } finally {
+        isExportingContactSheet.value = false;
+    }
+};
+
 const playbackContextMenu = usePlaybackContextMenu({
     isFileLoaded: () => player.state.media.isFileLoaded,
     getCurrentPath: () => player.state.media.url,
     getCurrentTitle: () => player.state.media.title,
-    addToFavorites: playlistState.addToFavorites,
+    // Route through the same handler as the toolbar so a poster frame is
+    // captured; adding directly would leave the Favourites tile blank.
+    addToFavorites: () => void onToggleFavorite(),
+    isFavorite: () => isCurrentFavorite.value,
     searchOnlineSubtitles: tracks.searchOnlineSubtitleTracks,
     openSubtitleAdvancedSettings: () => {
         tracks.showSubMenu.value = true;
         tracks.showSubtitleAdvancedSettings.value = true;
     },
     openSettings: openSettingsFromPlaybackContextMenu,
+    regenerateThumbnails: onRegenerateThumbnails,
+    exportContactSheet: onExportContactSheet,
+    isMenuBarVisible: () => isMenuBarVisible.value,
+    toggleMenuBar: () => setMenuBarVisible(!isMenuBarVisible.value),
     hideAllMenus,
 });
+
+// --- application menu bar -------------------------------------------------
+// A VLC-style menu row above the header. Purely an additional route to actions
+// that already exist; nothing here reimplements behaviour.
+
+const isMenuBarVisible = ref(true);
+const menuBarSaver = createDebouncedUiStateSaver(300);
+const setMenuBarVisible = (visible: boolean) => {
+    isMenuBarVisible.value = visible;
+    menuBarSaver.saveDebounced({ menuBarVisible: visible });
+};
+void loadUiState<{ menuBarVisible?: boolean }>().then((stored) => {
+    if (stored?.menuBarVisible === false) isMenuBarVisible.value = false;
+});
+
+// The menu bar is an opaque strip over the mpv surface. Reserving a video
+// margin to sit it "above" the picture pillarboxes the frame (mpv scales the
+// whole video down to keep aspect), so instead the bar fades in and out with
+// the rest of the on-screen chrome: while you're watching (mouse idle) the
+// video is full and unobstructed, and moving the mouse brings the menu back.
+// It stays permanently visible only on the home/browse screens, where there's
+// no video to cover.
+const isMenuBarShown = computed(() => {
+    if (!isMenuBarVisible.value) return false;
+    if (player.state.window.isFullscreen) return false;
+    if (!player.state.media.isFileLoaded) return true;
+    return ui.showControls.value;
+});
+
+const openExportFolder = async () => {
+    try {
+        await invoke("open_export_folder");
+    } catch (error) {
+        console.warn("[menu] open export folder failed", error);
+        showMessageOverlay("Couldn't open the export folder");
+    }
+};
+
+// Media actions, shared by the menu bar and the keyboard shortcuts so both
+// routes call exactly the same code.
+const openFileOrFolderPicker = async () => {
+    const selected = await player.pickMediaPathsAuto();
+    if (selected.length) await openSelectedPaths(selected);
+};
+const quitApp = () => void getCurrentWindow().close();
+const exportClipFromRange = (asGif: boolean) =>
+    void onExportClip({ asGif, gifWidth: asGif ? 720 : 0 });
+
+// Before/after wipe over the enhancement chain.
+const splitCompare = useSplitCompare();
+
+// Tap-to-sync subtitles: works out the offset from the nearest subtitle event.
+const subtitleSync = useSubtitleSyncByEar({
+    getDelay: () => adjustments.subDelay.value,
+    setDelay: (value) =>
+        adjustments.setSubDelayForTarget({ target: "primary", value }),
+    onMessage: showMessageOverlay,
+});
+
+// Chapters when the file has them, detected scenes when it doesn't.
+const sceneIndex = useSceneIndex({
+    getPath: () => player.state.media.url,
+    getDuration: () => player.state.playback.duration,
+    seekTo: (seconds) => onSeek(seconds),
+    formatTime: player.formatTime,
+    onMessage: showMessageOverlay,
+});
+
+const isPaletteOpen = ref(false);
+
+// Shows a command's bound key in the palette, when the user has given it one.
+const chordForCommand = (commandId: string): string | undefined =>
+    customShortcuts.shortcuts.value.find(
+        (entry) => entry.commandId === commandId && entry.kind === "action",
+    )?.chord;
+
+// Every bindable command, including the numeric settings that can't live in a
+// menu. The shortcut builder in Settings binds against this.
+const commandRegistry = useCommandRegistry({
+    enhancements,
+    audio,
+    transform,
+    videoPresets,
+    adjustments: {
+        brightness: () => adjustments.brightness.value,
+        contrast: () => adjustments.contrast.value,
+        saturation: () => adjustments.saturation.value,
+        gamma: () => adjustments.gamma.value,
+        hue: () => adjustments.hue.value,
+        setBrightness: adjustments.setBrightness,
+        setContrast: adjustments.setContrast,
+        setSaturation: adjustments.setSaturation,
+        setGamma: adjustments.setGamma,
+        setHue: adjustments.setHue,
+        audioDelay: () => adjustments.audioDelay.value,
+        setAudioDelay: adjustments.setAudioDelay,
+        subDelay: () => adjustments.subDelay.value,
+        setSubDelay: (value: number) =>
+            adjustments.setSubDelayForTarget({ target: "primary", value }),
+    },
+
+    openVideoPanel: () => toggleMenu("settings"),
+    openAudioTrackMenu: () => toggleMenu("audio"),
+    openSubtitleMenu: () => toggleMenu("sub"),
+    openSpeedMenu: () => toggleMenu("speed"),
+    openCurves: () => openCurves(),
+    openAudioPanel: () => openAudioPanel(),
+    openPlaylist: () => void togglePlaylist(),
+    openSettings: () => openSettings(),
+    openMediaInfo: () => void toggleInfo(),
+    openShortcutsHelp: () => {
+        isShortcutsHelpOpen.value = !isShortcutsHelpOpen.value;
+    },
+    closePanels: () => {
+        hideAllMenus();
+        isCurvesOpen.value = false;
+        isAudioPanelOpen.value = false;
+        isSettingsOpen.value = false;
+        closePlaylist();
+    },
+
+    getSpeed: () => player.state.playback.speed,
+    setSpeed: (value) => void speed.setSpeed(value),
+    getVolume: () => player.state.playback.volume,
+    setVolume: (value) => void playbackVolume.setVolume(value),
+
+    autoEnhance: () => void onAutoEnhance(),
+    resetVideoSettings: () => void onResetVideoSettings(),
+    cycleAspectRatio: () => void onCycleAspectRatio(),
+    autoCropNow: () => void autoCrop.detectNow(),
+    clearCrop: () => void autoCrop.clear(),
+
+    toggleSplitCompare: () => void splitCompare.toggle(),
+    getSplitPosition: () => splitCompare.position.value,
+    setSplitPosition: (value) => {
+        splitCompare.setPosition(value);
+        splitCompare.commitPosition();
+    },
+    oldFilmRestore: () => void enhancements.applyOldFilmRestore(),
+    setDeband: (level) => void enhancements.setDeband(level),
+    syncSubtitlesByEar: () => void subtitleSync.syncNow(),
+    nextScene: () => void sceneIndex.next(player.state.playback.currentTime),
+    previousScene: () => void sceneIndex.previous(player.state.playback.currentTime),
+    rescanScenes: () => void sceneIndex.scan(true),
+});
+
+const customShortcuts = useCustomShortcuts({
+    resolve: (id) => commandRegistry.byId.value.get(id),
+    onMessage: showMessageOverlay,
+});
+
+const { menus: appMenus } = useAppMenu({
+    isFileLoaded: () => player.state.media.isFileLoaded,
+    isLocalMedia: () => isLocalMediaPath.value,
+    isPlaying: () => player.state.playback.isPlaying,
+    isFullscreen: () => player.state.window.isFullscreen,
+    isAlwaysOnTop: () => isAlwaysOnTop.value,
+    isLoopOne: () => isLoopOne.value,
+    isFavorite: () => isCurrentFavorite.value,
+    areSubtitlesVisible: () => areSubtitlesVisible.value,
+    isDualSubEnabled: () => tracks.dualSubEnabled.value,
+    currentSpeed: () => player.state.playback.speed,
+    playbackRates: () => [...speed.playbackRates],
+    aspectLabel: () => geometry.currentAspectLabel.value,
+    hasAbRange: () => abRange.hasRange.value,
+    clipExportAvailable: () => isClipExportAvailable.value,
+    keyFor: (id) => menuShortcut(shortcutBindings.value[id]),
+
+    audio,
+    enhancements,
+    videoPresets,
+    transform,
+    ab: abRange,
+    skip: skipMarkers,
+
+    audioTracks: () => ({
+        tracks: tracks.audioTracks.value,
+        select: tracks.selectAudio,
+        emptyLabel: "No audio tracks",
+    }),
+    subtitleTracks: () => ({
+        tracks: tracks.subTracks.value,
+        select: (track) =>
+            tracks.selectSubTrack({ target: "primary", track }),
+        emptyLabel: "No subtitle tracks",
+    }),
+
+    openFilePicker: requestOpenFilePicker,
+    openFileOrFolderPicker: () => void openFileOrFolderPicker(),
+    gotoPanel: (panel) => void onSideNavNavigate(panel),
+    addToPlaylist: requestAddPlaylistItem,
+    exportContactSheet: onExportContactSheet,
+    exportClip: exportClipFromRange,
+    openExportFolder: () => void openExportFolder(),
+    quit: quitApp,
+
+    togglePlayPause: () => void player.togglePlayPause(),
+    seekRelative: (seconds) => void onSeekRelative(seconds),
+    seekToStart: () => void onSeek(0),
+    previousTrack: () => void onPrevTrack(),
+    nextTrack: () => void onNextTrack(),
+    frameStep: (forward) => void frameStep(forward ? 1 : -1),
+    setSpeed: (rate) => void speed.setSpeed(rate),
+    resetSpeed: () => void resetPlaybackSpeed(),
+    setSlomoFactor: ultraSlomo.setFactor,
+    slomoFactor: () => ultraSlomo.factor.value,
+    toggleLoop: () => void toggleLoopWithFeedback(),
+
+    adjustVolume: (delta) => {
+        const next = player.state.playback.volume + delta;
+        void playbackVolume.setVolume(next);
+        showVolumeOverlay(next);
+    },
+    toggleMuted: () => void onToggleMuted(),
+    isMuted: () => player.state.playback.isMuted,
+    addExternalAudio: () => void tracks.addExternalAudioTrack(),
+    adjustAudioDelay: (delta) => void adjustAudioDelayBy(delta),
+    resetAudioDelay: () => void adjustments.setAudioDelay(0),
+    openAudioPanel,
+
+    toggleFullscreen: () => void onToggleFullscreen(),
+    toggleAlwaysOnTop: () => void toggleAlwaysOnTop(),
+    cycleAspectRatio: () => void onCycleAspectRatio(),
+    autoCropNow: () => void autoCrop.detectNow(),
+    clearCrop: () => void autoCrop.clear(),
+    fitWindowToVideo: () => void onFitWindowToVideo(),
+    stepWindowSize: (factor) => void stepWindowSize(factor),
+    openCurves,
+    toggleSplitCompare: () => void splitCompare.toggle(),
+    syncSubtitlesByEar: () => void subtitleSync.syncNow(),
+    nextScene: () => void sceneIndex.next(player.state.playback.currentTime),
+    previousScene: () => void sceneIndex.previous(player.state.playback.currentTime),
+    rescanScenes: () => void sceneIndex.scan(true),
+    sceneCount: () => sceneIndex.markers.value.length,
+    scenesAreChapters: () => sceneIndex.fromChapters.value,
+    autoEnhance: () => void onAutoEnhance(),
+    resetVideoSettings: () => void onResetVideoSettings(),
+    takeScreenshot: (withSubtitles) => void takeScreenshotShortcut(withSubtitles),
+
+    addExternalSubtitle: () => void tracks.addExternalSubtitleTrack(),
+    findOnlineSubtitles: () => {
+        const url = player.state.media.url.trim();
+        if (!url) return;
+        void tracks.searchOnlineSubtitleTracks(
+            url,
+            player.state.media.title || undefined,
+        );
+    },
+    toggleSubtitleVisibility: () => void toggleSubtitleVisibility(),
+    setDualSubEnabled: (enabled) => void tracks.setDualSubEnabled(enabled),
+    adjustSubtitleDelay: (delta) => void adjustSubtitleDelay(delta),
+    resetSubtitleDelay: () =>
+        void adjustments.setSubDelayForTarget({ target: "primary", value: 0 }),
+    openSubtitleAdvanced: () => {
+        tracks.showSubMenu.value = true;
+        tracks.showSubtitleAdvancedSettings.value = true;
+    },
+
+    openSettings,
+    toggleShortcutsHelp: () => {
+        isShortcutsHelpOpen.value = !isShortcutsHelpOpen.value;
+    },
+    toggleInfo: () => void toggleInfo(),
+    regenerateThumbnails: () => void onRegenerateThumbnails(),
+
+    togglePlaylist: () => void togglePlaylist(),
+    toggleFavorite: () => void onToggleFavorite(),
+    showProgress: showProgressOverlay,
+    hideMenuBar: () => setMenuBarVisible(false),
+
+    checkForUpdates: () => {
+        openSettings();
+        showMessageOverlay("Check for updates in Settings → About");
+    },
+    showAbout: () => {
+        openSettings();
+        showMessageOverlay("Settings → About");
+    },
+});
+
+// Escape dismisses one layer at a time, topmost first: modal dialogs, then the
+// context menu, then the settings modal and the right-edge panels, then the
+// control-bar dropdowns, the playlist drawer and finally the info overlay.
+// Returns false when nothing was open, so the caller can fall through to
+// "exit fullscreen". Keep this ordered outermost-last.
+const closeTopOverlay = (): boolean => {
+    if (isPaletteOpen.value) {
+        isPaletteOpen.value = false;
+        return true;
+    }
+    if (playlistCreationPrompt.isOpen.value) {
+        playlistCreationPrompt.cancelPlaylistCreation();
+        return true;
+    }
+    if (isUpdateNotePromptOpen.value) {
+        closeUpdateNotePrompt();
+        return true;
+    }
+    if (isClearConfirmOpen.value) {
+        closeClearConfirm();
+        return true;
+    }
+    if (tracks.isOnlineSubtitleDialogOpen.value) {
+        tracks.closeOnlineSubtitleDialog();
+        return true;
+    }
+    if (playbackContextMenu.isOpen.value) {
+        playbackContextMenu.close();
+        return true;
+    }
+    if (isSettingsOpen.value) {
+        closeSettings();
+        return true;
+    }
+    if (isCurvesOpen.value) {
+        isCurvesOpen.value = false;
+        return true;
+    }
+    if (isAudioPanelOpen.value) {
+        isAudioPanelOpen.value = false;
+        return true;
+    }
+    if (
+        tracks.showAudioMenu.value ||
+        tracks.showSubMenu.value ||
+        speed.showSpeedMenu.value ||
+        adjustments.showSettingsMenu.value
+    ) {
+        hideAllMenus();
+        return true;
+    }
+    if (isPlaylistOpen.value) {
+        closePlaylist();
+        return true;
+    }
+    if (isInfoOpen.value) {
+        isInfoOpen.value = false;
+        return true;
+    }
+    if (skipMarkers.promptKind.value) {
+        skipMarkers.dismissPrompt();
+        return true;
+    }
+    if (abRange.isActive.value) {
+        void abRange.clear();
+        return true;
+    }
+    return false;
+};
 
 const { hasLoadedPanel, loadActivePanel } = useAppUiPersistence({
     activePanel,
@@ -916,7 +1574,13 @@ const onFileLoaded = async () => {
     await adjustments.applyColorAdjustmentsForMedia(player.state.media.url);
     await subtitleAppearance.applySubtitleAppearanceOptions();
     void enhancements.onFileLoaded(currentMediaKey());
+    void audio.onFileLoaded();
     await geometry.applyAspectForMedia(currentMediaKey());
+    await transform.applyForMedia(currentMediaKey());
+    void abRange.onFileLoaded();
+    skipMarkers.onFileLoaded(player.state.media.url);
+    void splitCompare.onFileLoaded();
+    sceneIndex.onFileLoaded();
     void applyWindowSizingForMedia();
     // Pre-render seek-bar thumbnails in the background for local files.
     if (player.state.playback.duration > 0) {
@@ -944,6 +1608,7 @@ useAppRuntimeBindings({
     onFullscreenTransitionEnd: resetFullscreenTransition,
     onCloseAllMenus: closeAllMenus,
     onKeydown,
+    onKeyup,
     onDoubleClick,
     setWindowControlsVisible,
     onFileLoaded,
@@ -986,9 +1651,13 @@ useAppStartupBindings({
                 player.state.media.isFileLoaded &&
                 !ui.showControls.value &&
                 !isPointerOverUi,
+            'cursor-pannable': transform.isZoomed.value && !isPointerOverUi,
+            'has-menu-bar': isMenuBarShown,
         }"
         @mousedown.capture="onAppMouseDownCapture"
         @touchstart.capture="onAppTouchStartCapture"
+        @pointerdown="onVideoPanPointerDown"
+        @wheel="onVideoWheel"
         @contextmenu="playbackContextMenu.onContextMenu"
     >
         <SideActionsNav
@@ -998,6 +1667,14 @@ useAppStartupBindings({
             :nav-active-panel="sideNavActivePanel"
             @navigate="onSideNavNavigate"
         />
+
+        <transition name="fade">
+            <MenuBar
+                v-show="isMenuBarShown"
+                :menus="appMenus"
+                :show-window-controls="playerHeaderCompactModeEnabled"
+            />
+        </transition>
 
         <PlayerHeader
             ref="playerHeaderRef"
@@ -1013,6 +1690,7 @@ useAppStartupBindings({
             :is-loading="isLoadingForCurrentUrl"
             :playback-title-mode="playbackTitleMode"
             :compact-mode-enabled="playerHeaderCompactModeEnabled"
+            :menu-bar-visible="isMenuBarShown"
             :is-fullscreen="player.state.window.isFullscreen"
             :info="mediaInfo"
             :current-time="player.state.playback.currentTime"
@@ -1131,6 +1809,10 @@ useAppStartupBindings({
             :current-time="player.state.playback.currentTime"
             :duration="player.state.playback.duration"
             :media-path="player.state.media.url"
+            :thumb-reload-token="thumbReloadToken"
+            :ab-point-a="abRange.pointA.value"
+            :ab-point-b="abRange.pointB.value"
+            :scene-marks="sceneIndex.markers.value.map((m) => m.start)"
             :is-live-playback="player.state.media.isLivePlayback"
             :volume="player.state.playback.volume"
             :progress-percent="player.progressPercent.value"
@@ -1158,9 +1840,12 @@ useAppStartupBindings({
             "
             :enhancements="enhancements"
             :video-presets="videoPresets"
+            :slomo-factor="ultraSlomo.factor.value"
+            :transform="transform"
             :is-loop-one="isLoopOne"
             :audio-tracks="tracks.audioTracks.value"
             :show-audio-menu="tracks.showAudioMenu.value"
+            :audio-enhance-active="audio.isActive.value"
             :sub-tracks="tracks.subTracks.value"
             :dual-sub-enabled="tracks.dualSubEnabled.value"
             :secondary-sub-id="tracks.secondarySubId.value"
@@ -1203,7 +1888,9 @@ useAppStartupBindings({
             @set-global-color-adjustments-enabled="onSetGlobalColorAdjustments"
             @auto-enhance="onAutoEnhance"
             @reset-video-settings="onResetVideoSettings"
+            @set-slomo-factor="ultraSlomo.setFactor"
             @open-curves="openCurves"
+            @open-audio-panel="openAudioPanel"
             @select-audio="tracks.selectAudio"
             @select-sub-track="tracks.selectSubTrack"
             @set-active-sub-target="tracks.setActiveSubTarget"
@@ -1213,7 +1900,20 @@ useAppStartupBindings({
             @find-online-sub="player.state.media.url.trim() && tracks.searchOnlineSubtitleTracks(player.state.media.url, player.state.media.title || undefined)"
             @toggle-fullscreen="onToggleFullscreen"
             @update:show-subtitle-advanced-settings="tracks.showSubtitleAdvancedSettings.value = $event"
-        />
+        >
+            <template #above-seek>
+                <ClipBar
+                    :ab="abRange"
+                    :skip="skipMarkers"
+                    :format-time="player.formatTime"
+                    :exporting="isExportingClip"
+                    :gif-max-seconds="GIF_MAX_SECONDS"
+                    :can-export="isLocalMediaPath"
+                    :clip-available="isClipExportAvailable"
+                    @export="onExportClip"
+                />
+            </template>
+        </PlayerControls>
 
         <PlaylistPeekButton
             v-show="!isPlaylistOpen && !isCurvesOpen"
@@ -1316,7 +2016,36 @@ useAppStartupBindings({
             @close="isCurvesOpen = false"
         />
 
-        <SettingsPanel :visible="isSettingsOpen" @close="closeSettings" />
+        <EqualizerPanel
+            :audio="audio"
+            :visible="isAudioPanelOpen"
+            @close="isAudioPanelOpen = false"
+        />
+
+        <SettingsPanel
+            :visible="isSettingsOpen"
+            :commands="commandRegistry.commands.value"
+            :custom-shortcuts="customShortcuts"
+            @close="closeSettings"
+        />
+
+        <SkipPrompt :skip="skipMarkers" />
+
+        <SplitCompareOverlay :compare="splitCompare" />
+
+        <CommandPalette
+            :open="isPaletteOpen"
+            :commands="commandRegistry.commands.value"
+            :chord-for="chordForCommand"
+            @close="isPaletteOpen = false"
+        />
+
+        <transition name="slomo-badge-fade">
+            <div v-if="ultraSlomo.isActive.value" class="slomo-badge">
+                <span class="slomo-badge__dot"></span>
+                {{ ultraSlomo.label.value }}
+            </div>
+        </transition>
 
         <WindowResizeRegions
             v-if="isLinuxPlatform && !player.state.window.isFullscreen"
@@ -1375,5 +2104,57 @@ useAppStartupBindings({
 
 :global(:root[data-theme="graphite"]) .update-note__heading--section {
     color: rgba(237, 241, 246, 0.95);
+}
+
+/* Ultra Slo-Mo active badge */
+.slomo-badge {
+    position: fixed;
+    top: 54px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 118;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 14px;
+    border-radius: 999px;
+    background: rgba(10, 12, 16, 0.72);
+    border: 1px solid rgba(143, 179, 255, 0.5);
+    color: #eaf0ff;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+    pointer-events: none;
+}
+
+.slomo-badge__dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #8fb3ff;
+    box-shadow: 0 0 8px #8fb3ff;
+    animation: slomo-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes slomo-pulse {
+    0%,
+    100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.35;
+    }
+}
+
+.slomo-badge-fade-enter-active,
+.slomo-badge-fade-leave-active {
+    transition: opacity 0.18s ease;
+}
+
+.slomo-badge-fade-enter-from,
+.slomo-badge-fade-leave-to {
+    opacity: 0;
 }
 </style>

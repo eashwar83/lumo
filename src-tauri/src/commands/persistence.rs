@@ -261,7 +261,7 @@ fn ensure_log_parent_dir(log_path: &Path) -> Result<(), String> {
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
-fn open_directory(path: &Path) -> Result<(), String> {
+pub(crate) fn open_directory(path: &Path) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let mut command = Command::new("open");
     #[cfg(target_os = "linux")]
@@ -285,7 +285,7 @@ fn open_directory(path: &Path) -> Result<(), String> {
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
-fn open_directory(_path: &Path) -> Result<(), String> {
+pub(crate) fn open_directory(_path: &Path) -> Result<(), String> {
     Err("Opening directories is unsupported on this platform".to_string())
 }
 
@@ -563,6 +563,11 @@ struct GlslLayers {
     curves: Vec<String>,
     sharpen: Vec<String>,
     grain: Vec<String>,
+    /// Wipe position 0..1 when the before/after split is active, else None.
+    split: Option<f64>,
+    /// Cache dir, captured on first shader apply, so `rebuild` can write the
+    /// combined split file without a tauri handle.
+    cache_dir: Option<PathBuf>,
 }
 
 static GLSL_LAYERS: std::sync::Mutex<GlslLayers> = std::sync::Mutex::new(GlslLayers {
@@ -572,18 +577,181 @@ static GLSL_LAYERS: std::sync::Mutex<GlslLayers> = std::sync::Mutex::new(GlslLay
     curves: Vec::new(),
     sharpen: Vec::new(),
     grain: Vec::new(),
+    split: None,
+    cache_dir: None,
 });
+
+static SPLIT_COMBINED_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 fn rebuild_combined_glsl(mpv_guard: &crate::mpv::MpvHandle) -> Result<(), String> {
     let layers = GLSL_LAYERS.lock().map_err(|_| "glsl layer lock poisoned".to_string())?;
-    // Order: upscale -> grade -> curves (colour) -> sharpen -> grain -> manual.
-    let mut combined = layers.upscale.clone();
-    combined.extend(layers.grade.iter().cloned());
-    combined.extend(layers.curves.iter().cloned());
-    combined.extend(layers.sharpen.iter().cloned());
-    combined.extend(layers.grain.iter().cloned());
-    combined.extend(layers.manual.iter().cloned());
-    apply_runtime_glsl_shaders(mpv_guard, &combined)
+
+    // The effect layers, in application order.
+    let ordered = |layers: &GlslLayers| {
+        let mut files = layers.upscale.clone();
+        files.extend(layers.grade.iter().cloned());
+        files.extend(layers.curves.iter().cloned());
+        files.extend(layers.sharpen.iter().cloned());
+        files.extend(layers.grain.iter().cloned());
+        files.extend(layers.manual.iter().cloned());
+        files
+    };
+
+    if let (Some(pos), Some(dir)) = (layers.split, layers.cache_dir.as_ref()) {
+        // Split active: concatenate stash + every effect shader + mix into ONE
+        // file. libplacebo only shares a `//!SAVE` texture *within* a file, so
+        // this is the only way the mix can see the stashed original. Because the
+        // mix hooks MAIN (like the effects), both halves are combined before
+        // colour management / HDR tone mapping and are transformed together —
+        // which is what keeps the original half from looking oversaturated on an
+        // HDR display.
+        let mut source = String::new();
+        source.push_str(&capture_shader_source());
+        source.push('\n');
+        for path in ordered(&layers) {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                source.push_str(&content);
+                source.push('\n');
+            }
+        }
+        source.push_str(&compare_shader_source(pos));
+
+        // Clean up stale combined files, then write a fresh uniquely-named one
+        // (mpv caches shaders by path, so the name must change to reload).
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if name.starts_with("lumo_split_combined") && name.ends_with(".glsl") {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
+        let seq = SPLIT_COMBINED_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let combined_path = dir.join(format!("lumo_split_combined_{seq}.glsl"));
+        std::fs::write(&combined_path, source).map_err(|err| err.to_string())?;
+        return apply_runtime_glsl_shaders(
+            mpv_guard,
+            &[combined_path.to_string_lossy().into_owned()],
+        );
+    }
+
+    // Normal path: each effect is its own file, in order.
+    apply_runtime_glsl_shaders(mpv_guard, &ordered(&layers))
+}
+
+// --- before/after split compare -------------------------------------------
+//
+// Both passes MUST live in one file: libplacebo scopes `//!SAVE` textures per
+// shader file, so a mix pass in a separate file cannot see LUMO_ORIG — and it
+// drops the binding silently rather than reporting an error, which makes the
+// failure look like "the shader loaded but did nothing". Verified end-to-end
+// through ffmpeg's libplacebo filter, which accepts the same .hook format.
+//
+// Ordering still works out: the stash hooks MAIN and this file is first in the
+// shader list, so it runs before the effect shaders (which also hook MAIN);
+// the mix hooks OUTPUT, which by definition runs after all of them.
+
+// Passthrough that stashes the untouched frame. Runs first (before any effect
+// shader), so LUMO_ORIG holds the true original at the MAIN stage.
+fn capture_shader_source() -> String {
+    "//!HOOK MAIN\n\
+//!BIND HOOKED\n\
+//!SAVE LUMO_ORIG\n\
+//!DESC Lumo stash original frame\n\
+vec4 hook() {\n\
+    return HOOKED_tex(HOOKED_pos);\n\
+}\n"
+        .to_string()
+}
+
+// The mix. It ALSO hooks MAIN (not OUTPUT) and runs last, so the original and
+// the processed frame are combined at the same pipeline stage — mpv's colour
+// management then applies to both halves equally. An OUTPUT-stage mix left the
+// original half un-colour-managed, which is what made it look oversaturated.
+//
+// The position is baked in as a constant and the shader is rewritten when it
+// moves: `//!PARAM` would avoid the rewrite, but this build's libplacebo rejects
+// that directive ("Unrecognized command 'PARAM'") and drops the whole shader.
+// Rewrites are throttled by the caller.
+fn compare_shader_source(position: f64) -> String {
+    let pos = position.clamp(0.0, 1.0);
+    format!(
+        "//!HOOK MAIN\n\
+//!BIND HOOKED\n\
+//!BIND LUMO_ORIG\n\
+//!DESC Lumo split compare\n\
+vec4 hook() {{\n\
+    float lumo_split = {pos:.5};\n\
+    vec4 processed = HOOKED_tex(HOOKED_pos);\n\
+    vec4 original = LUMO_ORIG_tex(HOOKED_pos);\n\
+    float delta = HOOKED_pos.x - lumo_split;\n\
+    vec4 col = delta < 0.0 ? original : processed;\n\
+    // Divider: white with a dark edge so it reads against any frame.\n\
+    float w = HOOKED_pt.x;\n\
+    float d = abs(delta);\n\
+    if (d < w * 1.2) {{\n\
+        col = vec4(1.0, 1.0, 1.0, col.a);\n\
+    }} else if (d < w * 2.4) {{\n\
+        col = vec4(0.0, 0.0, 0.0, col.a);\n\
+    }}\n\
+    return col;\n\
+}}\n"
+    )
+}
+
+// Remember the cache dir so `rebuild_combined_glsl` can write the combined
+// split file without a tauri handle.
+fn remember_cache_dir(app: &tauri::AppHandle) {
+    if let Ok(dir) = app.path().app_cache_dir() {
+        let _ = std::fs::create_dir_all(&dir);
+        if let Ok(mut layers) = GLSL_LAYERS.lock() {
+            if layers.cache_dir.is_none() {
+                layers.cache_dir = Some(dir);
+            }
+        }
+    }
+}
+
+/// Turn the before/after wipe on or off. `position` is 0..1 across the frame.
+/// When on, `rebuild_combined_glsl` folds the stash, every effect shader, and
+/// the mix into a single file so the comparison is HDR-correct.
+#[tauri::command]
+pub(crate) fn apply_split_compare(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    enabled: bool,
+    position: f64,
+) -> Result<(), String> {
+    remember_cache_dir(&app);
+    {
+        let mut layers = GLSL_LAYERS
+            .lock()
+            .map_err(|_| "glsl layer lock poisoned".to_string())?;
+        layers.split = enabled.then(|| position.clamp(0.0, 1.0));
+    }
+    with_mpv(&state, |mpv_guard| rebuild_combined_glsl(mpv_guard))?;
+    Ok(())
+}
+
+/// Move the wipe line. Rewrites and reloads the combined shader, so callers
+/// should throttle this while dragging.
+#[tauri::command]
+pub(crate) fn set_split_compare_position(
+    state: tauri::State<'_, AppState>,
+    position: f64,
+) -> Result<(), String> {
+    {
+        let mut layers = GLSL_LAYERS
+            .lock()
+            .map_err(|_| "glsl layer lock poisoned".to_string())?;
+        if layers.split.is_none() {
+            return Ok(());
+        }
+        layers.split = Some(position.clamp(0.0, 1.0));
+    }
+    with_mpv(&state, |mpv_guard| rebuild_combined_glsl(mpv_guard))?;
+    Ok(())
 }
 
 // A parametric unsharp-mask shader (13-tap disk blur on MAIN/RGB) with the

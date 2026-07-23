@@ -56,9 +56,36 @@ export type ShortcutActionId =
     | "fitWindowToVideo"
     | "windowSizeUp"
     | "windowSizeDown"
-    | "toggleCurves";
+    | "toggleCurves"
+    | "ultraSlomoHold"
+    | "cycleNightMode"
+    | "toggleAudioPanel"
+    | "zoomIn"
+    | "zoomOut"
+    | "rotateVideo"
+    | "resetTransform"
+    | "abRangeCycle"
+    | "abRangeClear"
+    | "skipIntro"
+    | "openFile"
+    | "openFileOrFolder"
+    | "openNetworkStream"
+    | "showRecent"
+    | "showFavourites"
+    | "addToPlaylist"
+    | "saveContactSheet"
+    | "exportClip"
+    | "exportGif"
+    | "openExportFolder"
+    | "quitApp"
+    | "commandPalette"
+    | "toggleSplitCompare"
+    | "syncSubtitlesByEar"
+    | "nextScene"
+    | "previousScene";
 
 export type ShortcutActionGroup =
+    | "File & Export"
     | "Playback"
     | "Volume"
     | "Subtitles & Audio"
@@ -74,6 +101,7 @@ export type ShortcutActionDef = {
 };
 
 export const SHORTCUT_GROUP_ORDER: ShortcutActionGroup[] = [
+    "File & Export",
     "Playback",
     "Volume",
     "Subtitles & Audio",
@@ -82,6 +110,20 @@ export const SHORTCUT_GROUP_ORDER: ShortcutActionGroup[] = [
 ];
 
 export const SHORTCUT_ACTIONS: ShortcutActionDef[] = [
+    // Ctrl-based accelerators, matching the Media menu and desktop convention.
+    { id: "openFile", label: "Open file…", group: "File & Export", defaultChord: "Ctrl+KeyO" },
+    { id: "openFileOrFolder", label: "Open file or folder…", group: "File & Export", defaultChord: "Ctrl+Shift+KeyO" },
+    { id: "openNetworkStream", label: "Open network stream…", group: "File & Export", defaultChord: "Ctrl+KeyN" },
+    { id: "showRecent", label: "Recent", group: "File & Export", defaultChord: "Ctrl+KeyH" },
+    { id: "showFavourites", label: "Favourites", group: "File & Export", defaultChord: "Ctrl+KeyB" },
+    { id: "addToPlaylist", label: "Add to playlist…", group: "File & Export", defaultChord: "Ctrl+Shift+KeyA" },
+    { id: "saveContactSheet", label: "Save contact sheet", group: "File & Export", defaultChord: "Ctrl+KeyT" },
+    { id: "exportClip", label: "Export clip", group: "File & Export", defaultChord: "Ctrl+KeyE" },
+    { id: "exportGif", label: "Export GIF", group: "File & Export", defaultChord: "Ctrl+Shift+KeyG" },
+    { id: "openExportFolder", label: "Open export folder", group: "File & Export", defaultChord: "Ctrl+Shift+KeyE" },
+    { id: "quitApp", label: "Quit", group: "File & Export", defaultChord: "Ctrl+KeyQ" },
+    { id: "commandPalette", label: "Command palette", group: "File & Export", defaultChord: "Ctrl+Shift+KeyP" },
+
     { id: "togglePlayPause", label: "Play / Pause", group: "Playback", defaultChord: "Space" },
     { id: "seekBackward", label: "Seek backward", group: "Playback", defaultChord: "ArrowLeft" },
     { id: "seekForward", label: "Seek forward", group: "Playback", defaultChord: "ArrowRight" },
@@ -100,6 +142,18 @@ export const SHORTCUT_ACTIONS: ShortcutActionDef[] = [
     { id: "clearCrop", label: "Clear crop", group: "Playback", defaultChord: "Shift+KeyC" },
     { id: "cycleAspectRatio", label: "Cycle aspect ratio", group: "Playback", defaultChord: "KeyE" },
     { id: "fitWindowToVideo", label: "Fit window to video", group: "Playback", defaultChord: "KeyG" },
+    { id: "ultraSlomoHold", label: "Ultra slo-mo (hold)", group: "Playback", defaultChord: "KeyX" },
+    { id: "zoomIn", label: "Zoom in", group: "Playback", defaultChord: "Alt+ArrowUp" },
+    { id: "zoomOut", label: "Zoom out", group: "Playback", defaultChord: "Alt+ArrowDown" },
+    { id: "rotateVideo", label: "Rotate 90°", group: "Playback", defaultChord: "KeyR" },
+    { id: "resetTransform", label: "Reset zoom & rotation", group: "Playback", defaultChord: "Alt+Digit0" },
+    { id: "abRangeCycle", label: "A-B range: mark / loop / clear", group: "Playback", defaultChord: "KeyK" },
+    { id: "abRangeClear", label: "A-B range: clear", group: "Playback", defaultChord: "Shift+KeyK" },
+    { id: "skipIntro", label: "Skip intro / credits", group: "Playback", defaultChord: "KeyP" },
+    { id: "previousScene", label: "Previous scene / chapter", group: "Playback", defaultChord: "Ctrl+ArrowLeft" },
+    { id: "nextScene", label: "Next scene / chapter", group: "Playback", defaultChord: "Ctrl+ArrowRight" },
+    { id: "toggleSplitCompare", label: "Before / after split view", group: "Interface & Window", defaultChord: "Ctrl+KeyW" },
+    { id: "syncSubtitlesByEar", label: "Sync subtitles to this moment", group: "Subtitles & Audio", defaultChord: "Ctrl+KeyJ" },
     { id: "toggleCurves", label: "Toggle curves editor", group: "Interface & Window", defaultChord: "KeyU" },
 
     { id: "volumeUp", label: "Volume up", group: "Volume", defaultChord: "ArrowUp" },
@@ -114,6 +168,8 @@ export const SHORTCUT_ACTIONS: ShortcutActionDef[] = [
     { id: "cycleAudioTrack", label: "Cycle audio track", group: "Subtitles & Audio", defaultChord: "KeyA" },
     { id: "audioDelayDown", label: "Audio delay −0.1s", group: "Subtitles & Audio", defaultChord: "Ctrl+Minus" },
     { id: "audioDelayUp", label: "Audio delay +0.1s", group: "Subtitles & Audio", defaultChord: "Ctrl+Equal" },
+    { id: "cycleNightMode", label: "Cycle night mode", group: "Subtitles & Audio", defaultChord: "KeyN" },
+    { id: "toggleAudioPanel", label: "Night mode & equalizer panel", group: "Subtitles & Audio", defaultChord: "Shift+KeyA" },
 
     { id: "screenshotWithSubtitles", label: "Screenshot (with subtitles)", group: "Screenshots", defaultChord: "KeyS" },
     { id: "screenshotVideoOnly", label: "Screenshot (video only)", group: "Screenshots", defaultChord: "Shift+KeyS" },

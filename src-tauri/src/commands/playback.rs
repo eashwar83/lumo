@@ -470,6 +470,9 @@ const SEEK_THUMB_MIN: u32 = 40;
 const SEEK_THUMB_MAX: u32 = 400;
 // Keep at most this many per-file thumbnail caches; evict the oldest beyond it.
 const SEEK_THUMB_MAX_CACHES: usize = 40;
+// Contact-sheet tiles are much larger than the seek-bar previews so the sheet
+// is worth looking at full-size.
+const CONTACT_SHEET_TILE_WIDTH: u32 = 480;
 
 fn seek_thumb_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     use tauri::Manager;
@@ -602,6 +605,384 @@ pub(crate) fn generate_seek_thumbnails(
         }
     });
     Ok(())
+}
+
+// Force-rebuild one video's seek thumbnails: drop its cache dir (so the
+// normal "already generated" skip doesn't apply), then regenerate synchronously
+// and return when done, so the caller can refresh the seek bar.
+#[tauri::command]
+pub(crate) async fn regenerate_seek_thumbnails(
+    app: tauri::AppHandle,
+    path: String,
+    duration: f64,
+) -> Result<(), String> {
+    if path.trim().is_empty() || duration <= 0.0 || !is_local_media(&path) {
+        return Ok(());
+    }
+    let interval = seek_thumb_interval(&app);
+    let dir = seek_thumb_cache_dir(&app, &path, interval)?;
+
+    // Drop any existing (improper) cache and clear an in-flight marker for it.
+    let _ = std::fs::remove_dir_all(&dir);
+    let inflight_key = dir.to_string_lossy().to_string();
+    if let Ok(mut guard) = SEEK_THUMB_INFLIGHT.lock() {
+        if let Some(set) = guard.as_mut() {
+            set.remove(&inflight_key);
+        }
+    }
+
+    if !seek_thumbnails_enabled(&app) {
+        return Ok(());
+    }
+    let count = ((duration / interval).round() as u32).clamp(SEEK_THUMB_MIN, SEEK_THUMB_MAX);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::mpv::generate_thumbnails(&path, &dir, duration, count)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map(|_| ())
+}
+
+/// Where screenshots, contact sheets and clips are written. Honours the
+/// user-configured screenshot folder, then Pictures, then app-local data.
+fn export_output_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    use tauri::Manager;
+
+    let custom_dir = crate::store::ui_state_store::load_setting_value(app, "SCREENSHOT_DIR")
+        .ok()
+        .flatten()
+        .map(PathBuf::from);
+    match custom_dir {
+        Some(dir) => Ok(dir),
+        None => app
+            .path()
+            .picture_dir()
+            .map(|dir| dir.join("Lumo Screenshots"))
+            .or_else(|_| {
+                app.path()
+                    .app_local_data_dir()
+                    .map(|dir| dir.join("screenshots"))
+            })
+            .map_err(|error| format!("Failed to resolve output directory: {error}")),
+    }
+}
+
+/// Pick a non-colliding `<stem>.<ext>` inside `dir`.
+fn unique_export_path(dir: &Path, stem: &str, extension: &str) -> PathBuf {
+    let mut path = dir.join(format!("{stem}.{extension}"));
+    let mut counter = 2;
+    while path.exists() {
+        path = dir.join(format!("{stem} ({counter}).{extension}"));
+        counter += 1;
+    }
+    path
+}
+
+/// Scene boundaries for a file, cached as JSON beside the other caches so a
+/// long film is only analysed once. `refresh` forces a re-scan.
+#[tauri::command]
+pub(crate) async fn get_scene_index(
+    app: tauri::AppHandle,
+    path: String,
+    duration: f64,
+    refresh: Option<bool>,
+) -> Result<Vec<f64>, String> {
+    use std::hash::{Hash, Hasher};
+    use tauri::Manager;
+
+    if path.trim().is_empty() || !is_local_media(&path) {
+        return Ok(Vec::new());
+    }
+    if duration <= 0.0 {
+        return Ok(Vec::new());
+    }
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    path.hash(&mut hasher);
+    let key = format!("{:016x}", hasher.finish());
+    let root = app
+        .path()
+        .app_cache_dir()
+        .map_err(|error| format!("Failed to resolve cache directory: {error}"))?
+        .join("scenes");
+    std::fs::create_dir_all(&root)
+        .map_err(|error| format!("Failed to create scene cache: {error}"))?;
+    let cache_file = root.join(format!("{key}.json"));
+
+    if refresh.unwrap_or(false) {
+        let _ = std::fs::remove_file(&cache_file);
+    } else if let Ok(text) = std::fs::read_to_string(&cache_file) {
+        if let Ok(list) = serde_json::from_str::<Vec<f64>>(&text) {
+            return Ok(list);
+        }
+    }
+
+    let work = root.join(format!("{key}.work"));
+    let input = path.clone();
+    let scenes = tauri::async_runtime::spawn_blocking(move || {
+        crate::scenes::detect(&input, duration, &work)
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+
+    let starts: Vec<f64> = scenes.into_iter().map(|scene| scene.start).collect();
+    if let Ok(text) = serde_json::to_string(&starts) {
+        let _ = std::fs::write(&cache_file, text);
+    }
+    Ok(starts)
+}
+
+/// Poster width for the Favourites / History grids.
+const POSTER_WIDTH: u32 = 320;
+
+/// One cached poster frame per file, for grid tiles. Entries that were
+/// favourited without ever playing (or added from the right-click menu) have no
+/// artwork, so the grid asks for one on demand and we extract it here.
+#[tauri::command]
+pub(crate) async fn get_media_poster(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<Option<String>, String> {
+    use base64::Engine as _;
+    use std::hash::{Hash, Hasher};
+    use tauri::Manager;
+
+    if path.trim().is_empty() || !is_local_media(&path) {
+        return Ok(None);
+    }
+    if !Path::new(&path).exists() {
+        return Ok(None);
+    }
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    path.hash(&mut hasher);
+    let key = format!("{:016x}", hasher.finish());
+    let root = app
+        .path()
+        .app_cache_dir()
+        .map_err(|error| format!("Failed to resolve cache directory: {error}"))?
+        .join("posters");
+    std::fs::create_dir_all(&root)
+        .map_err(|error| format!("Failed to create poster cache: {error}"))?;
+    let cached = root.join(format!("{key}.jpg"));
+
+    if !cached.exists() {
+        let work = root.join(format!("{key}.work"));
+        let input = path.clone();
+        let target = cached.clone();
+        let work_dir = work.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let frame = crate::mpv::generate_poster(&input, &work_dir, POSTER_WIDTH)?;
+            std::fs::copy(&frame, &target).map_err(|error| error.to_string())?;
+            let _ = std::fs::remove_dir_all(&work_dir);
+            Ok::<(), String>(())
+        })
+        .await
+        .map_err(|error| error.to_string())??;
+    }
+
+    let bytes = std::fs::read(&cached).map_err(|error| error.to_string())?;
+    if bytes.is_empty() {
+        return Ok(None);
+    }
+    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+    Ok(Some(format!("data:image/jpeg;base64,{encoded}")))
+}
+
+/// Reveal the folder that screenshots, clips, GIFs and contact sheets go to.
+#[tauri::command]
+pub(crate) fn open_export_folder(app: tauri::AppHandle) -> Result<(), String> {
+    let dir = export_output_dir(&app)?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|error| format!("Failed to create output folder: {error}"))?;
+    crate::commands::persistence::open_directory(&dir)
+}
+
+/// Settings key holding an explicit ffmpeg path (Settings -> Advanced).
+const FFMPEG_PATH_SETTING: &str = "FFMPEG_PATH";
+
+fn configured_ffmpeg(app: &tauri::AppHandle) -> Option<String> {
+    crate::store::ui_state_store::load_setting_value(app, FFMPEG_PATH_SETTING)
+        .ok()
+        .flatten()
+}
+
+/// Whether video-clip export is available (it needs a full ffmpeg; the bundled
+/// playback ffmpeg has no muxers). GIF export never needs one.
+#[tauri::command]
+pub(crate) async fn clip_export_available(app: tauri::AppHandle) -> Result<bool, String> {
+    let configured = configured_ffmpeg(&app);
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::mpv::find_ffmpeg(configured.as_deref()).is_some()
+    })
+    .await
+    .map_err(|error| error.to_string())
+}
+
+/// Export `[start, end)` of a local file: a lossless stream-copied clip (needs
+/// ffmpeg) or an animated GIF (built in-process from extracted frames).
+#[tauri::command]
+pub(crate) async fn export_clip(
+    app: tauri::AppHandle,
+    path: String,
+    title: String,
+    start: f64,
+    end: f64,
+    gif: Option<bool>,
+    // gif_width is a pixel width; 0 keeps the source resolution.
+    gif_width: Option<u32>,
+    gif_fps: Option<u32>,
+) -> Result<ScreenshotResult, String> {
+    use tauri::Manager;
+
+    if path.trim().is_empty() || !is_local_media(&path) {
+        return Err("Clip export is only available for local files".to_string());
+    }
+    if !(end > start) {
+        return Err("Invalid range".to_string());
+    }
+
+    let as_gif = gif.unwrap_or(false);
+    let target_dir = export_output_dir(&app)?;
+    std::fs::create_dir_all(&target_dir)
+        .map_err(|error| format!("Failed to create output folder: {error}"))?;
+
+    let stem_source = if title.trim().is_empty() {
+        Path::new(&path)
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "Clip".to_string())
+    } else {
+        title.clone()
+    };
+    let stem = format!(
+        "{} {}-{}",
+        sanitize_screenshot_stem(&stem_source),
+        format_screenshot_position(start),
+        format_screenshot_position(end)
+    );
+
+    if as_gif {
+        let output_path = unique_export_path(&target_dir, &stem, "gif");
+        let work_dir = app
+            .path()
+            .app_cache_dir()
+            .map_err(|error| format!("Failed to resolve cache directory: {error}"))?
+            .join("gif_work");
+        let input = path.clone();
+        let attempt = output_path.clone();
+        let width = gif_width.unwrap_or(crate::mpv::GIF_DEFAULT_WIDTH);
+        let fps = gif_fps.unwrap_or(crate::mpv::GIF_DEFAULT_FPS);
+        tauri::async_runtime::spawn_blocking(move || {
+            crate::mpv::export_gif(&input, &attempt, start, end, &work_dir, width, fps)
+        })
+        .await
+        .map_err(|error| error.to_string())??;
+
+        let file_name = output_path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_default();
+        return Ok(ScreenshotResult {
+            path: output_path.to_string_lossy().to_string(),
+            file_name,
+        });
+    }
+
+    // Always mp4/H.264 so the clip plays anywhere it gets shared.
+    let output_path = unique_export_path(&target_dir, &stem, "mp4");
+
+    let configured = configured_ffmpeg(&app);
+    let input = path.clone();
+    let attempt = output_path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(ffmpeg) = crate::mpv::find_ffmpeg(configured.as_deref()) else {
+            return Err(
+                "Clip export needs ffmpeg. Install it, or set its path in \
+                 Settings -> Advanced. (GIF export works without it.)"
+                    .to_string(),
+            );
+        };
+        crate::mpv::export_clip(&ffmpeg, &input, &attempt, start, end)
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+
+    let file_name = output_path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_default();
+    Ok(ScreenshotResult {
+        path: output_path.to_string_lossy().to_string(),
+        file_name,
+    })
+}
+
+/// Tile a grid of evenly-spaced frames into one timestamped JPEG. Uses the same
+/// screenshot destination as `take_screenshot` so exports land together.
+#[tauri::command]
+pub(crate) async fn export_contact_sheet(
+    app: tauri::AppHandle,
+    path: String,
+    title: String,
+    duration: f64,
+    columns: Option<u32>,
+    rows: Option<u32>,
+) -> Result<ScreenshotResult, String> {
+    use tauri::Manager;
+
+    if path.trim().is_empty() || !is_local_media(&path) {
+        return Err("Contact sheets are only available for local files".to_string());
+    }
+    if duration <= 0.0 {
+        return Err("Unknown duration".to_string());
+    }
+
+    let target_dir = export_output_dir(&app)?;
+
+    let stem_source = if title.trim().is_empty() {
+        Path::new(&path)
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "Video".to_string())
+    } else {
+        title.clone()
+    };
+    let stem = format!("{} contact sheet", sanitize_screenshot_stem(&stem_source));
+    let output_path = unique_export_path(&target_dir, &stem, "jpg");
+
+    let work_dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|error| format!("Failed to resolve cache directory: {error}"))?
+        .join("contact_sheet_work");
+
+    let columns = columns.unwrap_or(4);
+    let rows = rows.unwrap_or(5);
+    let result_path = output_path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::contact_sheet::export(
+            &path,
+            duration,
+            columns,
+            rows,
+            CONTACT_SHEET_TILE_WIDTH,
+            &work_dir,
+            &output_path,
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+
+    let file_name = result_path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_default();
+    Ok(ScreenshotResult {
+        path: result_path.to_string_lossy().to_string(),
+        file_name,
+    })
 }
 
 #[tauri::command]

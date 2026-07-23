@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { onBeforeUnmount, ref, watch } from "vue";
+import { invoke } from "@tauri-apps/api/core";
 import type { PlaylistEntry } from "../types/playlist";
 import { getPathDisplayName } from "../utils/getPathDisplayName";
 import { readImageDataUrl } from "../utils/readImageDataUrl";
@@ -19,9 +20,51 @@ const thumbs = ref<Record<string, string>>({});
 
 const isRemote = (url?: string): boolean => !!url && /^https?:\/\//i.test(url);
 
+const isRemotePath = (path: string): boolean =>
+    /^(https?|rtsp|rtmp|smb|webdav):\/\//i.test(path);
+
+// Entries favourited without ever playing (or added from the right-click menu)
+// carry no artwork, so a poster is extracted on demand and cached on disk.
+// Extraction spins up a headless mpv per file, so they run one at a time —
+// firing forty at once would stall the machine.
+const pending: string[] = [];
+const requested = new Set<string>();
+let draining = false;
+let disposed = false;
+
+const drain = async () => {
+    if (draining) return;
+    draining = true;
+    while (pending.length && !disposed) {
+        const path = pending.shift();
+        if (!path || thumbs.value[path]) continue;
+        try {
+            const dataUrl = await invoke<string | null>("get_media_poster", { path });
+            if (dataUrl && !disposed) {
+                thumbs.value = { ...thumbs.value, [path]: dataUrl };
+            }
+        } catch {
+            // Missing file or an unreadable codec — keep the placeholder.
+        }
+    }
+    draining = false;
+};
+
+const queuePoster = (path: string) => {
+    if (!path || requested.has(path) || thumbs.value[path]) return;
+    if (isRemotePath(path)) return;
+    requested.add(path);
+    pending.push(path);
+    void drain();
+};
+
 const resolveThumb = async (entry: PlaylistEntry) => {
+    if (thumbs.value[entry.path]) return;
     const icon = entry.iconUrl?.trim();
-    if (!icon || thumbs.value[entry.path]) return;
+    if (!icon) {
+        queuePoster(entry.path);
+        return;
+    }
     if (isRemote(icon)) {
         thumbs.value = { ...thumbs.value, [entry.path]: icon };
         return;
@@ -29,7 +72,10 @@ const resolveThumb = async (entry: PlaylistEntry) => {
     const dataUrl = await readImageDataUrl(icon);
     if (dataUrl) {
         thumbs.value = { ...thumbs.value, [entry.path]: dataUrl };
+        return;
     }
+    // The stored artwork file has gone (cache cleared, or it never landed).
+    queuePoster(entry.path);
 };
 
 watch(
@@ -39,6 +85,11 @@ watch(
     },
     { immediate: true, deep: true },
 );
+
+onBeforeUnmount(() => {
+    disposed = true;
+    pending.length = 0;
+});
 
 const displayName = (entry: PlaylistEntry): string =>
     entry.title?.trim() || getPathDisplayName(entry.path);

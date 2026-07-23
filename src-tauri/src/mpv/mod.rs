@@ -1,3 +1,4 @@
+mod encode;
 mod event_loop;
 mod ffi;
 mod handle;
@@ -7,6 +8,12 @@ mod ytdlp_settings;
 mod stream_https;
 mod stream_proxy;
 
+pub(crate) use encode::{
+    export_clip, export_gif, find_ffmpeg, GIF_DEFAULT_FPS, GIF_DEFAULT_WIDTH,
+};
+pub(crate) use thumbnails::generate_frames;
+pub(crate) use thumbnails::generate_poster;
+pub(crate) use thumbnails::generate_range_frames;
 pub(crate) use thumbnails::generate_thumbnails;
 
 #[cfg(target_os = "macos")]

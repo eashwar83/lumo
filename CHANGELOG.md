@@ -1,5 +1,87 @@
 # Changelog
 
+## [1.0.1] - 2026-07-23 — Lumo
+
+A large feature release focused on editing, navigation, audio, and a full
+keyboard/menu overhaul — plus several fixes.
+
+### Application menu bar
+
+- **VLC-style menu bar** — Media / Playback / Audio / Video / Subtitle / Tools /
+  View / Help across the top, styled to match Lumo. Every item shows its live
+  keyboard shortcut, ticks the active option (track, preset, mode), and greys out
+  what doesn't apply. It hosts the window controls in compact mode and fades in
+  and out with the on-screen chrome so the picture is never obstructed. Toggle it
+  from View → Hide Menu Bar (or the right-click menu).
+
+### Command palette & shortcut builder
+
+- **Command palette** (`Ctrl`+`Shift`+`P`) — search and run any command by name.
+- **Custom shortcut builder** (Settings → Keyboard Shortcuts) — bind a key to
+  three kinds of action: any command, a numeric setting as increase / decrease /
+  set-to with your own step (Sharpness, Grain, Brightness, Zoom, Volume, delays,
+  and more — the sliders that can't live in a menu), or a raw mpv command as an
+  escape hatch. Built-in shortcuts always take priority, and conflicts are
+  reported rather than silently created.
+- **File & export shortcuts** — Open File, Open Folder, Network Stream, Recent,
+  Favourites, Add to Playlist, Export Clip / GIF, Contact Sheet, Open Export
+  Folder, Quit — all rebindable.
+
+### Audio
+
+- **Night mode** — dynamic-range compression (Light / Medium / Strong) that lifts
+  quiet dialogue and tames loud action, for late-night or laptop-speaker viewing.
+- **10-band equalizer** with 12 presets, **dialogue boost**, and **volume boost**
+  to 300%. New Audio panel (`Shift`+`A`).
+
+### Video framing & transform
+
+- **Zoom / pan / rotate** — `Ctrl`+scroll to zoom about the cursor, drag to pan,
+  rotate 90°, all remembered per file.
+- **Before / after split view** (`Ctrl`+`W`) — a draggable wipe comparing the
+  original against your full GPU enhancement chain, live and HDR-accurate.
+- **Deband controls** (Off / Light / Medium / Strong) and a one-click **Old Film
+  Restore** preset tuned for old, heavily compressed transfers.
+
+### Editing & export
+
+- **A-B range & loop** (`K`) — mark a segment, loop it, and use it as the source
+  for export.
+- **Export clip** (exact-range MP4) and **Export GIF** (in-process, 480 →
+  source-resolution), from the marked range.
+- **Contact sheet** — a timestamped grid of frames saved as one image.
+- **Ultra slo-mo** (hold `X`) — smooth, interpolated slow motion at ½ / ¼ / ⅛.
+
+### Navigation
+
+- **Scenes / chapters** (`Ctrl`+`←` / `Ctrl`+`→`) — uses real chapters when the
+  file has them, otherwise detects scene changes and marks them on the seek bar.
+- **Skip intro / credits** — save intro and credits ranges per folder (per
+  series) and get a Skip button, with an optional auto-skip.
+- **Subtitle sync by ear** (`Ctrl`+`J`) — tap when a line should appear and the
+  delay is computed for you.
+- **Regenerate seek thumbnails** and **save contact sheet** from the right-click
+  menu.
+
+### Settings & window
+
+- **Escape** now closes one layer at a time — palette, dialog, context menu,
+  settings, curves/audio panels, control-bar menus, playlist, info — before
+  leaving fullscreen.
+- Shared **min / max / close** window controls, hosted in the menu bar.
+
+### Fixes
+
+- **Favourites thumbnails** — tiles with no stored artwork (including items added
+  from the right-click menu) now generate a poster on demand, so blank tiles fill
+  themselves in.
+- **Deinterlace** now forces hardware-decode copy-back (it silently did nothing
+  under non-copy hardware decoding).
+- **Startup console flash** — the ffmpeg/yt-dlp detection no longer flashes a
+  console window on launch.
+- Clip export re-encodes for a **frame-exact** cut instead of snapping to the
+  nearest keyframe.
+
 ## [1.0.0] - 2026-07-21 — Lumo
 
 First stable release of **Lumo**, a fork of [Soia](https://github.com/FengZeng/soia)

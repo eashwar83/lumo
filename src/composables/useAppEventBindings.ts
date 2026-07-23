@@ -39,6 +39,7 @@ type AppEventBindingsOptions = {
     onFullscreenTransitionEnd: () => void;
     onCloseAllMenus: (event: MouseEvent) => void;
     onKeydown: (event: KeyboardEvent) => void;
+    onKeyup?: (event: KeyboardEvent) => void;
     onDoubleClick: (event: MouseEvent) => void;
     setWindowControlsVisible: (visible: boolean) => Promise<void>;
     onFileLoaded?: () => void | Promise<void>;
@@ -65,6 +66,7 @@ export const useAppEventBindings = ({
     onFullscreenTransitionEnd,
     onCloseAllMenus,
     onKeydown,
+    onKeyup,
     onDoubleClick,
     setWindowControlsVisible,
     onFileLoaded,
@@ -91,6 +93,7 @@ export const useAppEventBindings = ({
         ["mousedown", () => ui.onUserInteraction()],
         ["click", (event) => onCloseAllMenus(event as MouseEvent)],
         ["keydown", (event) => onKeydown(event as KeyboardEvent)],
+        ["keyup", (event) => onKeyup?.(event as KeyboardEvent)],
         ["dblclick", (event) => onDoubleClick(event as MouseEvent)],
     ];
 

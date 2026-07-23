@@ -21,7 +21,15 @@ const INTERACTIVE_TARGET_SELECTOR = [
     "[data-window-no-drag]",
 ].join(", ");
 
-export const useWindowDragRegion = () => {
+type WindowDragRegionOptions = {
+    /**
+     * Return true to hand the drag to something else. Used while the video is
+     * zoomed in, where a left-drag pans the image instead of moving the window.
+     */
+    shouldSuppress?: () => boolean;
+};
+
+export const useWindowDragRegion = (options: WindowDragRegionOptions = {}) => {
     let dragStartX = 0;
     let dragStartY = 0;
     let isDragPending = false;
@@ -93,11 +101,13 @@ export const useWindowDragRegion = () => {
 
     function onAppMouseDownCapture(event: MouseEvent) {
         if (isInteractiveTarget(event.target)) return;
+        if (options.shouldSuppress?.()) return;
         onDragRegionMouseDown(event);
     }
 
     function onAppTouchStartCapture(event: TouchEvent) {
         if (isInteractiveTarget(event.target)) return;
+        if (options.shouldSuppress?.()) return;
         onDragRegionTouchStart(event);
     }
 

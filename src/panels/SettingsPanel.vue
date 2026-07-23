@@ -3,6 +3,8 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useSettingsPanel } from "../composables/useSettingsPanel";
 import { getPathDisplayName } from "../utils/getPathDisplayName";
 import ShortcutSettings from "../components/ShortcutSettings.vue";
+import type { CommandDef } from "../types/commands";
+import type { CustomShortcutsController } from "../composables/useCustomShortcuts";
 import { THEME_SETTING_GROUP_TITLE } from "../constants/theme";
 import {
     AUTOLOAD_FOLDER_SETTING_LABEL,
@@ -24,7 +26,11 @@ import {
     type SettingItem,
 } from "../mock/settings";
 
-const props = defineProps<{ visible: boolean }>();
+const props = defineProps<{
+    visible: boolean;
+    commands?: CommandDef[];
+    customShortcuts?: CustomShortcutsController;
+}>();
 const emit = defineEmits<{ (e: "close"): void }>();
 
 const {
@@ -1487,7 +1493,11 @@ onBeforeUnmount(() => {
 
                                 <!-- Shortcuts editor -->
                                 <template v-else-if="block.kind === 'shortcuts'">
-                                    <ShortcutSettings :group="block.group" />
+                                    <ShortcutSettings
+                                        :group="block.group"
+                                        :commands="props.commands"
+                                        :custom="props.customShortcuts"
+                                    />
                                 </template>
 
                                 <!-- About -->

@@ -10,10 +10,29 @@ import {
     UNBOUND_CHORD,
     type ShortcutActionId,
 } from "../constants/shortcuts";
+import type { CommandDef } from "../types/commands";
+import type { CustomShortcutsController } from "../composables/useCustomShortcuts";
+import CustomShortcutBuilder from "./CustomShortcutBuilder.vue";
 
 const props = defineProps<{
     group: SettingGroup;
+    commands?: CommandDef[];
+    custom?: CustomShortcutsController;
 }>();
+
+/** Chords held by built-in actions — those win over custom bindings. */
+const builtInChords = computed(() => {
+    const set = new Set<string>();
+    keybindItems.value.forEach((item) => {
+        if (item.value && item.value !== UNBOUND_CHORD) set.add(item.value);
+    });
+    return set;
+});
+
+const builtInLabelFor = (chord: string): string | undefined => {
+    const match = keybindItems.value.find((item) => item.value === chord);
+    return match ? (match.displayLabel ?? match.label) : undefined;
+};
 
 const keybindItems = computed(
     () =>
@@ -307,6 +326,14 @@ onBeforeUnmount(() => {
                 </div>
             </div>
         </section>
+
+        <CustomShortcutBuilder
+            v-if="props.commands && props.custom"
+            :commands="props.commands"
+            :custom="props.custom"
+            :built-in-chords="builtInChords"
+            :built-in-label-for="builtInLabelFor"
+        />
     </div>
 </template>
 

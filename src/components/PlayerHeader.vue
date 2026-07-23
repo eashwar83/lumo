@@ -27,6 +27,8 @@ const props = defineProps<{
     playbackTitleMode: PlaybackTitleMode;
     compactModeEnabled: boolean;
     isFullscreen: boolean;
+    /** When true the menu bar is showing and owns the window buttons. */
+    menuBarVisible?: boolean;
     info: MediaInfo | null;
     currentTime: number;
     duration: number;
@@ -68,7 +70,10 @@ const showDesktopCompactControls = computed(
     () =>
         isDesktopCompactControlsPlatform &&
         props.compactModeEnabled &&
-        !props.isFullscreen,
+        !props.isFullscreen &&
+        // The menu bar hosts them at the top-right when it's showing, so the
+        // header must not draw a second set.
+        !props.menuBarVisible,
 );
 
 type StoredRenderingState = {

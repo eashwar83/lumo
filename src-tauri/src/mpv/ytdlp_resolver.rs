@@ -6,6 +6,19 @@ use std::time::{Duration, Instant};
 use tauri::AppHandle;
 use url::Url;
 
+/// yt-dlp is a console application: spawned normally on Windows it flashes a
+/// console window over the player. Every spawn must go through this.
+fn quiet_command(program: &str) -> Command {
+    let mut command = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // CREATE_NO_WINDOW
+        command.creation_flags(0x0800_0000);
+    }
+    command
+}
+
 const YTDLP_TIMEOUT: Duration = Duration::from_secs(60);
 const DIRECT_STREAM_EXTENSIONS: &[&str] = &[
     "m3u8", "mp4", "m4v", "mov", "mkv", "webm", "flv", "avi", "ts", "mp3", "m4a", "aac", "flac",
@@ -108,7 +121,7 @@ fn run_ytdlp_playlist_command(
     cookies_from_browser: Option<&str>,
     raw_url: &str,
 ) -> Result<std::process::Output, String> {
-    let mut command = Command::new(ytdl_path);
+    let mut command = quiet_command(ytdl_path);
     let mut log_args = vec![
         "--dump-single-json".to_string(),
         "--flat-playlist".to_string(),
@@ -329,7 +342,7 @@ fn run_ytdlp_command(
     format_selector: &str,
     raw_url: &str,
 ) -> Result<std::process::Output, String> {
-    let mut command = Command::new(ytdl_path);
+    let mut command = quiet_command(ytdl_path);
     let mut log_args = vec![
         "--dump-single-json".to_string(),
         "--no-playlist".to_string(),

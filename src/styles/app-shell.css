@@ -27,3 +27,8 @@
 .cursor-hidden {
     cursor: none;
 }
+
+/* Zoomed in: a left-drag pans the image instead of moving the window. */
+.cursor-pannable:not(.cursor-hidden) {
+    cursor: grab;
+}

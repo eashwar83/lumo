@@ -58,11 +58,46 @@ export type PlaybackShortcutActions = {
     cycleAspectRatio?: () => Promise<void> | void;
     fitWindowToVideo?: () => Promise<void> | void;
     toggleCurves?: () => void;
+    cycleNightMode?: () => Promise<void> | void;
+    toggleAudioPanel?: () => void;
+    zoomIn?: () => void;
+    zoomOut?: () => void;
+    rotateVideo?: () => Promise<void> | void;
+    resetTransform?: () => Promise<void> | void;
+    abRangeCycle?: () => Promise<void> | void;
+    abRangeClear?: () => Promise<void> | void;
+    skipIntro?: () => void;
+    openFile?: () => void;
+    openFileOrFolder?: () => void;
+    openNetworkStream?: () => void;
+    showRecent?: () => void;
+    showFavourites?: () => void;
+    addToPlaylist?: () => void;
+    saveContactSheet?: () => void;
+    exportClip?: () => void;
+    exportGif?: () => void;
+    openExportFolder?: () => void;
+    quitApp?: () => void;
+    commandPalette?: () => void;
+    toggleSplitCompare?: () => void;
+    syncSubtitlesByEar?: () => void;
+    nextScene?: () => void;
+    previousScene?: () => void;
+    /** Runs a user-defined shortcut; true when it claimed the chord. */
+    runCustomShortcut?: (chord: string) => boolean;
+    /** Gates the export entries the same way the clip bar does. */
+    canExportRange?: () => boolean;
+    canExportClip?: () => boolean;
+    isLocalMedia?: () => boolean;
     windowSizeUp?: () => Promise<void> | void;
     windowSizeDown?: () => Promise<void> | void;
+    startUltraSlomo?: () => void;
+    stopUltraSlomo?: () => void;
     showProgress?: () => void;
     toggleShortcutsHelp?: () => void;
     closeShortcutsHelp?: () => boolean;
+    /** Dismiss the topmost open panel/dialog; false when nothing was open. */
+    closeTopOverlay?: () => boolean;
     isShortcutsHelpOpen?: () => boolean;
 };
 
@@ -358,6 +393,136 @@ export const usePlaybackShortcuts = (
             enabled: () => Boolean(actions.toggleCurves) && isFileLoaded(),
             run: () => actions.toggleCurves?.(),
         },
+        cycleNightMode: {
+            enabled: () => Boolean(actions.cycleNightMode),
+            allowRepeat: false,
+            run: () => actions.cycleNightMode?.(),
+        },
+        toggleAudioPanel: {
+            enabled: () => Boolean(actions.toggleAudioPanel),
+            allowRepeat: false,
+            run: () => actions.toggleAudioPanel?.(),
+        },
+        zoomIn: {
+            enabled: () => Boolean(actions.zoomIn) && isFileLoaded(),
+            run: () => actions.zoomIn?.(),
+        },
+        zoomOut: {
+            enabled: () => Boolean(actions.zoomOut) && isFileLoaded(),
+            run: () => actions.zoomOut?.(),
+        },
+        rotateVideo: {
+            enabled: () => Boolean(actions.rotateVideo) && isFileLoaded(),
+            allowRepeat: false,
+            run: () => actions.rotateVideo?.(),
+        },
+        resetTransform: {
+            enabled: () => Boolean(actions.resetTransform) && isFileLoaded(),
+            allowRepeat: false,
+            run: () => actions.resetTransform?.(),
+        },
+        abRangeCycle: {
+            enabled: () => Boolean(actions.abRangeCycle) && isFileLoaded(),
+            allowRepeat: false,
+            run: () => actions.abRangeCycle?.(),
+        },
+        abRangeClear: {
+            enabled: () => Boolean(actions.abRangeClear) && isFileLoaded(),
+            allowRepeat: false,
+            run: () => actions.abRangeClear?.(),
+        },
+        skipIntro: {
+            enabled: () => Boolean(actions.skipIntro) && isFileLoaded(),
+            allowRepeat: false,
+            run: () => actions.skipIntro?.(),
+        },
+
+        // --- File & Export -------------------------------------------------
+        // These stay available with no file loaded; that's the point of them.
+        openFile: {
+            enabled: () => Boolean(actions.openFile),
+            allowRepeat: false,
+            run: () => actions.openFile?.(),
+        },
+        openFileOrFolder: {
+            enabled: () => Boolean(actions.openFileOrFolder),
+            allowRepeat: false,
+            run: () => actions.openFileOrFolder?.(),
+        },
+        openNetworkStream: {
+            enabled: () => Boolean(actions.openNetworkStream),
+            allowRepeat: false,
+            run: () => actions.openNetworkStream?.(),
+        },
+        showRecent: {
+            enabled: () => Boolean(actions.showRecent),
+            allowRepeat: false,
+            run: () => actions.showRecent?.(),
+        },
+        showFavourites: {
+            enabled: () => Boolean(actions.showFavourites),
+            allowRepeat: false,
+            run: () => actions.showFavourites?.(),
+        },
+        addToPlaylist: {
+            enabled: () => Boolean(actions.addToPlaylist) && isFileLoaded(),
+            allowRepeat: false,
+            run: () => actions.addToPlaylist?.(),
+        },
+        saveContactSheet: {
+            enabled: () =>
+                Boolean(actions.saveContactSheet) &&
+                (actions.isLocalMedia?.() ?? false),
+            allowRepeat: false,
+            run: () => actions.saveContactSheet?.(),
+        },
+        exportClip: {
+            enabled: () =>
+                Boolean(actions.exportClip) &&
+                (actions.canExportRange?.() ?? false) &&
+                (actions.canExportClip?.() ?? false),
+            allowRepeat: false,
+            run: () => actions.exportClip?.(),
+        },
+        exportGif: {
+            enabled: () =>
+                Boolean(actions.exportGif) && (actions.canExportRange?.() ?? false),
+            allowRepeat: false,
+            run: () => actions.exportGif?.(),
+        },
+        openExportFolder: {
+            enabled: () => Boolean(actions.openExportFolder),
+            allowRepeat: false,
+            run: () => actions.openExportFolder?.(),
+        },
+        quitApp: {
+            enabled: () => Boolean(actions.quitApp),
+            allowRepeat: false,
+            run: () => actions.quitApp?.(),
+        },
+        commandPalette: {
+            enabled: () => Boolean(actions.commandPalette),
+            allowRepeat: false,
+            run: () => actions.commandPalette?.(),
+        },
+        toggleSplitCompare: {
+            enabled: () => Boolean(actions.toggleSplitCompare) && isFileLoaded(),
+            allowRepeat: false,
+            run: () => actions.toggleSplitCompare?.(),
+        },
+        syncSubtitlesByEar: {
+            enabled: () => Boolean(actions.syncSubtitlesByEar) && isFileLoaded(),
+            allowRepeat: false,
+            run: () => actions.syncSubtitlesByEar?.(),
+        },
+        nextScene: {
+            enabled: () => Boolean(actions.nextScene) && isFileLoaded(),
+            run: () => actions.nextScene?.(),
+        },
+        previousScene: {
+            enabled: () => Boolean(actions.previousScene) && isFileLoaded(),
+            run: () => actions.previousScene?.(),
+        },
         windowSizeUp: {
             enabled: () => Boolean(actions.windowSizeUp),
             run: () => actions.windowSizeUp?.(),
@@ -366,12 +531,33 @@ export const usePlaybackShortcuts = (
             enabled: () => Boolean(actions.windowSizeDown),
             run: () => actions.windowSizeDown?.(),
         },
+        ultraSlomoHold: {
+            enabled: () => Boolean(actions.startUltraSlomo) && isFileLoaded(),
+            // Hold semantics: start once on the initial keydown; auto-repeat
+            // keydowns are ignored, and release is handled by onKeyup below.
+            allowRepeat: false,
+            run: () => actions.startUltraSlomo?.(),
+        },
     };
 
     const onKeydown = async (event: KeyboardEvent) => {
-        // Escape is reserved: close the help overlay or exit fullscreen.
+        // Escape is reserved: peel off one UI layer per press — the help
+        // overlay, then whatever panel or dialog is on top — and only exit
+        // fullscreen once nothing else is open.
         if (event.code === "Escape") {
             if (actions.closeShortcutsHelp?.()) {
+                event.preventDefault();
+                return;
+            }
+            // Typing in a field? Escape leaves the field first — a second press
+            // then closes the panel that contains it.
+            const escapeTarget = event.target as HTMLElement | null;
+            if (isEditableTarget(escapeTarget)) {
+                escapeTarget?.blur();
+                event.preventDefault();
+                return;
+            }
+            if (actions.closeTopOverlay?.()) {
                 event.preventDefault();
                 return;
             }
@@ -405,7 +591,14 @@ export const usePlaybackShortcuts = (
         if (!chord) return;
 
         const actionId = chordToAction.value.get(chord);
-        if (!actionId) return;
+        if (!actionId) {
+            // Fall through to user-defined shortcuts. Built-ins win, so a
+            // custom binding can never shadow a documented key.
+            if (actions.runCustomShortcut?.(chord)) {
+                event.preventDefault();
+            }
+            return;
+        }
 
         const handler = handlers[actionId];
         if (!handler || !handler.enabled()) return;
@@ -415,9 +608,23 @@ export const usePlaybackShortcuts = (
         await handler.run(event);
     };
 
+    // Hold-to-slo-mo release: end slo-mo when the main key of the ultraSlomoHold
+    // binding is released (modifiers are ignored — releasing the letter ends the
+    // hold). stopUltraSlomo is a no-op unless slo-mo is currently active.
+    const onKeyup = (event: KeyboardEvent) => {
+        if (!actions.stopUltraSlomo) return;
+        const chord = bindings.value.ultraSlomoHold;
+        if (!chord || chord === UNBOUND_CHORD) return;
+        const mainKey = chord.split("+").pop();
+        if (event.code === mainKey) {
+            actions.stopUltraSlomo();
+        }
+    };
+
     return {
         onDoubleClick,
         onKeydown,
+        onKeyup,
         bindings,
     };
 };

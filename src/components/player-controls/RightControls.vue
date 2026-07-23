@@ -4,8 +4,10 @@ import { listen } from "@tauri-apps/api/event";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type { MediaTrack } from "../../types/media";
 import type { SubtitleTarget } from "../../composables/useSubtitleState";
+import { DEBAND_LABELS } from "../../composables/useVideoEnhancements";
 import type {
     AiUpscaleMode,
+    DebandLevel,
     ColorGradeKey,
     QualityPreset,
     VideoEnhancementsController,
@@ -14,6 +16,8 @@ import type {
     VideoPreset,
     VideoPresetsController,
 } from "../../composables/useVideoPresets";
+import { SLOMO_FACTORS } from "../../composables/useUltraSlomo";
+import type { VideoTransformController } from "../../composables/useVideoTransform";
 import {
     getAudioTrackDetails,
     getAudioTrackHoverTitle,
@@ -40,9 +44,13 @@ const props = defineProps<{
     globalColorAdjustmentsEnabled: boolean;
     enhancements: VideoEnhancementsController;
     videoPresets: VideoPresetsController;
+    slomoFactor: number;
+    transform: VideoTransformController;
     isLoopOne: boolean;
     audioTracks: MediaTrack[];
     showAudioMenu: boolean;
+    /** Drives the dot on the audio-enhance button when any filter is engaged. */
+    audioEnhanceActive: boolean;
     subTracks: MediaTrack[];
     dualSubEnabled: boolean;
     secondarySubId: MediaTrack["id"];
@@ -81,7 +89,9 @@ const emit = defineEmits<{
     (e: "set-global-color-adjustments-enabled", enabled: boolean): void;
     (e: "auto-enhance"): void;
     (e: "reset-video-settings"): void;
+    (e: "set-slomo-factor", value: number): void;
     (e: "open-curves"): void;
+    (e: "open-audio-panel"): void;
     (e: "select-audio", track: MediaTrack): void;
     (e: "select-sub-track", payload: { target: SubtitleTarget; track: MediaTrack }): void;
     (e: "set-active-sub-target", target: SubtitleTarget): void;
@@ -92,6 +102,8 @@ const emit = defineEmits<{
     (e: "toggle-fullscreen"): void;
     (e: "update:showSubtitleAdvancedSettings", value: boolean): void;
 }>();
+
+const DEBAND_LEVELS: DebandLevel[] = ["off", "light", "medium", "strong"];
 
 const QUALITY_PRESETS: { id: QualityPreset; label: string }[] = [
     { id: "fast", label: "Fast" },
@@ -546,8 +558,9 @@ watch(
                             </span>
                         </button>
                     </div>
-                    <div v-if="props.hasAudioTracks" class="track-menu__footer">
+                    <div class="track-menu__footer">
                         <ControlSlider
+                            v-if="props.hasAudioTracks"
                             label="Delay"
                             :value="audioDelay"
                             :min="-5"
@@ -559,6 +572,21 @@ watch(
                             @change="emit('set-audio-delay', $event)"
                             @reset="emit('set-audio-delay', 0)"
                         />
+                        <button
+                            class="audio-enhance-btn"
+                            type="button"
+                            @click.stop="emit('open-audio-panel')"
+                        >
+                            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                <path d="M3 10h2v4H3zm4-4h2v12H7zm4-3h2v18h-2zm4 5h2v8h-2zm4 3h2v2h-2z" />
+                            </svg>
+                            <span>Night mode &amp; equalizer…</span>
+                            <span
+                                v-if="props.audioEnhanceActive"
+                                class="audio-enhance-btn__dot"
+                                aria-hidden="true"
+                            ></span>
+                        </button>
                     </div>
                 </div>
             </transition>
@@ -1108,7 +1136,118 @@ watch(
                         </div>
 
                         <div class="enh">
+                            <div class="enh__seg-row">
+                                <span class="enh__heading">Zoom &amp; rotate</span>
+                                <div class="zoom-row">
+                                    <button
+                                        class="zoom-row__btn"
+                                        type="button"
+                                        title="Zoom out"
+                                        @click.stop="props.transform.zoomOut()"
+                                    >
+                                        −
+                                    </button>
+                                    <span class="zoom-row__value">
+                                        {{ props.transform.zoomPercent.value }}%
+                                    </span>
+                                    <button
+                                        class="zoom-row__btn"
+                                        type="button"
+                                        title="Zoom in"
+                                        @click.stop="props.transform.zoomIn()"
+                                    >
+                                        +
+                                    </button>
+                                    <button
+                                        class="zoom-row__btn"
+                                        type="button"
+                                        title="Rotate 90°"
+                                        @click.stop="props.transform.rotateBy(90)"
+                                    >
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <path d="M21 2v6h-6" />
+                                            <path d="M21 13a9 9 0 1 1-3-7.7L21 8" />
+                                        </svg>
+                                    </button>
+                                    <button
+                                        class="zoom-row__btn zoom-row__btn--text"
+                                        type="button"
+                                        title="Reset zoom and rotation"
+                                        @click.stop="props.transform.reset()"
+                                    >
+                                        Reset
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="slomo__hint">
+                                <kbd>Ctrl</kbd> + scroll to zoom · drag to pan when
+                                zoomed in
+                            </div>
+                        </div>
+
+                        <div class="enh">
+                            <div class="enh__seg-row">
+                                <span class="enh__heading">Ultra Slo-Mo</span>
+                                <div class="enh-seg slomo__seg">
+                                    <button
+                                        v-for="f in SLOMO_FACTORS"
+                                        :key="f.value"
+                                        class="enh-seg__btn"
+                                        :class="{
+                                            'enh-seg__btn--active':
+                                                props.slomoFactor === f.value,
+                                        }"
+                                        type="button"
+                                        @click.stop="
+                                            emit('set-slomo-factor', f.value)
+                                        "
+                                    >
+                                        {{ f.label }}
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="slomo__hint">
+                                Hold <kbd>X</kbd> to slow down smoothly · release to
+                                resume
+                            </div>
+                        </div>
+
+                        <div class="enh">
                             <div class="enh__heading">Enhance</div>
+
+                            <button
+                                class="auto-enhance-btn restore-btn"
+                                type="button"
+                                title="Deband, denoise, gentle sharpen and a touch of grain — tuned for old, heavily compressed transfers"
+                                @click.stop="props.enhancements.applyOldFilmRestore()"
+                            >
+                                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                    <path d="M12 3a9 9 0 1 0 9 9h-2a7 7 0 1 1-7-7v3l4-4-4-4v3z" />
+                                </svg>
+                                <span>Old Film Restore</span>
+                            </button>
+
+                            <div class="enh__seg-row">
+                                <span class="enh__label">Deband</span>
+                                <div class="enh-seg">
+                                    <button
+                                        v-for="level in DEBAND_LEVELS"
+                                        :key="level"
+                                        type="button"
+                                        class="enh-seg__btn"
+                                        :class="{
+                                            'enh-seg__btn--active':
+                                                props.enhancements.state.deband ===
+                                                level,
+                                        }"
+                                        @click.stop="
+                                            props.enhancements.setDeband(level)
+                                        "
+                                    >
+                                        {{ DEBAND_LABELS[level] }}
+                                    </button>
+                                </div>
+                            </div>
 
                             <div class="enh__seg-row">
                                 <span class="enh__label">Quality</span>
@@ -1501,6 +1640,97 @@ watch(
     background: rgba(143, 179, 255, 0.28);
 }
 
+.audio-enhance-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    margin-top: 6px;
+    padding: 8px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 9px;
+    background: rgba(255, 255, 255, 0.07);
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.audio-enhance-btn:hover {
+    background: rgba(255, 255, 255, 0.14);
+}
+
+.audio-enhance-btn svg {
+    width: 16px;
+    height: 16px;
+    flex: none;
+}
+
+/* Marks that something in the audio chain is currently engaged. */
+.zoom-row {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.07);
+}
+
+.zoom-row__btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 4px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.zoom-row__btn:hover {
+    background: rgba(255, 255, 255, 0.14);
+    color: #fff;
+}
+
+.zoom-row__btn--text {
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.zoom-row__btn svg {
+    width: 13px;
+    height: 13px;
+}
+
+.zoom-row__value {
+    min-width: 38px;
+    text-align: center;
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.audio-enhance-btn__dot {
+    margin-left: auto;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--progress-color, #4a9eff);
+}
+
+.restore-btn {
+    margin-top: 2px;
+    margin-bottom: 8px;
+}
+
 .auto-enhance-btn {
     display: flex;
     align-items: center;
@@ -1670,6 +1900,26 @@ watch(
     font-size: 12px;
     font-weight: 600;
     color: rgba(255, 255, 255, 0.92);
+}
+
+.slomo__hint {
+    margin-top: 6px;
+    font-size: 11px;
+    line-height: 1.4;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.slomo__hint kbd {
+    display: inline-block;
+    min-width: 14px;
+    padding: 1px 5px;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.24);
+    background: rgba(255, 255, 255, 0.1);
+    font-family: inherit;
+    font-size: 10.5px;
+    font-weight: 700;
+    text-align: center;
 }
 
 .enh-seg {

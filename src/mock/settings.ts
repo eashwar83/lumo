@@ -110,6 +110,7 @@ export const SEEK_THUMBNAILS_ENABLED_SETTING_LABEL = "SEEK_THUMBNAILS_ENABLED";
 export const SEEK_THUMB_INTERVAL_SETTING_LABEL = "SEEK_THUMB_INTERVAL";
 export const AUTOLOAD_FOLDER_SETTING_LABEL = "AUTOLOAD_FOLDER";
 export const SCREENSHOT_DIR_SETTING_LABEL = "SCREENSHOT_DIR";
+export const FFMPEG_PATH_SETTING_LABEL = "FFMPEG_PATH";
 export const OPENSUBTITLES_ENABLED_SETTING_LABEL = "OPENSUBTITLES_ENABLED";
 export const OPENSUBTITLES_API_KEY_SETTING_LABEL = "OPENSUBTITLES_API_KEY";
 export const OPENSUBTITLES_LANGUAGES_SETTING_LABEL = "OPENSUBTITLES_LANGUAGES";
@@ -518,6 +519,14 @@ export const defaultSettingGroups: SettingGroup[] = [
                 max: 120,
                 step: 5,
                 unit: "s",
+            },
+            {
+                label: FFMPEG_PATH_SETTING_LABEL,
+                displayLabel: "ffmpeg (for clip export)",
+                value: "",
+                type: "path",
+                placeholder: "Auto-detected from PATH. GIF export needs no ffmpeg.",
+                browseTitle: "Select the ffmpeg executable",
             },
         ],
     },

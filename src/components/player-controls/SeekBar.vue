@@ -5,10 +5,16 @@ import { invoke } from "@tauri-apps/api/core";
 const props = defineProps<{
     duration: number;
     mediaPath?: string;
+    thumbReloadToken?: number;
     progressPercent: number;
     bufferedPercent: number;
     formatTime: (seconds: number) => string;
     controlsVisible?: boolean;
+    /** A-B range in seconds; either end may be unset. */
+    abPointA?: number | null;
+    abPointB?: number | null;
+    /** Chapter or detected-scene start times, in seconds. */
+    sceneMarks?: number[];
 }>();
 
 const emit = defineEmits<{
@@ -81,9 +87,10 @@ const clearThumb = () => {
     thumbUrl.value = null;
 };
 
-// Reset the per-file cache when the media changes.
+// Reset the per-file cache when the media changes, or when thumbnails have been
+// regenerated for the current video (token bump) so the new frames are fetched.
 watch(
-    () => props.mediaPath,
+    () => [props.mediaPath, props.thumbReloadToken],
     () => {
         thumbCache.clear();
         clearThumb();
@@ -191,6 +198,30 @@ const bufferedAheadPercent = computed(() =>
     Math.max(0, displayBufferedPercent.value - displayProgressPercent.value),
 );
 
+// --- A-B range overlay -----------------------------------------------------
+
+const toPercent = (seconds: number | null | undefined): number | null => {
+    if (typeof seconds !== "number" || props.duration <= 0) return null;
+    return clampRatio(seconds / props.duration) * 100;
+};
+
+const scenePercents = computed(() =>
+    (props.sceneMarks ?? [])
+        .map((at) => toPercent(at))
+        .filter((v): v is number => v !== null && v > 0.2 && v < 99.8),
+);
+
+const abStartPercent = computed(() => toPercent(props.abPointA));
+const abEndPercent = computed(() => toPercent(props.abPointB));
+
+/** The shaded span between A and B; null until both ends exist. */
+const abSpan = computed(() => {
+    const start = abStartPercent.value;
+    const end = abEndPercent.value;
+    if (start === null || end === null || end <= start) return null;
+    return { left: start, width: end - start };
+});
+
 watch(
     () => props.controlsVisible,
     (visible) => {
@@ -250,7 +281,28 @@ onUnmounted(() => {
                 class="progress-current"
                 :style="{ width: displayProgressPercent + '%' }"
             ></div>
+            <div
+                v-for="(mark, index) in scenePercents"
+                :key="`scene-${index}`"
+                class="scene-mark"
+                :style="{ left: mark + '%' }"
+            ></div>
+            <div
+                v-if="abSpan"
+                class="ab-span"
+                :style="{ left: abSpan.left + '%', width: abSpan.width + '%' }"
+            ></div>
         </div>
+        <div
+            v-if="abStartPercent !== null"
+            class="ab-marker ab-marker--a"
+            :style="{ left: abStartPercent + '%' }"
+        ></div>
+        <div
+            v-if="abEndPercent !== null"
+            class="ab-marker ab-marker--b"
+            :style="{ left: abEndPercent + '%' }"
+        ></div>
         <div
             class="scrubber-head"
             :style="{ left: displayProgressPercent + '%' }"
@@ -328,6 +380,41 @@ onUnmounted(() => {
 .progress-area.is-dragging .scrubber-head {
     opacity: 1;
     transform: translate(-50%, -50%) scale(1.35);
+}
+
+/* Chapter / scene boundaries. Subtle: they are a navigation aid, not data. */
+.scene-mark {
+    position: absolute;
+    top: 0;
+    width: 2px;
+    height: 100%;
+    transform: translateX(-1px);
+    background: rgba(255, 255, 255, 0.5);
+    z-index: 2;
+    pointer-events: none;
+}
+
+/* A-B range: a tint across the selected span plus a tick at each end. */
+.ab-span {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    background: rgba(255, 214, 92, 0.42);
+    z-index: 3;
+    pointer-events: none;
+}
+
+.ab-marker {
+    position: absolute;
+    top: 50%;
+    width: 2px;
+    height: 12px;
+    transform: translate(-50%, -50%);
+    background: #ffd65c;
+    border-radius: 1px;
+    box-shadow: 0 0 0 1px rgba(10, 22, 40, 0.45);
+    z-index: 4;
+    pointer-events: none;
 }
 
 .seek-preview {
