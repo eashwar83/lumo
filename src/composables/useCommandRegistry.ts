@@ -70,6 +70,9 @@ export type CommandRegistryOptions = {
     toggleSplitCompare: () => void;
     getSplitPosition: () => number;
     setSplitPosition: (value: number) => void;
+    viewOriginal: () => void;
+    undoEnhancement: () => void;
+    redoEnhancement: () => void;
     oldFilmRestore: () => void;
     setDeband: (level: "off" | "light" | "medium" | "strong") => void;
     syncSubtitlesByEar: () => void;
@@ -199,6 +202,12 @@ export const useCommandRegistry = (options: CommandRegistryOptions) => {
                 () => options.setDeband(level)));
         action("video.oldFilmRestore", "Old Film Restore", "Video",
             options.oldFilmRestore);
+        action("video.viewOriginal", "View original (bypass enhancements)",
+            "Video", options.viewOriginal);
+        action("video.undo", "Undo enhancement change", "Video",
+            options.undoEnhancement);
+        action("video.redo", "Redo enhancement change", "Video",
+            options.redoEnhancement);
 
         action("subtitle.syncByEar", "Sync subtitles to this moment", "Subtitles",
             options.syncSubtitlesByEar);

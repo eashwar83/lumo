@@ -243,6 +243,16 @@ export const usePlaybackAdjustments = () => {
         await setColorAdjustment("hue", value);
     };
 
+    // View Original bypass: push neutral colour to mpv without changing stored
+    // values, then reapplyColorAdjustments() restores them.
+    const applyNeutral = async () => {
+        await applyColorAdjustmentsSet({ ...DEFAULT_COLOR_ADJUSTMENTS });
+    };
+
+    const reapplyColorAdjustments = async () => {
+        await applyColorAdjustmentsSet(activeColorAdjustments.value);
+    };
+
     const setGlobalColorAdjustmentsEnabled = async (enabled: boolean) => {
         if (globalColorAdjustmentsEnabled.value === enabled) return;
         persistedStateSaver.cancel();
@@ -305,5 +315,7 @@ export const usePlaybackAdjustments = () => {
         setGlobalColorAdjustmentsEnabled,
         reapplyGlobalColorAdjustments,
         applyColorAdjustmentsForMedia,
+        applyNeutral,
+        reapplyColorAdjustments,
     };
 };

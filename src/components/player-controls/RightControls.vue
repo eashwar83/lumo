@@ -51,6 +51,7 @@ const props = defineProps<{
     showAudioMenu: boolean;
     /** Drives the dot on the audio-enhance button when any filter is engaged. */
     audioEnhanceActive: boolean;
+    aiEnhanceBusy: boolean;
     subTracks: MediaTrack[];
     dualSubEnabled: boolean;
     secondarySubId: MediaTrack["id"];
@@ -88,6 +89,7 @@ const emit = defineEmits<{
     (e: "set-hue", value: number): void;
     (e: "set-global-color-adjustments-enabled", enabled: boolean): void;
     (e: "auto-enhance"): void;
+    (e: "ai-enhance"): void;
     (e: "reset-video-settings"): void;
     (e: "set-slomo-factor", value: number): void;
     (e: "open-curves"): void;
@@ -976,6 +978,19 @@ watch(
                             <span>{{ autoEnhanceBusy ? "Enhancing…" : "Auto Enhance" }}</span>
                         </button>
 
+                        <button
+                            class="auto-enhance-btn ai-enhance-btn"
+                            type="button"
+                            :disabled="props.aiEnhanceBusy"
+                            title="Send a few frames to your configured AI provider for a tailored correction (Settings → Advanced → AI Enhance)"
+                            @click.stop="emit('ai-enhance')"
+                        >
+                            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                <path d="M12 2l2.4 5.6L20 10l-5.6 2.4L12 18l-2.4-5.6L4 10l5.6-2.4zM19 15l1 2.3L22 18l-2 .7L19 21l-1-2.3L16 18l2-.7zM5 14l.8 1.8L8 16.5l-1.8.8L5 19l-.8-1.7L2 16.5l1.8-.7z" />
+                            </svg>
+                            <span>{{ props.aiEnhanceBusy ? "Asking AI…" : "AI Enhance (Cloud)" }}</span>
+                        </button>
+
                         <div class="presets">
                             <div class="presets__head">
                                 <span class="enh__heading">Presets</span>
@@ -1747,6 +1762,17 @@ watch(
     font-weight: 600;
     cursor: pointer;
     transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.ai-enhance-btn {
+    margin-top: 6px;
+    border-color: rgba(196, 160, 255, 0.45);
+    background: rgba(170, 130, 255, 0.16);
+    color: #e7dcff;
+}
+
+.ai-enhance-btn:hover:not(:disabled) {
+    background: rgba(170, 130, 255, 0.3);
 }
 
 .auto-enhance-btn:hover:not(:disabled) {

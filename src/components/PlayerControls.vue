@@ -47,6 +47,7 @@ const props = defineProps<{
     audioTracks: MediaTrack[];
     showAudioMenu: boolean;
     audioEnhanceActive: boolean;
+    aiEnhanceBusy: boolean;
     subTracks: MediaTrack[];
     dualSubEnabled: boolean;
     secondarySubId: MediaTrack["id"];
@@ -91,6 +92,7 @@ const emit = defineEmits<{
     (e: "set-hue", value: number): void;
     (e: "set-global-color-adjustments-enabled", enabled: boolean): void;
     (e: "auto-enhance"): void;
+    (e: "ai-enhance"): void;
     (e: "reset-video-settings"): void;
     (e: "set-slomo-factor", value: number): void;
     (e: "open-curves"): void;
@@ -294,6 +296,7 @@ onUnmounted(() => {
                         :audio-tracks="audioTracks"
                         :show-audio-menu="showAudioMenu"
                         :audio-enhance-active="audioEnhanceActive"
+                        :ai-enhance-busy="aiEnhanceBusy"
                         :sub-tracks="subTracks"
                         :dual-sub-enabled="dualSubEnabled"
                         :secondary-sub-id="secondarySubId"
@@ -332,6 +335,7 @@ onUnmounted(() => {
                             emit('set-global-color-adjustments-enabled', $event)
                         "
                         @auto-enhance="emit('auto-enhance')"
+                        @ai-enhance="emit('ai-enhance')"
                         @reset-video-settings="emit('reset-video-settings')"
                         @set-slomo-factor="emit('set-slomo-factor', $event)"
                         @open-curves="emit('open-curves')"

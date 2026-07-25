@@ -83,6 +83,9 @@ export type PlaybackShortcutActions = {
     syncSubtitlesByEar?: () => void;
     nextScene?: () => void;
     previousScene?: () => void;
+    viewOriginal?: () => void;
+    undoEnhancement?: () => void;
+    redoEnhancement?: () => void;
     /** Runs a user-defined shortcut; true when it claimed the chord. */
     runCustomShortcut?: (chord: string) => boolean;
     /** Gates the export entries the same way the clip bar does. */
@@ -185,6 +188,16 @@ export const usePlaybackShortcuts = (
         if (target.closest(".player-controls")) return false;
         if (target.closest(".top-bar")) return false;
         if (target.closest(".main-panels")) return false;
+        // Any chrome/overlay (settings, AI prompt, curves, palette, menus…)
+        // opts out of window-drag; a double-click there must not reach the
+        // video and toggle fullscreen.
+        if (target.closest("[data-window-no-drag]")) return false;
+        if (
+            target.closest(
+                "input, textarea, select, button, [role='dialog'], [role='menu']",
+            )
+        )
+            return false;
         return true;
     };
 
@@ -522,6 +535,21 @@ export const usePlaybackShortcuts = (
         previousScene: {
             enabled: () => Boolean(actions.previousScene) && isFileLoaded(),
             run: () => actions.previousScene?.(),
+        },
+        viewOriginal: {
+            enabled: () => Boolean(actions.viewOriginal) && isFileLoaded(),
+            allowRepeat: false,
+            run: () => actions.viewOriginal?.(),
+        },
+        undoEnhancement: {
+            enabled: () => Boolean(actions.undoEnhancement) && isFileLoaded(),
+            allowRepeat: false,
+            run: () => actions.undoEnhancement?.(),
+        },
+        redoEnhancement: {
+            enabled: () => Boolean(actions.redoEnhancement) && isFileLoaded(),
+            allowRepeat: false,
+            run: () => actions.redoEnhancement?.(),
         },
         windowSizeUp: {
             enabled: () => Boolean(actions.windowSizeUp),

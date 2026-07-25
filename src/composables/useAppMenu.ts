@@ -72,6 +72,8 @@ export type AppMenuOptions = {
     exportContactSheet: () => void;
     exportClip: (asGif: boolean) => void;
     openExportFolder: () => void;
+    openMergeFiles: () => void;
+    openSplitFile: () => void;
     quit: () => void;
 
     togglePlayPause: () => void;
@@ -103,6 +105,12 @@ export type AppMenuOptions = {
     stepWindowSize: (factor: number) => void;
     openCurves: () => void;
     toggleSplitCompare: () => void;
+    viewOriginal: () => void;
+    isViewingOriginal: () => boolean;
+    undoEnhancement: () => void;
+    redoEnhancement: () => void;
+    canUndoEnhancement: () => boolean;
+    canRedoEnhancement: () => boolean;
     syncSubtitlesByEar: () => void;
     nextScene: () => void;
     previousScene: () => void;
@@ -240,6 +248,19 @@ export const useAppMenu = (options: AppMenuOptions) => {
                 label: "Open Export Folder",
                 shortcut: key("openExportFolder"),
                 run: options.openExportFolder,
+            },
+            sep,
+            {
+                kind: "action",
+                label: "Merge Files…",
+                disabled: !options.clipExportAvailable(),
+                run: options.openMergeFiles,
+            },
+            {
+                kind: "action",
+                label: "Split File…",
+                disabled: !options.clipExportAvailable(),
+                run: options.openSplitFile,
             },
             sep,
             {
@@ -841,6 +862,30 @@ export const useAppMenu = (options: AppMenuOptions) => {
                 disabled: !loaded,
                 run: options.toggleSplitCompare,
             },
+            {
+                kind: "action",
+                label: "View Original",
+                shortcut: key("viewOriginal"),
+                checked: options.isViewingOriginal(),
+                disabled: !loaded,
+                run: options.viewOriginal,
+            },
+            sep,
+            {
+                kind: "action",
+                label: "Undo change",
+                shortcut: key("undoEnhancement"),
+                disabled: !loaded || !options.canUndoEnhancement(),
+                run: options.undoEnhancement,
+            },
+            {
+                kind: "action",
+                label: "Redo change",
+                shortcut: key("redoEnhancement"),
+                disabled: !loaded || !options.canRedoEnhancement(),
+                run: options.redoEnhancement,
+            },
+            sep,
             {
                 kind: "action",
                 label: "Curves…",

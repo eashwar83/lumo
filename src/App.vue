@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import {
     currentMonitor,
     getCurrentWindow,
@@ -21,6 +22,8 @@ import PlaylistCreationDialog from "./components/PlaylistCreationDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import ContextMenu from "./components/ContextMenu.vue";
 import OnlineSubtitleDialog from "./components/OnlineSubtitleDialog.vue";
+import MergeDialog from "./components/MergeDialog.vue";
+import SplitDialog from "./components/SplitDialog.vue";
 import WindowResizeRegions from "./components/WindowResizeRegions.vue";
 import { usePlaybackShortcuts } from "./composables/usePlaybackShortcuts";
 import { useUltraSlomo } from "./composables/useUltraSlomo";
@@ -37,6 +40,7 @@ import { useCustomShortcuts } from "./composables/useCustomShortcuts";
 import CommandPalette from "./components/CommandPalette.vue";
 import SplitCompareOverlay from "./components/SplitCompareOverlay.vue";
 import { useSplitCompare } from "./composables/useSplitCompare";
+import { useEnhancementHistory } from "./composables/useEnhancementHistory";
 import { useSubtitleSyncByEar } from "./composables/useSubtitleSyncByEar";
 import { useSceneIndex } from "./composables/useSceneIndex";
 import {
@@ -44,6 +48,9 @@ import {
     loadUiState,
 } from "./composables/useUiStateStore";
 import CurvesPanel from "./components/CurvesPanel.vue";
+import { serializeCurves } from "./utils/curves";
+import { useAiConfig } from "./composables/useAiConfig";
+import { AI_PROVIDERS } from "./constants/aiModels";
 import EqualizerPanel from "./components/EqualizerPanel.vue";
 import SkipPrompt from "./components/SkipPrompt.vue";
 import { useAbRange } from "./composables/useAbRange";
@@ -626,6 +633,9 @@ const { onKeydown, onKeyup, onDoubleClick, bindings: shortcutBindings } = usePla
         nextScene: () => void sceneIndex.next(player.state.playback.currentTime),
         previousScene: () =>
             void sceneIndex.previous(player.state.playback.currentTime),
+        viewOriginal: () => enhancementHistory.toggleBypass(),
+        undoEnhancement: () => void enhancementHistory.undo(),
+        redoEnhancement: () => void enhancementHistory.redo(),
         runCustomShortcut: (chord) => customShortcuts.runChord(chord),
         canExportRange: () => abRange.hasRange.value && isLocalMediaPath.value,
         canExportClip: () => isClipExportAvailable.value,
@@ -938,9 +948,10 @@ const openSettings = () => {
 };
 const closeSettings = () => {
     isSettingsOpen.value = false;
-    // The ffmpeg path may have just been set, which enables clip export — but
-    // only re-probe if there's a range whose buttons depend on the answer.
-    if (abRange.hasRange.value) void refreshClipExportAvailability();
+    // The ffmpeg path may have just been set, which enables clip export and the
+    // merge/split tools — re-probe unconditionally (those tools don't need an
+    // A-B range, so a range-gated check would leave them stuck disabled).
+    void refreshClipExportAvailability();
 };
 // The update-note "install" flow sets activePanel to the settings id to reveal
 // the update UI. Settings is no longer a main panel, so translate that into
@@ -993,6 +1004,178 @@ const videoPresets = useVideoPresets({
     }),
     onApplied: (name) => showMessageOverlay(`Preset: ${name}`),
 });
+
+// Cloud AI correction — shared by the Video-popover "AI Enhance" button and the
+// Curves-panel "AI Correct" button. Applies per-channel curves plus a
+// saturation / temperature / tint nudge and sharpen / grain, all as one
+// undoable step.
+type AiCurveResult = {
+    rgb: [number, number][];
+    r: [number, number][];
+    g: [number, number][];
+    b: [number, number][];
+    saturation: number;
+    temperature: number;
+    tint: number;
+    sharpen: number;
+    sharpenRadius: number;
+    grain: number;
+    notes: string;
+};
+// Merge / split modals (file operations in the Media menu).
+const mergeOpen = ref(false);
+const splitOpen = ref(false);
+
+const aiConfig = useAiConfig();
+const isAiEnhancing = ref(false);
+const aiPromptOpen = ref(false);
+const aiPromptText = ref("");
+const aiFetchStatus = ref("");
+const aiFetching = ref(false);
+const onPromptFetchModels = async () => {
+    if (aiFetching.value) return;
+    aiFetching.value = true;
+    aiFetchStatus.value = "Fetching…";
+    const result = await aiConfig.fetchModels();
+    aiFetchStatus.value = result.message;
+    aiFetching.value = false;
+};
+const aiPromptInput = ref<HTMLTextAreaElement | null>(null);
+watch(aiPromptOpen, (open) => {
+    if (open) void nextTick(() => aiPromptInput.value?.focus());
+});
+
+// Reuse a past prompt: refill the text and restore the provider/model it ran on.
+const reuseAiPrompt = (entry: {
+    prompt: string;
+    provider: string;
+    model: string;
+}) => {
+    aiPromptText.value = entry.prompt;
+    if (entry.provider) aiConfig.setProvider(entry.provider);
+    if (entry.model) aiConfig.setModel(entry.model);
+    void nextTick(() => aiPromptInput.value?.focus());
+};
+
+const onSelectRecent = (rawIndex: string) => {
+    const entry = aiConfig.promptHistory.value[Number(rawIndex)];
+    if (entry) reuseAiPrompt(entry);
+};
+
+// Reference images that steer the correction toward a target look. Session-only
+// (kept while the app is open, cleared on restart); capped at three.
+const MAX_REFERENCE_IMAGES = 3;
+const aiRefImages = ref<{ path: string; thumb: string }[]>([]);
+
+const onAddReferenceImages = async () => {
+    if (aiRefImages.value.length >= MAX_REFERENCE_IMAGES) return;
+    const selected = await openFileDialog({
+        multiple: true,
+        directory: false,
+        filters: [
+            {
+                name: "Images",
+                extensions: [
+                    "jpg", "jpeg", "png", "webp", "bmp", "gif", "tif", "tiff",
+                ],
+            },
+        ],
+    });
+    const paths = Array.isArray(selected)
+        ? selected
+        : selected
+          ? [selected]
+          : [];
+    for (const path of paths) {
+        if (aiRefImages.value.length >= MAX_REFERENCE_IMAGES) break;
+        if (aiRefImages.value.some((r) => r.path === path)) continue;
+        try {
+            const thumb = await invoke<string>("ai_reference_thumbnail", { path });
+            aiRefImages.value = [...aiRefImages.value, { path, thumb }];
+        } catch (error) {
+            showMessageOverlay(
+                String(error).replace(/^Error:\s*/, "").slice(0, 140),
+                3200,
+            );
+        }
+    }
+};
+
+const removeReferenceImage = (index: number) => {
+    aiRefImages.value = aiRefImages.value.filter((_, i) => i !== index);
+};
+
+// The AI buttons open a prompt first so you can steer the correction
+// ("warmer, less saturation"); leaving it blank runs a general best-effort pass.
+const onAiEnhance = () => {
+    if (isAiEnhancing.value) return;
+    const path = player.state.media.url.trim();
+    if (!path || player.state.playback.duration <= 0) return;
+    if (!isLocalMediaPath.value) {
+        showMessageOverlay("AI correction needs a local video file", 3000);
+        return;
+    }
+    aiPromptOpen.value = true;
+};
+
+const runAiEnhance = async () => {
+    const instruction = aiPromptText.value.trim();
+    const provider = aiConfig.provider.value;
+    const model = aiConfig.currentModel.value;
+    aiPromptOpen.value = false;
+    if (isAiEnhancing.value) return;
+    const path = player.state.media.url.trim();
+    const duration = player.state.playback.duration;
+    if (!path || duration <= 0) return;
+    isAiEnhancing.value = true;
+    showMessageOverlay("Analyzing with AI…", 20000);
+    try {
+        const result = await invoke<AiCurveResult>("ai_curve_correction", {
+            path,
+            duration,
+            provider,
+            apiKey: aiConfig.currentKey.value,
+            model: model || null,
+            baseUrl: aiConfig.currentBaseUrl.value || null,
+            instruction: instruction || null,
+            referenceImages: aiRefImages.value.map((r) => r.path),
+        });
+        // Tag the resulting undo checkpoint with the model, the prompt used, and
+        // the model's own description, so cycling back to it shows all three.
+        enhancementHistory.tagNextChange({
+            label: `AI · ${model || provider}`,
+            prompt: instruction,
+            notes: result.notes,
+        });
+        // Remember the prompt + model so it can be reused.
+        aiConfig.addPromptHistory({ prompt: instruction, provider, model });
+        const toPoints = (arr: [number, number][]) =>
+            arr.map(([x, y]) => ({ x, y }));
+        enhancements.setCurves(
+            serializeCurves({
+                rgb: toPoints(result.rgb),
+                r: toPoints(result.r),
+                g: toPoints(result.g),
+                b: toPoints(result.b),
+            }),
+        );
+        enhancements.setColorGrade("temperature", result.temperature);
+        enhancements.setColorGrade("tint", result.tint);
+        await adjustments.setSaturation(result.saturation);
+        enhancements.setSharpenAmount(result.sharpen);
+        enhancements.setSharpenRadius(result.sharpenRadius);
+        enhancements.setGrain(result.grain);
+        showMessageOverlay(result.notes || "AI correction applied", 3600);
+    } catch (error) {
+        const message = String(error)
+            .replace(/^Error:\s*/, "")
+            .slice(0, 160);
+        showMessageOverlay(`AI correction failed: ${message}`, 4500);
+        console.warn("[ai-enhance] failed", error);
+    } finally {
+        isAiEnhancing.value = false;
+    }
+};
 
 const onAutoEnhance = async () => {
     if (!player.state.media.isFileLoaded) return;
@@ -1232,6 +1415,38 @@ const quitApp = () => void getCurrentWindow().close();
 const exportClipFromRange = (asGif: boolean) =>
     void onExportClip({ asGif, gifWidth: asGif ? 720 : 0 });
 
+// View Original bypass + per-file undo/redo across every picture and audio
+// enhancement.
+const enhancementHistory = useEnhancementHistory({
+    enhancements,
+    audio,
+    adjustments: {
+        brightness: adjustments.brightness,
+        contrast: adjustments.contrast,
+        saturation: adjustments.saturation,
+        gamma: adjustments.gamma,
+        hue: adjustments.hue,
+        setBrightness: adjustments.setBrightness,
+        setContrast: adjustments.setContrast,
+        setSaturation: adjustments.setSaturation,
+        setGamma: adjustments.setGamma,
+        setHue: adjustments.setHue,
+        applyNeutral: adjustments.applyNeutral,
+        reapplyColorAdjustments: adjustments.reapplyColorAdjustments,
+    },
+    // Multi-line readouts (AI steps carry a prompt + result) need longer to read.
+    onMessage: (text: string) =>
+        showMessageOverlay(text, text.includes("\n") ? 5200 : 1400),
+    silenceMessageHandlers: () => {
+        enhancements.setMessageHandler(() => {});
+        audio.setMessageHandler(() => {});
+    },
+    restoreMessageHandlers: () => {
+        enhancements.setMessageHandler(showMessageOverlay);
+        audio.setMessageHandler(showMessageOverlay);
+    },
+});
+
 // Before/after wipe over the enhancement chain.
 const splitCompare = useSplitCompare();
 
@@ -1322,6 +1537,9 @@ const commandRegistry = useCommandRegistry({
         splitCompare.setPosition(value);
         splitCompare.commitPosition();
     },
+    viewOriginal: () => enhancementHistory.toggleBypass(),
+    undoEnhancement: () => void enhancementHistory.undo(),
+    redoEnhancement: () => void enhancementHistory.redo(),
     oldFilmRestore: () => void enhancements.applyOldFilmRestore(),
     setDeband: (level) => void enhancements.setDeband(level),
     syncSubtitlesByEar: () => void subtitleSync.syncNow(),
@@ -1378,6 +1596,8 @@ const { menus: appMenus } = useAppMenu({
     exportContactSheet: onExportContactSheet,
     exportClip: exportClipFromRange,
     openExportFolder: () => void openExportFolder(),
+    openMergeFiles: () => (mergeOpen.value = true),
+    openSplitFile: () => (splitOpen.value = true),
     quit: quitApp,
 
     togglePlayPause: () => void player.togglePlayPause(),
@@ -1413,6 +1633,12 @@ const { menus: appMenus } = useAppMenu({
     stepWindowSize: (factor) => void stepWindowSize(factor),
     openCurves,
     toggleSplitCompare: () => void splitCompare.toggle(),
+    viewOriginal: () => enhancementHistory.toggleBypass(),
+    isViewingOriginal: () => enhancementHistory.bypass.value,
+    undoEnhancement: () => void enhancementHistory.undo(),
+    redoEnhancement: () => void enhancementHistory.redo(),
+    canUndoEnhancement: () => enhancementHistory.canUndo.value,
+    canRedoEnhancement: () => enhancementHistory.canRedo.value,
     syncSubtitlesByEar: () => void subtitleSync.syncNow(),
     nextScene: () => void sceneIndex.next(player.state.playback.currentTime),
     previousScene: () => void sceneIndex.previous(player.state.playback.currentTime),
@@ -1470,6 +1696,18 @@ const { menus: appMenus } = useAppMenu({
 // Returns false when nothing was open, so the caller can fall through to
 // "exit fullscreen". Keep this ordered outermost-last.
 const closeTopOverlay = (): boolean => {
+    if (mergeOpen.value) {
+        mergeOpen.value = false;
+        return true;
+    }
+    if (splitOpen.value) {
+        splitOpen.value = false;
+        return true;
+    }
+    if (aiPromptOpen.value) {
+        aiPromptOpen.value = false;
+        return true;
+    }
     if (isPaletteOpen.value) {
         isPaletteOpen.value = false;
         return true;
@@ -1581,6 +1819,7 @@ const onFileLoaded = async () => {
     skipMarkers.onFileLoaded(player.state.media.url);
     void splitCompare.onFileLoaded();
     sceneIndex.onFileLoaded();
+    enhancementHistory.onFileLoaded(currentMediaKey());
     void applyWindowSizingForMedia();
     // Pre-render seek-bar thumbnails in the background for local files.
     if (player.state.playback.duration > 0) {
@@ -1673,6 +1912,7 @@ useAppStartupBindings({
                 v-show="isMenuBarShown"
                 :menus="appMenus"
                 :show-window-controls="playerHeaderCompactModeEnabled"
+                @open="() => void refreshClipExportAvailability()"
             />
         </transition>
 
@@ -1804,6 +2044,22 @@ useAppStartupBindings({
             @select="tracks.addSelectedOnlineSubtitleTrack"
         />
 
+        <MergeDialog
+            :open="mergeOpen"
+            @close="mergeOpen = false"
+            @notify="(msg: string) => showMessageOverlay(msg, 4000)"
+            @load="(path: string) => void playPath(path)"
+        />
+
+        <SplitDialog
+            :open="splitOpen"
+            :current-path="player.state.media.url"
+            :current-duration="player.state.playback.duration"
+            :current-position="player.state.playback.currentTime"
+            @close="splitOpen = false"
+            @notify="(msg: string) => showMessageOverlay(msg, 4000)"
+        />
+
         <PlayerControls
             :is-playing="player.state.playback.isPlaying"
             :current-time="player.state.playback.currentTime"
@@ -1846,6 +2102,7 @@ useAppStartupBindings({
             :audio-tracks="tracks.audioTracks.value"
             :show-audio-menu="tracks.showAudioMenu.value"
             :audio-enhance-active="audio.isActive.value"
+            :ai-enhance-busy="isAiEnhancing"
             :sub-tracks="tracks.subTracks.value"
             :dual-sub-enabled="tracks.dualSubEnabled.value"
             :secondary-sub-id="tracks.secondarySubId.value"
@@ -1887,6 +2144,7 @@ useAppStartupBindings({
             @set-hue="adjustments.setHue"
             @set-global-color-adjustments-enabled="onSetGlobalColorAdjustments"
             @auto-enhance="onAutoEnhance"
+            @ai-enhance="onAiEnhance"
             @reset-video-settings="onResetVideoSettings"
             @set-slomo-factor="ultraSlomo.setFactor"
             @open-curves="openCurves"
@@ -2013,7 +2271,9 @@ useAppStartupBindings({
             :visible="isCurvesOpen"
             :media-path="player.state.media.url"
             :duration="player.state.playback.duration"
+            :ai-busy="isAiEnhancing"
             @close="isCurvesOpen = false"
+            @request-ai="onAiEnhance"
         />
 
         <EqualizerPanel
@@ -2040,10 +2300,185 @@ useAppStartupBindings({
             @close="isPaletteOpen = false"
         />
 
+        <transition name="fade">
+            <div
+                v-if="aiPromptOpen"
+                class="ai-prompt"
+                data-window-no-drag
+                @keydown.esc.stop.prevent="aiPromptOpen = false"
+            >
+                <div
+                    class="ai-prompt__backdrop"
+                    @click="aiPromptOpen = false"
+                ></div>
+                <div class="ai-prompt__box" role="dialog" aria-label="AI correction">
+                    <div class="ai-prompt__title">AI Correction</div>
+
+                    <div class="ai-prompt__grid">
+                        <span class="ai-prompt__field-label">Provider</span>
+                        <select
+                            :value="aiConfig.provider.value"
+                            class="ai-prompt__select"
+                            @change="
+                                aiConfig.setProvider(
+                                    ($event.target as HTMLSelectElement).value,
+                                )
+                            "
+                        >
+                            <option v-for="p in AI_PROVIDERS" :key="p" :value="p">
+                                {{ p }}
+                            </option>
+                        </select>
+
+                        <span class="ai-prompt__field-label">Model</span>
+                        <div class="ai-prompt__model">
+                            <select
+                                :value="aiConfig.currentModel.value"
+                                class="ai-prompt__select"
+                                @change="
+                                    aiConfig.setModel(
+                                        ($event.target as HTMLSelectElement).value,
+                                    )
+                                "
+                            >
+                                <option
+                                    v-for="m in aiConfig.modelOptions.value"
+                                    :key="m"
+                                    :value="m"
+                                >
+                                    {{ m }}
+                                </option>
+                            </select>
+                            <button
+                                class="ai-prompt__fetch"
+                                type="button"
+                                :disabled="aiFetching"
+                                title="Fetch this provider's latest models"
+                                @click="onPromptFetchModels"
+                            >
+                                {{ aiFetching ? "…" : "↻" }}
+                            </button>
+                        </div>
+                    </div>
+
+                    <p
+                        v-if="!aiConfig.currentKey.value"
+                        class="ai-prompt__warn"
+                    >
+                        No API key set for {{ aiConfig.provider.value }} — add one
+                        in Settings → Advanced → AI Enhance.
+                    </p>
+                    <p v-else-if="aiFetchStatus" class="ai-prompt__status">
+                        {{ aiFetchStatus }}
+                    </p>
+
+                    <p class="ai-prompt__hint">
+                        Describe the correction you want, or leave blank for a
+                        general best-effort pass.
+                    </p>
+                    <textarea
+                        ref="aiPromptInput"
+                        v-model="aiPromptText"
+                        class="ai-prompt__input"
+                        rows="3"
+                        placeholder="e.g. warmer, slightly less saturation, lift the shadows"
+                        @keydown.enter.exact.prevent="runAiEnhance"
+                        @keydown.stop
+                    ></textarea>
+
+                    <div
+                        v-if="aiConfig.promptHistory.value.length"
+                        class="ai-prompt__grid"
+                    >
+                        <span class="ai-prompt__field-label">Recent</span>
+                        <select
+                            class="ai-prompt__select"
+                            :value="''"
+                            @change="onSelectRecent(($event.target as HTMLSelectElement).value)"
+                        >
+                            <option value="" disabled>
+                                Reuse a previous prompt…
+                            </option>
+                            <option
+                                v-for="(entry, i) in aiConfig.promptHistory.value"
+                                :key="i"
+                                :value="String(i)"
+                            >
+                                {{ (entry.prompt || "General best-effort pass") }}
+                                — {{ entry.model || entry.provider }}
+                            </option>
+                        </select>
+                    </div>
+
+                    <div class="ai-prompt__refs">
+                        <div class="ai-prompt__refs-head">
+                            <span class="ai-prompt__field-label">Reference</span>
+                            <button
+                                class="ai-prompt__ref-add"
+                                type="button"
+                                :disabled="aiRefImages.length >= MAX_REFERENCE_IMAGES"
+                                @click="onAddReferenceImages"
+                            >
+                                + Add image
+                            </button>
+                        </div>
+                        <div v-if="aiRefImages.length" class="ai-prompt__ref-chips">
+                            <div
+                                v-for="(refImg, i) in aiRefImages"
+                                :key="refImg.path"
+                                class="ai-prompt__ref-chip"
+                                :title="refImg.path"
+                            >
+                                <img :src="refImg.thumb" alt="reference" />
+                                <button
+                                    class="ai-prompt__ref-remove"
+                                    type="button"
+                                    aria-label="Remove reference image"
+                                    @click="removeReferenceImage(i)"
+                                >
+                                    ×
+                                </button>
+                            </div>
+                        </div>
+                        <p v-else class="ai-prompt__ref-empty">
+                            Optional — add up to {{ MAX_REFERENCE_IMAGES }} stills
+                            of a look you want, and the AI grades the video toward
+                            them.
+                        </p>
+                    </div>
+
+                    <div class="ai-prompt__actions">
+                        <button
+                            class="ai-prompt__btn"
+                            type="button"
+                            @click="aiPromptOpen = false"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            class="ai-prompt__btn ai-prompt__btn--primary"
+                            type="button"
+                            :disabled="!aiConfig.currentKey.value"
+                            @click="runAiEnhance"
+                        >
+                            Enhance
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </transition>
+
         <transition name="slomo-badge-fade">
             <div v-if="ultraSlomo.isActive.value" class="slomo-badge">
                 <span class="slomo-badge__dot"></span>
                 {{ ultraSlomo.label.value }}
+            </div>
+        </transition>
+
+        <transition name="slomo-badge-fade">
+            <div v-if="enhancementHistory.bypass.value" class="original-badge">
+                <span class="original-badge__dot"></span>
+                ORIGINAL
             </div>
         </transition>
 
@@ -2136,6 +2571,278 @@ useAppStartupBindings({
     background: #8fb3ff;
     box-shadow: 0 0 8px #8fb3ff;
     animation: slomo-pulse 1.1s ease-in-out infinite;
+}
+
+/* View Original bypass badge */
+/* AI correction prompt modal */
+.ai-prompt {
+    position: fixed;
+    inset: 0;
+    z-index: 210;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.ai-prompt__backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+}
+
+.ai-prompt__box {
+    position: relative;
+    width: min(520px, 92vw);
+    padding: 20px;
+    border-radius: 14px;
+    background: rgba(24, 26, 31, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+    color: #fff;
+}
+
+.ai-prompt__title {
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.ai-prompt__grid {
+    display: grid;
+    grid-template-columns: 72px 1fr;
+    align-items: center;
+    gap: 8px 12px;
+    margin: 12px 0 8px;
+}
+
+.ai-prompt__field-label {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.ai-prompt__select {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.28);
+    color: #fff;
+    font-size: 13px;
+    color-scheme: dark;
+}
+
+.ai-prompt__select option {
+    background-color: #1a1c21;
+    color: #f2f2f2;
+}
+
+.ai-prompt__model {
+    display: flex;
+    gap: 6px;
+}
+
+.ai-prompt__fetch {
+    flex: none;
+    width: 38px;
+    border: 1px solid rgba(196, 160, 255, 0.45);
+    border-radius: 8px;
+    background: rgba(170, 130, 255, 0.16);
+    color: #e7dcff;
+    font-size: 15px;
+    cursor: pointer;
+}
+
+.ai-prompt__fetch:hover:not(:disabled) {
+    background: rgba(170, 130, 255, 0.3);
+}
+
+.ai-prompt__fetch:disabled {
+    opacity: 0.55;
+    cursor: default;
+}
+
+.ai-prompt__status {
+    margin: 0 0 6px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.ai-prompt__warn {
+    margin: 0 0 6px;
+    font-size: 12px;
+    color: #ffb454;
+}
+
+.ai-prompt__btn--primary:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.ai-prompt__hint {
+    margin: 6px 0 12px;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.ai-prompt__input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 9px;
+    background: rgba(0, 0, 0, 0.28);
+    color: #fff;
+    font-size: 13.5px;
+    font-family: inherit;
+    resize: vertical;
+}
+
+.ai-prompt__refs {
+    margin-top: 12px;
+}
+
+.ai-prompt__refs-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.ai-prompt__ref-add {
+    padding: 5px 12px;
+    border: 1px solid rgba(196, 160, 255, 0.45);
+    border-radius: 7px;
+    background: rgba(170, 130, 255, 0.16);
+    color: #e7dcff;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.ai-prompt__ref-add:hover:not(:disabled) {
+    background: rgba(170, 130, 255, 0.3);
+}
+
+.ai-prompt__ref-add:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.ai-prompt__ref-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.ai-prompt__ref-chip {
+    position: relative;
+    width: 68px;
+    height: 68px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: rgba(0, 0, 0, 0.3);
+}
+
+.ai-prompt__ref-chip img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.ai-prompt__ref-remove {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 18px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.65);
+    color: #fff;
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.ai-prompt__ref-remove:hover {
+    background: rgba(220, 60, 60, 0.9);
+}
+
+.ai-prompt__ref-empty {
+    margin: 8px 0 0;
+    font-size: 12px;
+    line-height: 1.45;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.ai-prompt__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 14px;
+}
+
+.ai-prompt__btn {
+    padding: 8px 16px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.ai-prompt__btn:hover {
+    background: rgba(255, 255, 255, 0.13);
+}
+
+.ai-prompt__btn--primary {
+    background: rgba(170, 130, 255, 0.9);
+    border-color: transparent;
+    color: #14101f;
+}
+
+.ai-prompt__btn--primary:hover {
+    background: #b79bff;
+}
+
+.original-badge {
+    position: fixed;
+    top: 54px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 118;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 14px;
+    border-radius: 999px;
+    background: rgba(10, 12, 16, 0.72);
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    color: #fff;
+    font-size: 12.5px;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+    pointer-events: none;
+}
+
+.original-badge__dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #fff;
 }
 
 @keyframes slomo-pulse {

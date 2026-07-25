@@ -316,6 +316,17 @@ export const useAudioEnhancements = () => {
         persist();
     };
 
+    // Replace all EQ bands at once (used when restoring an undo snapshot).
+    const setEqBands = (bands: number[]) => {
+        state.eqBands = normalizeBands(bands);
+        const match = EQ_PRESETS.find((preset) =>
+            bandsMatch(preset.bands, state.eqBands),
+        );
+        state.eqPreset = match?.id ?? "";
+        if (state.eqEnabled) scheduleRebuild();
+        persist();
+    };
+
     const applyEqPreset = async (id: string) => {
         const preset = EQ_PRESETS.find((candidate) => candidate.id === id);
         if (!preset) return;
@@ -355,6 +366,18 @@ export const useAudioEnhancements = () => {
             state.gain > 100 ||
             (state.eqEnabled && state.eqBands.some((g) => Math.abs(g) >= 0.05)),
     );
+
+    // View Original bypass: strip every audio filter without changing state,
+    // then reapplyToMpv() rebuilds them from state.
+    const applyNeutral = async () => {
+        for (const label of ALL_LABELS) {
+            await runCommand(["af", "remove", `@${label}`]);
+        }
+    };
+
+    const reapplyToMpv = async () => {
+        await rebuildFilters();
+    };
 
     // --- lifecycle ----------------------------------------------------------
 
@@ -400,10 +423,13 @@ export const useAudioEnhancements = () => {
         setEqEnabled,
         setEqBand,
         applyEqPreset,
+        setEqBands,
         resetEq,
         reset,
         setMessageHandler,
         onFileLoaded,
+        applyNeutral,
+        reapplyToMpv,
     };
 };
 

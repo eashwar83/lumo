@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useSettingsPanel } from "../composables/useSettingsPanel";
 import { getPathDisplayName } from "../utils/getPathDisplayName";
 import ShortcutSettings from "../components/ShortcutSettings.vue";
+import AiSettings from "../components/AiSettings.vue";
 import type { CommandDef } from "../types/commands";
 import type { CustomShortcutsController } from "../composables/useCustomShortcuts";
 import { THEME_SETTING_GROUP_TITLE } from "../constants/theme";
@@ -235,6 +236,7 @@ type Block =
     | { kind: "onlineSubs"; key: string; items: SettingItem[] }
     | { kind: "shader"; key: string }
     | { kind: "shortcuts"; key: string; group: SettingGroup }
+    | { kind: "ai"; key: string; title: string }
     | { kind: "about"; key: string };
 
 const activeBlocks = computed<Block[]>(() => {
@@ -305,6 +307,11 @@ const activeBlocks = computed<Block[]>(() => {
                     items: tools,
                 });
             }
+            blocks.push({
+                kind: "ai",
+                key: "adv-ai",
+                title: "AI Enhance (Cloud)",
+            });
             const experiments = visibleOfTitle(EXPERIMENTS_GROUP_TITLE);
             if (experiments.length) {
                 blocks.push({
@@ -1498,6 +1505,14 @@ onBeforeUnmount(() => {
                                         :commands="props.commands"
                                         :custom="props.customShortcuts"
                                     />
+                                </template>
+
+                                <!-- AI Enhance -->
+                                <template v-else-if="block.kind === 'ai'">
+                                    <div class="settings-section__title">
+                                        {{ block.title }}
+                                    </div>
+                                    <AiSettings />
                                 </template>
 
                                 <!-- About -->

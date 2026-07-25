@@ -1,6 +1,6 @@
 [package]
 name = "lumo"
-version = "1.0.1"
+version = "1.1.0"
 description = "Lumo — a modern mpv-based video player"
 license = "GPL-3.0-only"
 authors = ["FengZeng"]
@@ -42,7 +42,7 @@ uuid = { version = "1", features = ["v7"] }
 base64 = "0.22"
 # JPEG decode for Auto Enhance / contact sheets, GIF encode for clip export.
 # Both are pure Rust, so nothing is added to the shipped binary set.
-image = { version = "0.25", default-features = false, features = ["jpeg", "gif"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "gif", "png", "webp", "bmp"] }
 flate2 = "1"
 zip = { version = "4.6.1", default-features = false, features = ["deflate"] }
 

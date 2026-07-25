@@ -80,6 +80,14 @@ pub struct UiState {
     pub menu_bar_visible: Option<bool>,
     #[serde(default)]
     pub custom_shortcuts: Option<Vec<CustomShortcut>>,
+    /// Per-file enhancement undo/redo history. Opaque JSON owned by the
+    /// frontend (a map of file key -> { stack, index }).
+    #[serde(default)]
+    pub enhancement_history: Option<serde_json::Value>,
+    /// Cloud-AI settings (provider, per-provider keys/models, fetched models).
+    /// Opaque JSON owned by the frontend; the backend only stores it.
+    #[serde(default)]
+    pub ai_config: Option<serde_json::Value>,
 }
 
 impl Default for UiState {
@@ -111,6 +119,8 @@ impl Default for UiState {
             skip_markers_auto: None,
             menu_bar_visible: None,
             custom_shortcuts: None,
+            enhancement_history: None,
+            ai_config: None,
         }
     }
 }
@@ -152,6 +162,8 @@ impl UiState {
             skip_markers_auto: incoming.skip_markers_auto.or(self.skip_markers_auto),
             menu_bar_visible: incoming.menu_bar_visible.or(self.menu_bar_visible),
             custom_shortcuts: incoming.custom_shortcuts.or(self.custom_shortcuts),
+            enhancement_history: incoming.enhancement_history.or(self.enhancement_history),
+            ai_config: incoming.ai_config.or(self.ai_config),
         }
     }
 }

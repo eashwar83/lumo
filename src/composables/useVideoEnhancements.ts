@@ -576,6 +576,61 @@ export const useVideoEnhancements = (options: VideoEnhancementsOptions = {}) => 
         }
     };
 
+    // --- View Original bypass ----------------------------------------------
+    // Push neutral values straight to mpv WITHOUT touching stored state, so the
+    // "View Original" toggle is a true A/B. reapplyAll() puts everything back.
+
+    const applyNeutral = async () => {
+        try {
+            await invoke("apply_sharpen_shader", {
+                amount: 0,
+                radius: normalizeRadius(state.sharpenRadius),
+            });
+        } catch (error) {
+            console.warn("[enhance] neutral sharpen failed", error);
+        }
+        try {
+            await invoke("apply_color_grade_shader", {
+                exposure: 0,
+                temperature: 0,
+                tint: 0,
+                highlights: 0,
+                shadows: 0,
+            });
+        } catch (error) {
+            console.warn("[enhance] neutral grade failed", error);
+        }
+        try {
+            await invoke("apply_grain_shader", { amount: 0 });
+        } catch (error) {
+            console.warn("[enhance] neutral grain failed", error);
+        }
+        try {
+            await invoke("apply_curves_shader", { lut: [] });
+        } catch (error) {
+            console.warn("[enhance] neutral curves failed", error);
+        }
+        await setProp("deinterlace", "no");
+        await runCommand(["vf", "remove", `@${DENOISE_LABEL}`]);
+        if (lastHwdec !== "auto") {
+            await runCommand(["set", "hwdec", "auto"]);
+            lastHwdec = "auto";
+        }
+        await setProp("deband", "no");
+        try {
+            await invoke("apply_upscale_shaders", { mode: "off" });
+        } catch (error) {
+            console.warn("[enhance] neutral upscale failed", error);
+        }
+    };
+
+    // Re-apply the full stored look + global settings to mpv (undo the neutral).
+    const reapplyAll = async () => {
+        await applyQualityPreset();
+        await applyLook();
+        await applyAiUpscale();
+    };
+
     // --- lifecycle ----------------------------------------------------------
 
     // Apply the currently-loaded look values to mpv. Each apply is idempotent
@@ -699,6 +754,8 @@ export const useVideoEnhancements = (options: VideoEnhancementsOptions = {}) => 
         setQualityPreset,
         setDeband,
         applyOldFilmRestore,
+        applyNeutral,
+        reapplyAll,
         setSharpenAmount,
         setSharpenRadius,
         setDenoise,

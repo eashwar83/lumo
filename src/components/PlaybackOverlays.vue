@@ -90,7 +90,14 @@ const seekOverlayRightDisplay = computed(() =>
             </div>
         </transition>
         <transition name="fade-in">
-            <div v-if="messageOverlayText" class="message-overlay__text">
+            <div
+                v-if="messageOverlayText"
+                class="message-overlay__text"
+                :class="{
+                    'message-overlay__text--multiline':
+                        messageOverlayText.includes('\n'),
+                }"
+            >
                 {{ messageOverlayText }}
             </div>
         </transition>
@@ -335,6 +342,17 @@ const seekOverlayRightDisplay = computed(() =>
     font-variant-numeric: tabular-nums;
     text-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
     backdrop-filter: blur(8px);
+}
+
+/* AI history steps carry a prompt + result on their own lines. */
+.message-overlay__text--multiline {
+    white-space: pre-line;
+    overflow: visible;
+    text-overflow: clip;
+    text-align: center;
+    line-height: 1.45;
+    max-width: min(80vw, 620px);
+    font-size: 14px;
 }
 
 .fade-in-enter-active,

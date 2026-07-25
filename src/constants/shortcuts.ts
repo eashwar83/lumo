@@ -82,7 +82,10 @@ export type ShortcutActionId =
     | "toggleSplitCompare"
     | "syncSubtitlesByEar"
     | "nextScene"
-    | "previousScene";
+    | "previousScene"
+    | "viewOriginal"
+    | "undoEnhancement"
+    | "redoEnhancement";
 
 export type ShortcutActionGroup =
     | "File & Export"
@@ -153,6 +156,9 @@ export const SHORTCUT_ACTIONS: ShortcutActionDef[] = [
     { id: "previousScene", label: "Previous scene / chapter", group: "Playback", defaultChord: "Ctrl+ArrowLeft" },
     { id: "nextScene", label: "Next scene / chapter", group: "Playback", defaultChord: "Ctrl+ArrowRight" },
     { id: "toggleSplitCompare", label: "Before / after split view", group: "Interface & Window", defaultChord: "Ctrl+KeyW" },
+    { id: "viewOriginal", label: "View original (bypass enhancements)", group: "Interface & Window", defaultChord: "Backslash" },
+    { id: "undoEnhancement", label: "Undo enhancement change", group: "Interface & Window", defaultChord: "Ctrl+KeyZ" },
+    { id: "redoEnhancement", label: "Redo enhancement change", group: "Interface & Window", defaultChord: "Ctrl+Shift+KeyZ" },
     { id: "syncSubtitlesByEar", label: "Sync subtitles to this moment", group: "Subtitles & Audio", defaultChord: "Ctrl+KeyJ" },
     { id: "toggleCurves", label: "Toggle curves editor", group: "Interface & Window", defaultChord: "KeyU" },
 

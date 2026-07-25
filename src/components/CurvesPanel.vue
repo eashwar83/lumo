@@ -28,9 +28,13 @@ const props = defineProps<{
     visible: boolean;
     mediaPath?: string;
     duration?: number;
+    aiBusy?: boolean;
 }>();
 
-const emit = defineEmits<{ (e: "close"): void }>();
+const emit = defineEmits<{
+    (e: "close"): void;
+    (e: "request-ai"): void;
+}>();
 
 const SIZE = 256; // svg coordinate space (also the curve resolution)
 
@@ -207,6 +211,16 @@ const resetAll = () => {
 
 const autoBusy = ref(false);
 const autoError = ref("");
+
+// --- Cloud AI correction ---------------------------------------------------
+// The actual call + apply lives in App (shared with the Video-popover button);
+// this just triggers it. The guarded watch below re-syncs the graph once the
+// curves come back.
+const onAiCorrect = () => {
+    if (props.aiBusy || autoBusy.value) return;
+    if (!props.mediaPath || (props.duration ?? 0) <= 0) return;
+    emit("request-ai");
+};
 // Sample ~20 frames across the video, derive auto-levels curves, apply them.
 const onAuto = async () => {
     if (autoBusy.value) return;
@@ -337,6 +351,19 @@ watch(
     },
     { immediate: true },
 );
+
+// Reflect curve changes made elsewhere while the panel is open (AI from the
+// Video popover, undo/redo, a preset applied from another surface) without
+// echoing our own emitChange back into a loop.
+watch(
+    () => props.enhancements.state.curves,
+    (next) => {
+        if (!props.visible) return;
+        if (next === serializeCurves(curves)) return;
+        clearPresetLink();
+        loadFromState();
+    },
+);
 </script>
 
 <template>
@@ -380,6 +407,19 @@ watch(
                 <span>{{ autoBusy ? "Analyzing 20 frames…" : "Auto" }}</span>
             </button>
             <div v-if="autoError" class="curves__auto-error">{{ autoError }}</div>
+
+            <button
+                class="curves__ai"
+                type="button"
+                :disabled="props.aiBusy || autoBusy"
+                title="Send a few frames to your configured AI provider for a tailored correction (Settings → Advanced → AI Enhance)"
+                @click="onAiCorrect"
+            >
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M12 2l2.4 5.6L20 10l-5.6 2.4L12 18l-2.4-5.6L4 10l5.6-2.4zM19 15l1 2.3L22 18l-2 .7L19 21l-1-2.3L16 18l2-.7zM5 14l.8 1.8L8 16.5l-1.8.8L5 19l-.8-1.7L2 16.5l1.8-.7z" />
+                </svg>
+                <span>{{ props.aiBusy ? "Asking AI…" : "AI Correct (Cloud)" }}</span>
+            </button>
 
             <div class="curves__editor">
                 <svg
@@ -657,6 +697,37 @@ watch(
 
 .curves__auto:hover:not(:disabled) {
     background: rgba(143, 179, 255, 0.3);
+}
+
+.curves__ai {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    padding: 9px 12px;
+    border: 1px solid rgba(196, 160, 255, 0.45);
+    border-radius: 9px;
+    background: rgba(170, 130, 255, 0.16);
+    color: #e7dcff;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.curves__ai:hover:not(:disabled) {
+    background: rgba(170, 130, 255, 0.3);
+}
+
+.curves__ai:disabled {
+    opacity: 0.55;
+    cursor: default;
+}
+
+.curves__ai svg {
+    width: 16px;
+    height: 16px;
 }
 
 .curves__auto:disabled {

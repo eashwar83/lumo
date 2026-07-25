@@ -177,8 +177,21 @@ pub fn find_ffmpeg(configured: Option<&str>) -> Option<PathBuf> {
             .unwrap_or(false)
     };
 
+    let exe_name = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
     if let Some(raw) = configured.map(str::trim).filter(|s| !s.is_empty()) {
         let path = PathBuf::from(raw);
+        // The user may have pointed at the ffmpeg executable itself…
+        if path.is_file() && runnable(&path) {
+            return Some(path);
+        }
+        // …or at the folder that contains it (e.g. the winbuild `bin` dir).
+        if path.is_dir() {
+            let inside = path.join(exe_name);
+            if inside.exists() && runnable(&inside) {
+                return Some(inside);
+            }
+        }
+        // Fall back to running whatever was given (covers a bare command name).
         if runnable(&path) {
             return Some(path);
         }
