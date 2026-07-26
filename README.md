@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-<b><a href="https://github.com/eashwar83/lumo/releases">⬇️ Download Latest Release</a> · <a href="https://github.com/eashwar83/lumo/issues">🐞 Report a Bug</a></b>
+<b><a href="https://github.com/eashwar83/lumo/releases">⬇️ Download Latest Release</a> · <a href="./docs/USER_GUIDE.md">📖 User Guide</a> · <a href="https://github.com/eashwar83/lumo/issues">🐞 Report a Bug</a></b>
 </p>
 
 > A modern mpv frontend focused on performance and clean design.
@@ -71,6 +71,49 @@ Open the **Video** popover (gear icon) in the player bar.
 - **Quality presets** (Fast / Balanced / High) for mpv's scaler and debanding.
 - **AI Upscaling** — one-click bundled **Anime4K** (anime) and **ravu**
   (live-action) upscalers.
+
+### 🤖 AI colour correction (cloud)
+
+Bring your own key and let a **cloud vision model** design a tailored grade.
+
+- **Multi-provider** — Gemini, Claude, OpenAI, Kimi (Moonshot), Qwen, DeepSeek,
+  Grok, or any custom OpenAI-compatible endpoint. Keys are stored per-provider
+  and stay on your device; frames upload only to the provider you pick.
+- **Prompt-steered** — type an instruction ("warmer, 90s film look, lift the
+  shadows") or run a blank best-effort pass. Switch provider/model right in the
+  prompt window, and **reuse past prompts** from a Recent list.
+- **Reference images** — attach up to 3 stills of a look you want and the AI
+  grades the video *toward* them (palette, contrast, warmth, mood).
+- **Full correction** — returns per-channel **curves** plus **saturation,
+  temperature/tint, sharpen, and film grain**, applied as one undoable step.
+
+### 🔍 Compare, history & non-destructive editing
+
+- **Before / after split view** — split the frame down the middle to judge your
+  grade against the untouched original (HDR-correct on both halves).
+- **View Original** (`\`) — instantly bypass *all* picture **and** audio
+  enhancements to see the source, without losing your settings.
+- **Undo / Redo** (`Ctrl+Z` / `Ctrl+Shift+Z`) — a **per-file** history (up to 20
+  steps) that survives restarts. AI-made steps are self-documenting: cycling to
+  one shows the **model, prompt, and the model's result notes**.
+
+### ✂️ Cutting & exporting
+
+- **Merge files** (no re-encode) — combine same-format clips **losslessly and
+  instantly**; a re-encode fallback combines mismatched files when needed.
+- **Split file** (no re-encode) — cut one file into pieces by **timestamps,
+  equal parts, every N minutes, or chapters**.
+- **Clip & GIF export** — lossless stream-copied clips and in-process animated
+  GIFs from an A-B range.
+- **Contact sheet** — tile a grid of evenly-spaced frames into one image.
+- **Scene detection & chapters** — auto-detect scene cuts (or read embedded
+  chapters) and jump between them, with seek-bar marks.
+
+### 🧭 Menu bar & command palette
+
+- A familiar **VLC-style menu bar** (Media / Playback / Audio / Video / Subtitle
+  / Tools / View / Help) — an additional route to every action.
+- A searchable **command palette** to run any action by name.
 
 ### 🎞 Looks & presets
 
