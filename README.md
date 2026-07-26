@@ -19,6 +19,65 @@
 
 > Lumo is a fork of **[Soia](https://github.com/FengZeng/soia)** by [@FengZeng](https://github.com/FengZeng), licensed under GPL-3.0. See [Credits](#credits) below.
 
+<p align="center">
+  <img src="docs/images/01-hero-player-ui.png" alt="Lumo player" width="860" />
+</p>
+
+## ✨ Highlights
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>🤖 AI Colour Correction</h3>
+      Bring your own API key and let a cloud vision model design a tailored grade
+      from your own footage — or match the look of a reference still.
+      <br/><br/>
+      <img src="docs/images/20-ai-prompt-window.png" width="100%" alt="AI colour correction" />
+    </td>
+    <td width="50%" valign="top">
+      <h3>🎨 Pro Picture Controls</h3>
+      Curves, colour grade, sharpen, film grain, denoise and AI upscaling — all
+      GPU-accelerated and remembered per file.
+      <br/><br/>
+      <img src="docs/images/13-curves-editor.png" width="100%" alt="Curves editor" />
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>🔍 Before / After Compare</h3>
+      Split the frame down the middle to judge your grade against the untouched
+      original — HDR-correct on both halves.
+      <br/><br/>
+      <img src="docs/images/17-split-view.png" width="100%" alt="Before/after split view" />
+    </td>
+    <td width="50%" valign="top">
+      <h3>✂️ Merge &amp; Split — No Re-encode</h3>
+      Combine clips, or cut one file into pieces, losslessly and instantly — by
+      timestamps, equal parts, minutes, or chapters.
+      <br/><br/>
+      <img src="docs/images/33-split-dialog.png" width="100%" alt="Split file" />
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>❤️ Favourites, Organised</h3>
+      Group favourites into folders, move videos between them with multi-select,
+      and import/export your whole list.
+      <br/><br/>
+      <img src="docs/images/09-favourites.png" width="100%" alt="Favourites" />
+    </td>
+    <td width="50%" valign="top">
+      <h3>🖼 Contact Sheets &amp; Clips</h3>
+      One-click contact sheets, plus lossless clip and animated-GIF export from
+      any A-B range.
+      <br/><br/>
+      <img src="docs/images/30-contact-sheet.png" width="100%" alt="Contact sheet" />
+    </td>
+  </tr>
+</table>
+
+<p align="center"><a href="./docs/USER_GUIDE.md"><b>📖 Read the full User Guide →</b></a></p>
+
 ## ✨ Key Features
 
 ### High-Performance Playback
