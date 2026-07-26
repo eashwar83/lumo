@@ -133,6 +133,8 @@ export type AppMenuOptions = {
     toggleShortcutsHelp: () => void;
     toggleInfo: () => void;
     regenerateThumbnails: () => void;
+    exportSettings: () => void;
+    importSettings: () => void;
 
     togglePlaylist: () => void;
     toggleFavorite: () => void;
@@ -1009,6 +1011,17 @@ export const useAppMenu = (options: AppMenuOptions) => {
             kind: "action",
             label: "Keyboard Shortcuts…",
             run: options.toggleShortcutsHelp,
+        },
+        sep,
+        {
+            kind: "action",
+            label: "Export Settings & Shortcuts…",
+            run: options.exportSettings,
+        },
+        {
+            kind: "action",
+            label: "Import Settings & Shortcuts…",
+            run: options.importSettings,
         },
         sep,
         {

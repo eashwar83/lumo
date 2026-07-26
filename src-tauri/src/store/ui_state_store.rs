@@ -88,6 +88,10 @@ pub struct UiState {
     /// Opaque JSON owned by the frontend; the backend only stores it.
     #[serde(default)]
     pub ai_config: Option<serde_json::Value>,
+    /// Favourites folders + per-path folder assignments. Opaque JSON owned by
+    /// the frontend (`{ folders: [...], assignments: { path: folderId } }`).
+    #[serde(default)]
+    pub favorites_meta: Option<serde_json::Value>,
 }
 
 impl Default for UiState {
@@ -121,6 +125,7 @@ impl Default for UiState {
             custom_shortcuts: None,
             enhancement_history: None,
             ai_config: None,
+            favorites_meta: None,
         }
     }
 }
@@ -164,6 +169,7 @@ impl UiState {
             custom_shortcuts: incoming.custom_shortcuts.or(self.custom_shortcuts),
             enhancement_history: incoming.enhancement_history.or(self.enhancement_history),
             ai_config: incoming.ai_config.or(self.ai_config),
+            favorites_meta: incoming.favorites_meta.or(self.favorites_meta),
         }
     }
 }

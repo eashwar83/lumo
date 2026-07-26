@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { HistoryEntry } from "../types/history";
 import type { NetworkPlayRequest } from "../types/network";
-import type { PlaylistEntry } from "../types/playlist";
+import type { FavoriteFolder, PlaylistEntry } from "../types/playlist";
 import HomePanel from "../panels/HomePanel.vue";
 import HistoryPanel from "../panels/HistoryPanel.vue";
 import FavoritesPanel from "../panels/FavoritesPanel.vue";
@@ -14,6 +14,10 @@ const props = defineProps<{
     historyReady: boolean;
     hideHistory: boolean;
     favorites: PlaylistEntry[];
+    favoriteFolders: FavoriteFolder[];
+    favoritesByFolder: Record<string, PlaylistEntry[]>;
+    favoriteFolderCounts: Record<string, number>;
+    activeFavoriteFolderId: string | null;
     mode: "home" | "history" | "favorites" | "network" | "settings";
     currentUrl: string;
 }>();
@@ -29,6 +33,15 @@ const emit = defineEmits<{
     (e: "play-favorite", entry: PlaylistEntry): void;
     (e: "remove-favorite", entry: PlaylistEntry): void;
     (e: "clear-favorites"): void;
+    (e: "select-favorite-folder", id: string | null): void;
+    (e: "create-favorite-folder", name: string): void;
+    (e: "rename-favorite-folder", payload: { id: string; name: string }): void;
+    (e: "delete-favorite-folder", id: string): void;
+    (e: "move-favorite-to-folder", payload: { path: string; folderId: string }): void;
+    (e: "move-many-favorites", payload: { paths: string[]; folderId: string }): void;
+    (e: "remove-many-favorites", paths: string[]): void;
+    (e: "export-favorites"): void;
+    (e: "import-favorites"): void;
 }>();
 
 const showPanels = () => !props.isFileLoaded;
@@ -73,9 +86,22 @@ const showPanels = () => !props.isFileLoaded;
             <FavoritesPanel
                 v-if="showPanels() && props.mode === 'favorites'"
                 :favorites="props.favorites"
+                :folders="props.favoriteFolders"
+                :favorites-by-folder="props.favoritesByFolder"
+                :folder-counts="props.favoriteFolderCounts"
+                :active-folder-id="props.activeFavoriteFolderId"
                 @play="emit('play-favorite', $event)"
                 @remove="emit('remove-favorite', $event)"
                 @clear="emit('clear-favorites')"
+                @select-folder="emit('select-favorite-folder', $event)"
+                @create-folder="emit('create-favorite-folder', $event)"
+                @rename-folder="emit('rename-favorite-folder', $event)"
+                @delete-folder="emit('delete-favorite-folder', $event)"
+                @move-to-folder="emit('move-favorite-to-folder', $event)"
+                @move-many-to-folder="emit('move-many-favorites', $event)"
+                @remove-many="emit('remove-many-favorites', $event)"
+                @export="emit('export-favorites')"
+                @import="emit('import-favorites')"
             />
 
             <NetworkPanel

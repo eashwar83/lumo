@@ -18,6 +18,23 @@ pub(crate) struct StreamProxySettingsState {
     parallel_download_enabled: bool,
 }
 
+/// Write a UTF-8 text file (used for Favourites / Settings export). The path is
+/// chosen by the user via the native save dialog, so this just writes it.
+#[tauri::command]
+pub(crate) fn write_text_file(path: String, contents: String) -> Result<(), String> {
+    if let Some(parent) = Path::new(&path).parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create folder: {e}"))?;
+    }
+    std::fs::write(&path, contents).map_err(|e| format!("Failed to write file: {e}"))
+}
+
+/// Read a UTF-8 text file chosen by the user (Favourites / Settings import).
+#[tauri::command]
+pub(crate) fn read_text_file(path: String) -> Result<String, String> {
+    std::fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {e}"))
+}
+
 #[tauri::command]
 pub(crate) fn load_play_history(app: tauri::AppHandle) -> Result<Vec<PlayHistoryEntry>, String> {
     crate::store::play_history::load_play_history(&app)

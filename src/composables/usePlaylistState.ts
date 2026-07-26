@@ -1,14 +1,22 @@
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import {
+    DEFAULT_FAVORITE_FOLDER_ID,
+    DEFAULT_FAVORITE_FOLDER_NAME,
     FAVORITES_PLAYLIST_ID,
     FAVORITES_PLAYLIST_NAME,
     LEGACY_FAVOURITE_PLAYLIST_ID,
+    type FavoriteFolder,
+    type FavoritesMeta,
     type Playlist,
     type PlaylistEntry,
     type PlaylistLoopMode,
     type PlaylistSortMode,
 } from "../types/playlist";
 import { getPathDisplayName } from "../utils/getPathDisplayName";
+import {
+    createDebouncedUiStateSaver,
+    loadUiState,
+} from "./useUiStateStore";
 
 type PersistedPlaylistState = {
     playlists?: Playlist[];
@@ -38,6 +46,55 @@ const isValidSortMode = (value: unknown): value is PlaylistSortMode =>
 
 const createPlaylistId = () =>
     `pl_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
+const createFavoriteFolderId = () =>
+    `ff_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
+const createDefaultFavoriteFolder = (): FavoriteFolder => ({
+    id: DEFAULT_FAVORITE_FOLDER_ID,
+    name: DEFAULT_FAVORITE_FOLDER_NAME,
+    createdAt: 0,
+});
+
+// Coerce whatever was persisted into a sane FavoritesMeta: the default folder is
+// always present and always first, names are trimmed, and stray fields dropped.
+const normalizeFavoritesMeta = (raw: unknown): FavoritesMeta => {
+    const value = (raw ?? {}) as Partial<FavoritesMeta>;
+    const seen = new Set<string>();
+    const folders: FavoriteFolder[] = [createDefaultFavoriteFolder()];
+    seen.add(DEFAULT_FAVORITE_FOLDER_ID);
+    if (Array.isArray(value.folders)) {
+        for (const folder of value.folders) {
+            const id = folder?.id?.trim();
+            const name = folder?.name?.trim();
+            if (!id || !name || seen.has(id)) continue;
+            if (id === DEFAULT_FAVORITE_FOLDER_ID) {
+                // Preserve a renamed default folder.
+                folders[0] = { ...folders[0], name };
+                continue;
+            }
+            seen.add(id);
+            folders.push({
+                id,
+                name,
+                createdAt:
+                    typeof folder.createdAt === "number"
+                        ? folder.createdAt
+                        : Date.now(),
+            });
+        }
+    }
+    const assignments: Record<string, string> = {};
+    if (value.assignments && typeof value.assignments === "object") {
+        for (const [path, folderId] of Object.entries(value.assignments)) {
+            const key = path.trim();
+            if (key && typeof folderId === "string" && seen.has(folderId)) {
+                assignments[key] = folderId;
+            }
+        }
+    }
+    return { folders, assignments };
+};
 
 const isFavoritesPlaylist = (playlistId: string | null) =>
     playlistId === FAVORITES_PLAYLIST_ID;
@@ -194,6 +251,37 @@ export const usePlaylistState = () => {
     const sortMode = ref<PlaylistSortMode>("added");
     const isLoopOne = ref(false);
 
+    // --- favourite folders --------------------------------------------------
+    const favoriteFolders = ref<FavoriteFolder[]>([createDefaultFavoriteFolder()]);
+    const favoriteAssignments = ref<Record<string, string>>({});
+    // The folder the Favourites view is currently showing (null = "All"). New
+    // quick-favourites land here when set, otherwise in the default folder.
+    const activeFavoriteFolderId = ref<string | null>(null);
+
+    // Self-contained persistence of the opaque `favoritesMeta` ui-state slice,
+    // independent of the playlist persistence path.
+    let favoritesMetaReady = false;
+    const favoritesMetaSaver = createDebouncedUiStateSaver(300);
+    const persistFavoritesMeta = () => {
+        if (!favoritesMetaReady) return;
+        favoritesMetaSaver.saveDebounced({
+            favoritesMeta: {
+                folders: favoriteFolders.value,
+                assignments: favoriteAssignments.value,
+            } satisfies FavoritesMeta,
+        });
+    };
+    void (async () => {
+        const stored = await loadUiState<{ favoritesMeta?: unknown }>();
+        const meta = normalizeFavoritesMeta(stored?.favoritesMeta);
+        favoriteFolders.value = meta.folders;
+        favoriteAssignments.value = meta.assignments;
+        favoritesMetaReady = true;
+    })();
+    watch([favoriteFolders, favoriteAssignments], persistFavoritesMeta, {
+        deep: true,
+    });
+
     const activePlaylist = computed<Playlist | null>(
         () =>
             playlists.value.find((item) => item.id === activePlaylistId.value) ??
@@ -289,8 +377,36 @@ export const usePlaylistState = () => {
         playlists.value = nextPlaylists;
     };
 
-    const addToFavorites = (item: CreatePlaylistEntryInput) => {
+    const folderExists = (id: string) =>
+        favoriteFolders.value.some((folder) => folder.id === id);
+
+    // Set/clear a favourite's folder. The default folder means "no assignment".
+    const assignFavoriteFolder = (path: string, folderId: string) => {
+        const key = path.trim();
+        if (!key) return;
+        const next = { ...favoriteAssignments.value };
+        if (folderId === DEFAULT_FAVORITE_FOLDER_ID || !folderExists(folderId)) {
+            delete next[key];
+        } else {
+            next[key] = folderId;
+        }
+        favoriteAssignments.value = next;
+    };
+
+    const addToFavorites = (
+        item: CreatePlaylistEntryInput,
+        folderId?: string,
+    ) => {
         addEntryToPlaylist(FAVORITES_PLAYLIST_ID, item);
+        const path = item.path?.trim();
+        if (!path) return;
+        // Quick-favourites land in the folder currently open in the Favourites
+        // view (activeFavoriteFolderId), else the default folder.
+        const target =
+            folderId ??
+            activeFavoriteFolderId.value ??
+            DEFAULT_FAVORITE_FOLDER_ID;
+        assignFavoriteFolder(path, target);
     };
 
     const favoritesPlaylist = computed<Playlist | null>(() =>
@@ -327,6 +443,12 @@ export const usePlaylistState = () => {
         const nextPlaylists = [...playlists.value];
         nextPlaylists[index] = { ...target, entries: nextEntries };
         playlists.value = nextPlaylists;
+        // Drop the folder assignment for a favourite that no longer exists.
+        if (favoriteAssignments.value[normalized]) {
+            const nextAssignments = { ...favoriteAssignments.value };
+            delete nextAssignments[normalized];
+            favoriteAssignments.value = nextAssignments;
+        }
     };
 
     // Make the drawer show the Favourites list, creating the playlist if it is
@@ -360,6 +482,172 @@ export const usePlaylistState = () => {
         }
         addToFavorites(item);
         return true;
+    };
+
+    // --- favourite folders --------------------------------------------------
+
+    // Default folder first, then user folders in creation order.
+    const favoriteFolderList = computed<FavoriteFolder[]>(() => {
+        const def =
+            favoriteFolders.value.find(
+                (folder) => folder.id === DEFAULT_FAVORITE_FOLDER_ID,
+            ) ?? createDefaultFavoriteFolder();
+        const others = favoriteFolders.value.filter(
+            (folder) => folder.id !== DEFAULT_FAVORITE_FOLDER_ID,
+        );
+        return [def, ...others];
+    });
+
+    const folderIdForPath = (path: string): string => {
+        const assigned = favoriteAssignments.value[path.trim()];
+        return assigned && folderExists(assigned)
+            ? assigned
+            : DEFAULT_FAVORITE_FOLDER_ID;
+    };
+
+    // folderId -> favourite entries (in the same newest-first order as favorites).
+    const favoritesByFolder = computed<Record<string, PlaylistEntry[]>>(() => {
+        const groups: Record<string, PlaylistEntry[]> = {};
+        for (const folder of favoriteFolders.value) groups[folder.id] = [];
+        for (const entry of favorites.value) {
+            const fid = folderIdForPath(entry.path);
+            (groups[fid] ??= []).push(entry);
+        }
+        return groups;
+    });
+
+    const favoriteFolderCounts = computed<Record<string, number>>(() => {
+        const counts: Record<string, number> = {};
+        for (const [fid, list] of Object.entries(favoritesByFolder.value)) {
+            counts[fid] = list.length;
+        }
+        return counts;
+    });
+
+    const createFavoriteFolder = (name: string): string | null => {
+        const trimmed = name.trim();
+        if (!trimmed) return null;
+        const id = createFavoriteFolderId();
+        favoriteFolders.value = [
+            ...favoriteFolders.value,
+            { id, name: trimmed, createdAt: Date.now() },
+        ];
+        return id;
+    };
+
+    const renameFavoriteFolder = (id: string, name: string) => {
+        const trimmed = name.trim();
+        if (!trimmed) return;
+        favoriteFolders.value = favoriteFolders.value.map((folder) =>
+            folder.id === id ? { ...folder, name: trimmed } : folder,
+        );
+    };
+
+    const deleteFavoriteFolder = (id: string) => {
+        if (id === DEFAULT_FAVORITE_FOLDER_ID) return; // default is permanent
+        if (!folderExists(id)) return;
+        favoriteFolders.value = favoriteFolders.value.filter(
+            (folder) => folder.id !== id,
+        );
+        // Its videos fall back to the default folder (drop their assignments).
+        const next = { ...favoriteAssignments.value };
+        for (const [path, fid] of Object.entries(next)) {
+            if (fid === id) delete next[path];
+        }
+        favoriteAssignments.value = next;
+        if (activeFavoriteFolderId.value === id) {
+            activeFavoriteFolderId.value = null;
+        }
+    };
+
+    const moveFavoriteToFolder = (path: string, folderId: string) => {
+        if (!isFavorite(path)) return;
+        assignFavoriteFolder(path, folderId);
+    };
+
+    const setActiveFavoriteFolder = (id: string | null) => {
+        activeFavoriteFolderId.value = id && folderExists(id) ? id : null;
+    };
+
+    // --- favourites export / import ----------------------------------------
+
+    const exportFavoritesData = () => ({
+        kind: "lumo-favorites",
+        version: 1,
+        exportedAt: Date.now(),
+        folders: favoriteFolders.value,
+        favorites: favorites.value.map((entry) => ({
+            path: entry.path,
+            title: entry.title,
+            addedAt: entry.addedAt,
+            folderId: folderIdForPath(entry.path),
+        })),
+    });
+
+    type ImportedFavorite = {
+        path?: string;
+        title?: string;
+        addedAt?: number;
+        folderId?: string;
+    };
+
+    const importFavoritesData = (
+        data: unknown,
+        mode: "merge" | "replace",
+    ): number => {
+        const payload = (data ?? {}) as {
+            folders?: unknown;
+            favorites?: unknown;
+        };
+        const incomingFolders = normalizeFavoritesMeta({
+            folders: payload.folders,
+            assignments: {},
+        }).folders;
+        const incomingEntries: ImportedFavorite[] = Array.isArray(payload.favorites)
+            ? (payload.favorites as ImportedFavorite[])
+            : [];
+
+        if (mode === "replace") {
+            clearFavorites();
+            favoriteFolders.value = incomingFolders;
+            favoriteAssignments.value = {};
+        } else {
+            const existing = new Set(
+                favoriteFolders.value.map((folder) => folder.id),
+            );
+            const merged = [...favoriteFolders.value];
+            for (const folder of incomingFolders) {
+                if (!existing.has(folder.id)) {
+                    merged.push(folder);
+                    existing.add(folder.id);
+                }
+            }
+            favoriteFolders.value = merged;
+        }
+
+        const nextAssignments =
+            mode === "replace" ? {} : { ...favoriteAssignments.value };
+        let added = 0;
+        for (const entry of incomingEntries) {
+            const path = entry?.path?.trim();
+            if (!path) continue;
+            addEntryToPlaylist(FAVORITES_PLAYLIST_ID, {
+                path,
+                title: entry.title,
+            });
+            const fid =
+                entry.folderId && folderExists(entry.folderId)
+                    ? entry.folderId
+                    : DEFAULT_FAVORITE_FOLDER_ID;
+            if (fid === DEFAULT_FAVORITE_FOLDER_ID) {
+                delete nextAssignments[path];
+            } else {
+                nextAssignments[path] = fid;
+            }
+            added += 1;
+        }
+        favoriteAssignments.value = nextAssignments;
+        return added;
     };
 
     const createPlaylistWithEntries = (
@@ -781,6 +1069,19 @@ export const usePlaylistState = () => {
         removeFromFavorites,
         clearFavorites,
         openFavoritesView,
+        // Favourite folders
+        favoriteFolderList,
+        favoritesByFolder,
+        favoriteFolderCounts,
+        activeFavoriteFolderId,
+        folderIdForPath,
+        createFavoriteFolder,
+        renameFavoriteFolder,
+        deleteFavoriteFolder,
+        moveFavoriteToFolder,
+        setActiveFavoriteFolder,
+        exportFavoritesData,
+        importFavoritesData,
         cycleSortMode,
         getAdjacentPath,
         getPathForEnd,

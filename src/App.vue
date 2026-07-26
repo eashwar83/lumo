@@ -2,6 +2,7 @@
 import { computed, nextTick, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
+import { saveJsonFile, openJsonFile } from "./composables/useBackupIo";
 import {
     currentMonitor,
     getCurrentWindow,
@@ -46,6 +47,7 @@ import { useSceneIndex } from "./composables/useSceneIndex";
 import {
     createDebouncedUiStateSaver,
     loadUiState,
+    saveUiState,
 } from "./composables/useUiStateStore";
 import CurvesPanel from "./components/CurvesPanel.vue";
 import { serializeCurves } from "./utils/curves";
@@ -515,6 +517,201 @@ const onRemoveFavorite = (entry: PlaylistEntry) => {
 
 const onClearFavorites = () => {
     playlistState.clearFavorites();
+};
+
+// --- favourite folders + export / import --------------------------------
+const onSelectFavoriteFolder = (id: string | null) => {
+    playlistState.setActiveFavoriteFolder(id);
+};
+const onCreateFavoriteFolder = (name: string) => {
+    const id = playlistState.createFavoriteFolder(name);
+    if (id) playlistState.setActiveFavoriteFolder(id);
+};
+const onRenameFavoriteFolder = (payload: { id: string; name: string }) => {
+    playlistState.renameFavoriteFolder(payload.id, payload.name);
+};
+const onDeleteFavoriteFolder = (id: string) => {
+    playlistState.deleteFavoriteFolder(id);
+};
+const onMoveFavoriteToFolder = (payload: { path: string; folderId: string }) => {
+    playlistState.moveFavoriteToFolder(payload.path, payload.folderId);
+};
+const onMoveManyFavorites = (payload: { paths: string[]; folderId: string }) => {
+    for (const path of payload.paths) {
+        playlistState.moveFavoriteToFolder(path, payload.folderId);
+    }
+    showMessageOverlay(
+        `Moved ${payload.paths.length} to ${
+            playlistState.favoriteFolderList.value.find(
+                (f) => f.id === payload.folderId,
+            )?.name ?? "folder"
+        }`,
+    );
+};
+const onRemoveManyFavorites = (paths: string[]) => {
+    for (const path of paths) playlistState.removeFromFavorites(path);
+    showMessageOverlay(
+        `Removed ${paths.length} favourite${paths.length === 1 ? "" : "s"}`,
+    );
+};
+
+// "Current folder" for quick-favourites only applies while the Favourites view
+// is open; anywhere else a new favourite goes to the default folder.
+watch(activePanel, (panel) => {
+    if (panel !== "favorites") playlistState.setActiveFavoriteFolder(null);
+});
+
+const onExportFavorites = async () => {
+    try {
+        const saved = await saveJsonFile(
+            "lumo-favorites.json",
+            playlistState.exportFavoritesData(),
+        );
+        if (saved) showMessageOverlay("Favourites exported");
+    } catch (error) {
+        showMessageOverlay(
+            String(error).replace(/^Error:\s*/, "").slice(0, 160),
+            3600,
+        );
+    }
+};
+
+const onImportFavorites = async () => {
+    try {
+        const data = await openJsonFile();
+        if (!data) return;
+        if (
+            typeof data !== "object" ||
+            (data as { kind?: string }).kind !== "lumo-favorites"
+        ) {
+            showMessageOverlay("Not a Lumo favourites file", 3600);
+            return;
+        }
+        const mode = await confirmImportMode("favourites");
+        if (!mode) return;
+        const added = playlistState.importFavoritesData(data, mode);
+        showMessageOverlay(`Imported ${added} favourite${added === 1 ? "" : "s"}`);
+    } catch (error) {
+        showMessageOverlay(
+            String(error).replace(/^Error:\s*/, "").slice(0, 160),
+            3600,
+        );
+    }
+};
+
+// --- settings + keyboard-shortcuts export / import ----------------------
+// Ask (at export time) whether to include the AI API keys, which live in the
+// aiConfig slice. Everything else (preferences, shortcuts) is non-secret.
+const settingsExportPrompt = ref<{
+    resolve: (value: { includeKeys: boolean } | null) => void;
+} | null>(null);
+const askSettingsExportOptions = (): Promise<{ includeKeys: boolean } | null> =>
+    new Promise((resolve) => {
+        settingsExportPrompt.value = { resolve };
+    });
+const resolveSettingsExport = (value: { includeKeys: boolean } | null) => {
+    settingsExportPrompt.value?.resolve(value);
+    settingsExportPrompt.value = null;
+};
+
+// Merge imported setting groups over the existing ones (match by group title,
+// then by item label); groups/items not present in the import are kept.
+const mergeSettingsGroups = (existing: unknown, incoming: unknown): unknown => {
+    type Group = { title: string; items: Array<{ label: string; value: string }> };
+    const ex = (existing as { groups?: Group[] })?.groups ?? [];
+    const inc = (incoming as { groups?: Group[] })?.groups ?? [];
+    const byTitle = new Map<string, Group>();
+    for (const g of ex) byTitle.set(g.title, { title: g.title, items: [...(g.items ?? [])] });
+    for (const g of inc) {
+        const target = byTitle.get(g.title) ?? { title: g.title, items: [] };
+        const items = [...target.items];
+        for (const item of g.items ?? []) {
+            const idx = items.findIndex((i) => i.label === item.label);
+            if (idx >= 0) items[idx] = { ...items[idx], value: item.value };
+            else items.push(item);
+        }
+        byTitle.set(g.title, { title: g.title, items });
+    }
+    return { ...(incoming as object), groups: [...byTitle.values()] };
+};
+
+const onExportSettings = async () => {
+    try {
+        const opts = await askSettingsExportOptions();
+        if (!opts) return;
+        const stored = await loadUiState<{
+            settings?: unknown;
+            aiConfig?: Record<string, unknown>;
+        }>();
+        const payload: Record<string, unknown> = {
+            kind: "lumo-settings",
+            version: 1,
+            exportedAt: Date.now(),
+            settings: stored?.settings ?? null,
+        };
+        if (stored?.aiConfig) {
+            payload.aiConfig = opts.includeKeys
+                ? stored.aiConfig
+                : { ...stored.aiConfig, keys: {} };
+        }
+        const saved = await saveJsonFile("lumo-settings.json", payload);
+        if (saved) {
+            showMessageOverlay(
+                opts.includeKeys
+                    ? "Settings exported (with API keys)"
+                    : "Settings exported",
+            );
+        }
+    } catch (error) {
+        showMessageOverlay(
+            String(error).replace(/^Error:\s*/, "").slice(0, 160),
+            3600,
+        );
+    }
+};
+
+const onImportSettings = async () => {
+    try {
+        const data = await openJsonFile();
+        if (!data) return;
+        if (
+            typeof data !== "object" ||
+            (data as { kind?: string }).kind !== "lumo-settings"
+        ) {
+            showMessageOverlay("Not a Lumo settings file", 3600);
+            return;
+        }
+        const mode = await confirmImportMode("settings");
+        if (!mode) return;
+        const incoming = data as {
+            settings?: unknown;
+            aiConfig?: Record<string, unknown>;
+        };
+        const stored = await loadUiState<{
+            settings?: unknown;
+            aiConfig?: Record<string, unknown>;
+        }>();
+        const patch: Record<string, unknown> = {
+            settings:
+                mode === "merge"
+                    ? mergeSettingsGroups(stored?.settings, incoming.settings)
+                    : incoming.settings,
+        };
+        if (incoming.aiConfig) {
+            patch.aiConfig =
+                mode === "merge"
+                    ? { ...(stored?.aiConfig ?? {}), ...incoming.aiConfig }
+                    : incoming.aiConfig;
+        }
+        await saveUiState(patch);
+        showMessageOverlay("Settings imported — reloading…", 1600);
+        window.setTimeout(() => window.location.reload(), 700);
+    } catch (error) {
+        showMessageOverlay(
+            String(error).replace(/^Error:\s*/, "").slice(0, 160),
+            3600,
+        );
+    }
 };
 
 // Remembers which playlist/folder was showing before jumping to Favourites,
@@ -1025,6 +1222,22 @@ type AiCurveResult = {
 // Merge / split modals (file operations in the Media menu).
 const mergeOpen = ref(false);
 const splitOpen = ref(false);
+
+// Import mode chooser (Merge / Replace / Cancel) shared by favourites & settings
+// import. confirmImportMode resolves with the user's choice.
+type ImportMode = "merge" | "replace";
+const importPrompt = ref<{
+    kind: string;
+    resolve: (mode: ImportMode | null) => void;
+} | null>(null);
+const confirmImportMode = (kind: string): Promise<ImportMode | null> =>
+    new Promise((resolve) => {
+        importPrompt.value = { kind, resolve };
+    });
+const resolveImportMode = (mode: ImportMode | null) => {
+    importPrompt.value?.resolve(mode);
+    importPrompt.value = null;
+};
 
 const aiConfig = useAiConfig();
 const isAiEnhancing = ref(false);
@@ -1674,6 +1887,8 @@ const { menus: appMenus } = useAppMenu({
     },
     toggleInfo: () => void toggleInfo(),
     regenerateThumbnails: () => void onRegenerateThumbnails(),
+    exportSettings: () => void onExportSettings(),
+    importSettings: () => void onImportSettings(),
 
     togglePlaylist: () => void togglePlaylist(),
     toggleFavorite: () => void onToggleFavorite(),
@@ -1696,6 +1911,14 @@ const { menus: appMenus } = useAppMenu({
 // Returns false when nothing was open, so the caller can fall through to
 // "exit fullscreen". Keep this ordered outermost-last.
 const closeTopOverlay = (): boolean => {
+    if (importPrompt.value) {
+        resolveImportMode(null);
+        return true;
+    }
+    if (settingsExportPrompt.value) {
+        resolveSettingsExport(null);
+        return true;
+    }
     if (mergeOpen.value) {
         mergeOpen.value = false;
         return true;
@@ -1978,6 +2201,10 @@ useAppStartupBindings({
             :history-ready="history.isReady.value"
             :hide-history="hideHistory"
             :favorites="favorites"
+            :favorite-folders="playlistState.favoriteFolderList.value"
+            :favorites-by-folder="playlistState.favoritesByFolder.value"
+            :favorite-folder-counts="playlistState.favoriteFolderCounts.value"
+            :active-favorite-folder-id="playlistState.activeFavoriteFolderId.value"
             :mode="activePanel"
             :current-url="currentOrLastPlaybackUrl"
             @update:hover="ui.hoverFilePicker.value = $event"
@@ -1990,6 +2217,15 @@ useAppStartupBindings({
             @play-favorite="onPlayFavorite"
             @remove-favorite="onRemoveFavorite"
             @clear-favorites="onClearFavorites"
+            @select-favorite-folder="onSelectFavoriteFolder"
+            @create-favorite-folder="onCreateFavoriteFolder"
+            @rename-favorite-folder="onRenameFavoriteFolder"
+            @delete-favorite-folder="onDeleteFavoriteFolder"
+            @move-favorite-to-folder="onMoveFavoriteToFolder"
+            @move-many-favorites="onMoveManyFavorites"
+            @remove-many-favorites="onRemoveManyFavorites"
+            @export-favorites="onExportFavorites"
+            @import-favorites="onImportFavorites"
         />
 
         <PlaylistDrawer
@@ -2059,6 +2295,97 @@ useAppStartupBindings({
             @close="splitOpen = false"
             @notify="(msg: string) => showMessageOverlay(msg, 4000)"
         />
+
+        <!-- Import mode chooser (favourites / settings) -->
+        <transition name="fade-in">
+            <div
+                v-if="importPrompt"
+                class="io-prompt"
+                @keydown.esc.stop.prevent="resolveImportMode(null)"
+            >
+                <div
+                    class="io-prompt__backdrop"
+                    @click="resolveImportMode(null)"
+                />
+                <div class="io-prompt__box" role="dialog">
+                    <div class="io-prompt__title">
+                        Import {{ importPrompt.kind }}
+                    </div>
+                    <p class="io-prompt__hint">
+                        Merge with your existing {{ importPrompt.kind }}, or
+                        replace them entirely?
+                    </p>
+                    <div class="io-prompt__actions">
+                        <button
+                            class="io-prompt__btn"
+                            type="button"
+                            @click="resolveImportMode(null)"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            class="io-prompt__btn"
+                            type="button"
+                            @click="resolveImportMode('merge')"
+                        >
+                            Merge
+                        </button>
+                        <button
+                            class="io-prompt__btn io-prompt__btn--danger"
+                            type="button"
+                            @click="resolveImportMode('replace')"
+                        >
+                            Replace
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </transition>
+
+        <!-- Settings export: include API keys? -->
+        <transition name="fade-in">
+            <div
+                v-if="settingsExportPrompt"
+                class="io-prompt"
+                @keydown.esc.stop.prevent="resolveSettingsExport(null)"
+            >
+                <div
+                    class="io-prompt__backdrop"
+                    @click="resolveSettingsExport(null)"
+                />
+                <div class="io-prompt__box" role="dialog">
+                    <div class="io-prompt__title">Export settings</div>
+                    <p class="io-prompt__hint">
+                        Include your AI API keys in the file? Keys are stored in
+                        plain text — only include them for a personal backup you
+                        keep private.
+                    </p>
+                    <div class="io-prompt__actions">
+                        <button
+                            class="io-prompt__btn"
+                            type="button"
+                            @click="resolveSettingsExport(null)"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            class="io-prompt__btn"
+                            type="button"
+                            @click="resolveSettingsExport({ includeKeys: false })"
+                        >
+                            Without keys
+                        </button>
+                        <button
+                            class="io-prompt__btn io-prompt__btn--primary"
+                            type="button"
+                            @click="resolveSettingsExport({ includeKeys: true })"
+                        >
+                            Include keys
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </transition>
 
         <PlayerControls
             :is-playing="player.state.playback.isPlaying"
@@ -2575,6 +2902,75 @@ useAppStartupBindings({
 
 /* View Original bypass badge */
 /* AI correction prompt modal */
+.io-prompt {
+    position: fixed;
+    inset: 0;
+    z-index: 220;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.io-prompt__backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+}
+.io-prompt__box {
+    position: relative;
+    width: min(440px, 92vw);
+    padding: 20px;
+    border-radius: 14px;
+    background: rgba(24, 26, 31, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+    color: #fff;
+}
+.io-prompt__title {
+    font-size: 15px;
+    font-weight: 700;
+    text-transform: capitalize;
+}
+.io-prompt__hint {
+    margin: 8px 0 16px;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.6);
+}
+.io-prompt__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+.io-prompt__btn {
+    padding: 8px 16px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+.io-prompt__btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+}
+.io-prompt__btn--primary {
+    border-color: rgba(196, 160, 255, 0.5);
+    background: rgba(170, 130, 255, 0.28);
+}
+.io-prompt__btn--primary:hover {
+    background: rgba(170, 130, 255, 0.42);
+}
+.io-prompt__btn--danger {
+    border-color: rgba(220, 90, 90, 0.5);
+    background: rgba(220, 70, 70, 0.24);
+}
+.io-prompt__btn--danger:hover {
+    background: rgba(220, 70, 70, 0.4);
+}
+
 .ai-prompt {
     position: fixed;
     inset: 0;

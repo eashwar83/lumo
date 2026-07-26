@@ -493,6 +493,8 @@ pub fn run() {
             commands::now_playing::set_now_playing_status,
             commands::now_playing::clear_now_playing,
             commands::now_playing::capture_now_playing_artwork,
+            commands::persistence::write_text_file,
+            commands::persistence::read_text_file,
             commands::persistence::load_play_history,
             commands::persistence::save_play_history,
             commands::persistence::save_play_history_entry,
