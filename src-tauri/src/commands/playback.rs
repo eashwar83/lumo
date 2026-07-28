@@ -790,6 +790,150 @@ pub(crate) async fn get_media_poster(
     Ok(Some(format!("data:image/jpeg;base64,{encoded}")))
 }
 
+/// Animated hover-preview storyboard: this many small frames spread across a
+/// file, generated once and cached, then cycled by the playlist drawer.
+const STORYBOARD_COUNT: u32 = 12;
+const STORYBOARD_WIDTH: u32 = 320;
+/// Below this length, use exact seeking for distinct frames (cheap on a short
+/// clip); above it, fast keyframe seeking (frames are already far apart).
+const STORYBOARD_EXACT_SEEK_MAX_SECS: f64 = 120.0;
+
+fn read_sorted_jpgs(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(dir)
+        .map(|rd| {
+            rd.flatten()
+                .map(|entry| entry.path())
+                .filter(|p| {
+                    p.extension()
+                        .and_then(|x| x.to_str())
+                        .map(|x| x.eq_ignore_ascii_case("jpg"))
+                        .unwrap_or(false)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    files.sort();
+    files
+}
+
+/// Return a file's storyboard frames (base64 JPEG data URLs, in order),
+/// generating and caching them on first request. Empty for remote/missing files.
+#[tauri::command]
+pub(crate) async fn get_media_storyboard(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<Vec<String>, String> {
+    use base64::Engine as _;
+    use std::hash::{Hash, Hasher};
+    use tauri::Manager;
+
+    if path.trim().is_empty() || !is_local_media(&path) || !Path::new(&path).exists() {
+        return Ok(vec![]);
+    }
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    path.hash(&mut hasher);
+    let key = format!("{:016x}", hasher.finish());
+    let dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|error| format!("Failed to resolve cache directory: {error}"))?
+        .join("storyboards")
+        .join(&key);
+
+    if read_sorted_jpgs(&dir).is_empty() {
+        let input = path.clone();
+        let out = dir.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
+            let duration = crate::mpv::probe_duration(&input).unwrap_or(0.0);
+            if duration <= 0.0 {
+                return Err("Could not read duration".to_string());
+            }
+            // Hybrid seeking to keep this cheap: exact (hr) seeking only for
+            // short clips (where keyframes are too sparse for distinct frames
+            // and decoding is cheap anyway); fast keyframe seeking for longer
+            // videos (frames are already far apart, and exact decode would be
+            // expensive on high-res footage).
+            if duration <= STORYBOARD_EXACT_SEEK_MAX_SECS {
+                crate::mpv::generate_storyboard_frames(
+                    &input,
+                    &out,
+                    duration,
+                    STORYBOARD_COUNT,
+                    STORYBOARD_WIDTH,
+                )?;
+            } else {
+                crate::mpv::generate_frames(
+                    &input,
+                    &out,
+                    duration,
+                    STORYBOARD_COUNT,
+                    STORYBOARD_WIDTH,
+                )?;
+            }
+            Ok::<(), String>(())
+        })
+        .await
+        .map_err(|error| error.to_string())??;
+    }
+
+    let frames: Vec<String> = read_sorted_jpgs(&dir)
+        .into_iter()
+        .filter_map(|p| std::fs::read(p).ok())
+        .filter(|bytes| !bytes.is_empty())
+        .map(|bytes| {
+            format!(
+                "data:image/jpeg;base64,{}",
+                base64::engine::general_purpose::STANDARD.encode(bytes)
+            )
+        })
+        .collect();
+    Ok(frames)
+}
+
+/// Drop cached previews so they re-extract. `paths` limits it to those files
+/// (else the whole cache). `include_storyboards` (default true) also clears the
+/// animated storyboards; pass false to refresh only the static posters.
+#[tauri::command]
+pub(crate) fn clear_preview_cache(
+    app: tauri::AppHandle,
+    paths: Option<Vec<String>>,
+    include_storyboards: Option<bool>,
+) -> Result<(), String> {
+    use std::hash::{Hash, Hasher};
+    use tauri::Manager;
+
+    let with_storyboards = include_storyboards.unwrap_or(true);
+    let cache = app
+        .path()
+        .app_cache_dir()
+        .map_err(|error| format!("Failed to resolve cache directory: {error}"))?;
+    let posters = cache.join("posters");
+    let storyboards = cache.join("storyboards");
+
+    match paths {
+        None => {
+            let _ = std::fs::remove_dir_all(&posters);
+            if with_storyboards {
+                let _ = std::fs::remove_dir_all(&storyboards);
+            }
+        }
+        Some(list) => {
+            for path in list {
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                path.hash(&mut hasher);
+                let key = format!("{:016x}", hasher.finish());
+                let _ = std::fs::remove_file(posters.join(format!("{key}.jpg")));
+                if with_storyboards {
+                    let _ = std::fs::remove_dir_all(storyboards.join(&key));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Reveal the folder that screenshots, clips, GIFs and contact sheets go to.
 #[tauri::command]
 pub(crate) fn open_export_folder(app: tauri::AppHandle) -> Result<(), String> {

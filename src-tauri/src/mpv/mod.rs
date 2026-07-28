@@ -12,6 +12,8 @@ pub(crate) use encode::{
     export_clip, export_gif, find_ffmpeg, GIF_DEFAULT_FPS, GIF_DEFAULT_WIDTH,
 };
 pub(crate) use thumbnails::generate_frames;
+pub(crate) use thumbnails::generate_storyboard_frames;
+pub(crate) use thumbnails::probe_duration;
 pub(crate) use thumbnails::generate_poster;
 pub(crate) use thumbnails::generate_range_frames;
 pub(crate) use thumbnails::generate_thumbnails;

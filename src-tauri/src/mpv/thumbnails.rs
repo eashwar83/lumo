@@ -2,8 +2,8 @@ use std::ffi::{c_char, c_void, CString};
 use std::path::{Path, PathBuf};
 
 use super::ffi::{
-    mpv_command, mpv_create, mpv_event_id, mpv_initialize, mpv_set_option_string,
-    mpv_terminate_destroy, mpv_wait_event,
+    mpv_command, mpv_create, mpv_event_id, mpv_free, mpv_get_property_string,
+    mpv_initialize, mpv_set_option_string, mpv_terminate_destroy, mpv_wait_event,
 };
 
 /// Set LUMO_MPV_DEBUG=1 to let the headless helpers log to the terminal; the
@@ -36,6 +36,69 @@ fn command(ctx: *mut c_void, args: &[&str]) -> bool {
     let mut ptrs: Vec<*const c_char> = cstrings.iter().map(|c| c.as_ptr()).collect();
     ptrs.push(std::ptr::null());
     unsafe { mpv_command(ctx, ptrs.as_ptr()) == 0 }
+}
+
+/// Read a property as f64 via mpv's string interface (frees the returned C str).
+fn get_property_f64(ctx: *mut c_void, name: &str) -> Option<f64> {
+    let c_name = CString::new(name).ok()?;
+    let ptr = unsafe { mpv_get_property_string(ctx, c_name.as_ptr()) };
+    if ptr.is_null() {
+        return None;
+    }
+    let value = unsafe { std::ffi::CStr::from_ptr(ptr) }
+        .to_string_lossy()
+        .to_string();
+    unsafe { mpv_free(ptr as *mut c_void) };
+    value.parse::<f64>().ok()
+}
+
+/// Headlessly probe a file's duration in seconds. Loads it paused with no output,
+/// polls the `duration` property, then tears down. None if it can't be read
+/// within a short window (e.g. a broken or still-opening file).
+pub fn probe_duration(path: &str) -> Option<f64> {
+    let ctx = unsafe { mpv_create() };
+    if ctx.is_null() {
+        return None;
+    }
+    set_opt(ctx, "audio", "no");
+    set_opt(ctx, "vo", "null");
+    set_opt(ctx, "hwdec", "no");
+    set_opt(ctx, "sub", "no");
+    set_opt(ctx, "load-scripts", "no");
+    set_opt(ctx, "osc", "no");
+    set_opt(ctx, "pause", "yes");
+    apply_log_options(ctx);
+    if unsafe { mpv_initialize(ctx) } < 0 {
+        unsafe { mpv_terminate_destroy(ctx) };
+        return None;
+    }
+    if !command(ctx, &["loadfile", path]) {
+        unsafe { mpv_terminate_destroy(ctx) };
+        return None;
+    }
+    let mut duration = None;
+    let started = std::time::Instant::now();
+    loop {
+        let event = unsafe { mpv_wait_event(ctx, 0.3) };
+        if !event.is_null() {
+            match unsafe { &(*event).event_id } {
+                mpv_event_id::MPV_EVENT_SHUTDOWN
+                | mpv_event_id::MPV_EVENT_END_FILE => break,
+                _ => {}
+            }
+        }
+        if let Some(d) = get_property_f64(ctx, "duration") {
+            if d > 0.0 {
+                duration = Some(d);
+                break;
+            }
+        }
+        if started.elapsed().as_secs_f64() > 8.0 {
+            break;
+        }
+    }
+    unsafe { mpv_terminate_destroy(ctx) };
+    duration
 }
 
 fn count_jpgs(dir: &Path) -> u32 {
@@ -224,6 +287,30 @@ pub fn generate_frames(
     count: u32,
     width: u32,
 ) -> Result<u32, String> {
+    generate_frames_inner(path, outdir, duration, count, width, false)
+}
+
+/// Like `generate_frames` but with exact (hr) seeking. Short clips have sparse
+/// keyframes, so plain sstep seeks land on the same keyframe repeatedly and
+/// yield duplicate/too-few frames; exact seeking decodes to each requested time.
+pub fn generate_storyboard_frames(
+    path: &str,
+    outdir: &Path,
+    duration: f64,
+    count: u32,
+    width: u32,
+) -> Result<u32, String> {
+    generate_frames_inner(path, outdir, duration, count, width, true)
+}
+
+fn generate_frames_inner(
+    path: &str,
+    outdir: &Path,
+    duration: f64,
+    count: u32,
+    width: u32,
+    exact: bool,
+) -> Result<u32, String> {
     if duration <= 0.0 {
         return Err("Unknown duration".to_string());
     }
@@ -247,6 +334,11 @@ pub fn generate_frames(
     set_opt(ctx, "vo-image-outdir", &outdir_str);
     set_opt(ctx, "sstep", &format!("{step}"));
     set_opt(ctx, "vf", &format!("scale={}:-2", width.max(16)));
+    if exact {
+        // Decode to each requested time rather than snapping to a keyframe.
+        set_opt(ctx, "hr-seek", "yes");
+        set_opt(ctx, "hr-seek-framedrop", "no");
+    }
     apply_log_options(ctx);
 
     if unsafe { mpv_initialize(ctx) } < 0 {

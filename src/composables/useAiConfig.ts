@@ -197,6 +197,10 @@ export const useAiConfig = () => {
         persist();
     };
 
+    /** The stored key / base URL for any provider name (for cross-feature reuse). */
+    const keyFor = (name: string): string => keys.value[name] ?? "";
+    const baseUrlFor = (name: string): string => baseUrls.value[name] ?? "";
+
     /** Query the provider's models API and merge the results. */
     const fetchModels = async (): Promise<{ ok: boolean; message: string }> => {
         if (!currentKey.value.trim()) {
@@ -240,5 +244,7 @@ export const useAiConfig = () => {
         setBaseUrl,
         addPromptHistory,
         fetchModels,
+        keyFor,
+        baseUrlFor,
     };
 };

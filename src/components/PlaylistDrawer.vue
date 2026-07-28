@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { invoke } from "@tauri-apps/api/core";
 import type {
     Playlist,
     PlaylistEntry,
@@ -125,8 +126,220 @@ const clampRatio = (value: number | undefined) => {
     return Math.min(Math.max(value ?? 0, 0), 1);
 };
 
-const getItemStyle = (entry: PlaylistDrawerEntry) => ({
-    "--played-ratio": `${(clampRatio(entry.playedRatio) * 100).toFixed(2)}%`,
+// Absolute-positioned row style for the virtualized list.
+const virtualRowStyle = (row: { entry: PlaylistDrawerEntry; top: number }) => ({
+    "--played-ratio": `${(clampRatio(row.entry.playedRatio) * 100).toFixed(2)}%`,
+    transform: `translateY(${row.top}px)`,
+    height: `${ROW_HEIGHT.value - 8}px`,
+});
+
+// --- view mode: dense text list vs. thumbnail rows -----------------------
+const VIEW_MODE_KEY = "lumo.playlistViewMode";
+const readStoredViewMode = (): "list" | "thumbnails" => {
+    try {
+        return localStorage.getItem(VIEW_MODE_KEY) === "thumbnails"
+            ? "thumbnails"
+            : "list";
+    } catch {
+        return "list";
+    }
+};
+const viewMode = ref<"list" | "thumbnails">(readStoredViewMode());
+const toggleViewMode = () => {
+    viewMode.value = viewMode.value === "list" ? "thumbnails" : "list";
+    try {
+        localStorage.setItem(VIEW_MODE_KEY, viewMode.value);
+    } catch {
+        /* ignore */
+    }
+};
+
+// --- virtualized rows -----------------------------------------------------
+// Only the rows near the viewport are ever in the DOM, so a 1000-item playlist
+// stays light regardless of size. Fixed row heights per view mode.
+const ROW_HEIGHT = computed(() => (viewMode.value === "thumbnails" ? 72 : 64));
+const ROW_OVERSCAN = 6;
+const vScrollTop = ref(0);
+const vViewportH = ref(600);
+
+const virtualTotalHeight = computed(
+    () => playlistItems.value.length * ROW_HEIGHT.value,
+);
+const virtualRows = computed(() => {
+    const rh = ROW_HEIGHT.value;
+    const total = playlistItems.value.length;
+    const start = Math.max(0, Math.floor(vScrollTop.value / rh) - ROW_OVERSCAN);
+    const count = Math.ceil(vViewportH.value / rh) + ROW_OVERSCAN * 2;
+    const end = Math.min(total, start + count);
+    const rows: { entry: PlaylistDrawerEntry; top: number }[] = [];
+    for (let i = start; i < end; i += 1) {
+        const entry = playlistItems.value[i];
+        if (entry) rows.push({ entry, top: i * rh });
+    }
+    return rows;
+});
+
+// --- static poster extraction (bounded to a few visible rows) --------------
+const thumbs = ref<Record<string, string>>({});
+let disposed = false;
+
+const isRemotePath = (path: string): boolean =>
+    /^(https?|rtsp|rtmp|smb|webdav):\/\//i.test(path);
+
+// Only the currently-visible rows are "wanted"; a small worker pool extracts
+// them a few at a time and skips anything scrolled out of view.
+const MAX_CONCURRENT_POSTERS = 3;
+const wantedPosters = new Set<string>();
+const inFlightPosters = new Set<string>();
+
+const pumpPosters = () => {
+    if (disposed) return;
+    while (inFlightPosters.size < MAX_CONCURRENT_POSTERS) {
+        let next: string | undefined;
+        for (const path of wantedPosters) {
+            if (!thumbs.value[path] && !inFlightPosters.has(path)) {
+                next = path;
+                break;
+            }
+        }
+        if (!next) break;
+        const path = next;
+        inFlightPosters.add(path);
+        invoke<string | null>("get_media_poster", { path })
+            .then((url) => {
+                inFlightPosters.delete(path);
+                if (url && !disposed) {
+                    thumbs.value = { ...thumbs.value, [path]: url };
+                }
+                pumpPosters();
+            })
+            .catch(() => {
+                inFlightPosters.delete(path);
+                pumpPosters();
+            });
+    }
+};
+
+// Recompute the wanted set from what's actually rendered (visible rows).
+const refreshWantedPosters = () => {
+    wantedPosters.clear();
+    if (viewMode.value === "thumbnails") {
+        for (const row of virtualRows.value) {
+            const path = row.entry.path;
+            if (!thumbs.value[path] && !isRemotePath(path)) {
+                wantedPosters.add(path);
+            }
+        }
+    }
+    pumpPosters();
+};
+watch([virtualRows, viewMode], refreshWantedPosters, { flush: "post" });
+
+// --- static hover preview -------------------------------------------------
+const hoverPreview = ref<{ path: string; top: number; left: number } | null>(
+    null,
+);
+let hoverTimer: number | null = null;
+const PREVIEW_W = 300;
+const PREVIEW_H = 176;
+const HOVER_DELAY_MS = 500;
+
+const previewSrc = computed<string>(() =>
+    hoverPreview.value ? thumbs.value[hoverPreview.value.path] ?? "" : "",
+);
+
+const showPreviewAt = (path: string, rect: DOMRect) => {
+    let left = rect.right + 12;
+    if (left + PREVIEW_W > window.innerWidth - 8) {
+        left = rect.left - PREVIEW_W - 12;
+    }
+    left = Math.max(8, left);
+    let top = rect.top + rect.height / 2 - PREVIEW_H / 2;
+    top = Math.max(8, Math.min(top, window.innerHeight - PREVIEW_H - 8));
+    hoverPreview.value = { path, top, left };
+};
+
+const onThumbEnter = (entry: PlaylistDrawerEntry, event: MouseEvent) => {
+    // Make sure the hovered row's poster is prioritised.
+    if (!thumbs.value[entry.path] && !isRemotePath(entry.path)) {
+        wantedPosters.add(entry.path);
+        pumpPosters();
+    }
+    if (hoverTimer) window.clearTimeout(hoverTimer);
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    hoverTimer = window.setTimeout(() => {
+        showPreviewAt(entry.path, rect);
+    }, HOVER_DELAY_MS);
+};
+const onThumbLeave = () => {
+    if (hoverTimer) {
+        window.clearTimeout(hoverTimer);
+        hoverTimer = null;
+    }
+    hoverPreview.value = null;
+};
+
+// --- regenerate posters (when a frame is unwanted) -----------------------
+const regeneratePreview = async (path: string) => {
+    try {
+        await invoke("clear_preview_cache", {
+            paths: [path],
+            includeStoryboards: false,
+        });
+    } catch {
+        /* ignore */
+    }
+    if (thumbs.value[path]) {
+        const next = { ...thumbs.value };
+        delete next[path];
+        thumbs.value = next;
+    }
+    refreshWantedPosters();
+};
+
+const regenerateAllPreviews = async () => {
+    const paths = playlistItems.value.map((entry) => entry.path);
+    try {
+        await invoke("clear_preview_cache", {
+            paths,
+            includeStoryboards: false,
+        });
+    } catch {
+        /* ignore */
+    }
+    // Drop in-memory posters; visible rows re-extract now (bounded), off-screen
+    // rows re-extract lazily as they scroll into view.
+    thumbs.value = {};
+    refreshWantedPosters();
+};
+
+// --- virtual scroll + viewport tracking ----------------------------------
+let vScrollRaf = 0;
+const scheduleVScroll = () => {
+    if (vScrollRaf) return;
+    vScrollRaf = window.requestAnimationFrame(() => {
+        vScrollRaf = 0;
+        const container = contentRef.value;
+        if (container) vScrollTop.value = container.scrollTop;
+    });
+};
+const measureViewport = () => {
+    const container = contentRef.value;
+    if (container && container.clientHeight > 0) {
+        vViewportH.value = container.clientHeight;
+    }
+};
+onMounted(() => {
+    measureViewport();
+    window.addEventListener("resize", measureViewport);
+});
+
+onUnmounted(() => {
+    disposed = true;
+    wantedPosters.clear();
+    if (hoverTimer) window.clearTimeout(hoverTimer);
+    if (vScrollRaf) window.cancelAnimationFrame(vScrollRaf);
+    window.removeEventListener("resize", measureViewport);
 });
 
 const clampWidth = (value: number) => {
@@ -482,14 +695,17 @@ const restoreScrollPosition = async (playlistId: string | null) => {
     await nextTick();
     const container = contentRef.value;
     if (!container) return;
+    measureViewport();
     isRestoringScroll = true;
     container.scrollTop = getSavedScrollTop(playlistId);
+    vScrollTop.value = container.scrollTop;
     window.setTimeout(() => {
         isRestoringScroll = false;
     }, 0);
 };
 
 const onContentScroll = () => {
+    scheduleVScroll(); // keep the virtualized window in sync (even during restore)
     if (isRestoringScroll) return;
     if (scrollSyncTimer) {
         window.clearTimeout(scrollSyncTimer);
@@ -704,6 +920,58 @@ watch(
                         </svg>
                     </button>
                     <template v-if="isInPlaylist">
+                        <button
+                            class="playlist-drawer__tool playlist-drawer__tool--view"
+                            type="button"
+                            :title="
+                                viewMode === 'list'
+                                    ? 'Show thumbnails'
+                                    : 'Compact list'
+                            "
+                            :aria-label="
+                                viewMode === 'list'
+                                    ? 'Show thumbnails'
+                                    : 'Compact list'
+                            "
+                            @click="toggleViewMode"
+                        >
+                            <svg
+                                v-if="viewMode === 'list'"
+                                viewBox="0 0 24 24"
+                                fill="currentColor"
+                                aria-hidden="true"
+                            >
+                                <path
+                                    d="M4 5h7v6H4V5zm9 0h7v6h-7V5zM4 13h7v6H4v-6zm9 0h7v6h-7v-6z"
+                                />
+                            </svg>
+                            <svg
+                                v-else
+                                viewBox="0 0 24 24"
+                                fill="currentColor"
+                                aria-hidden="true"
+                            >
+                                <path d="M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h16v2H4v-2z" />
+                            </svg>
+                        </button>
+                        <button
+                            v-if="viewMode === 'thumbnails'"
+                            class="playlist-drawer__tool playlist-drawer__tool--regen"
+                            type="button"
+                            title="Regenerate all previews"
+                            aria-label="Regenerate all previews"
+                            @click="regenerateAllPreviews"
+                        >
+                            <svg
+                                viewBox="0 0 24 24"
+                                fill="currentColor"
+                                aria-hidden="true"
+                            >
+                                <path
+                                    d="M12 6V3L8 7l4 4V8a4 4 0 1 1-4 4H6a6 6 0 1 0 6-6z"
+                                />
+                            </svg>
+                        </button>
                         <button
                             class="playlist-drawer__tool playlist-drawer__tool--loop"
                             type="button"
@@ -934,36 +1202,89 @@ watch(
                             Add files to this playlist.
                         </div>
                     </div>
-                    <div v-else class="playlist-drawer__list">
+                    <div
+                        v-else
+                        class="playlist-drawer__list playlist-drawer__list--virtual"
+                        :style="{ height: `${virtualTotalHeight}px` }"
+                    >
                         <div
-                            v-for="entry in playlistItems"
-                            :key="entry.path"
+                            v-for="row in virtualRows"
+                            :key="row.entry.path"
                             class="playlist-drawer__item"
                             :class="{
                                 'playlist-drawer__item--active':
-                                    entry.path === props.currentUrl,
+                                    row.entry.path === props.currentUrl,
+                                'playlist-drawer__item--thumbs':
+                                    viewMode === 'thumbnails',
                             }"
-                            :style="getItemStyle(entry)"
+                            :style="virtualRowStyle(row)"
                             role="button"
                             tabindex="0"
-                            @click="emit('play', entry)"
-                            @keydown.enter="emit('play', entry)"
-                            @keydown.space.prevent="emit('play', entry)"
+                            @click="emit('play', row.entry)"
+                            @keydown.enter="emit('play', row.entry)"
+                            @keydown.space.prevent="emit('play', row.entry)"
                         >
-                            <div class="playlist-drawer__item-title">
-                                {{
-                                    entry.title?.trim() ||
-                                    getPathDisplayName(entry.path, "Untitled")
-                                }}
+                            <div
+                                v-if="viewMode === 'thumbnails'"
+                                class="playlist-drawer__thumb"
+                                @mouseenter="onThumbEnter(row.entry, $event)"
+                                @mouseleave="onThumbLeave"
+                            >
+                                <img
+                                    v-if="thumbs[row.entry.path]"
+                                    class="playlist-drawer__thumb-img"
+                                    :src="thumbs[row.entry.path]"
+                                    alt=""
+                                    draggable="false"
+                                />
+                                <div v-else class="playlist-drawer__thumb-ph">
+                                    <svg
+                                        viewBox="0 0 24 24"
+                                        fill="currentColor"
+                                        aria-hidden="true"
+                                    >
+                                        <path d="M8 5v14l11-7z" />
+                                    </svg>
+                                </div>
+                                <button
+                                    class="playlist-drawer__thumb-regen"
+                                    type="button"
+                                    title="Regenerate this preview"
+                                    aria-label="Regenerate this preview"
+                                    @click.stop="regeneratePreview(row.entry.path)"
+                                    @keydown.enter.stop
+                                    @keydown.space.prevent.stop
+                                >
+                                    <svg
+                                        viewBox="0 0 24 24"
+                                        fill="currentColor"
+                                        aria-hidden="true"
+                                    >
+                                        <path
+                                            d="M12 6V3L8 7l4 4V8a4 4 0 1 1-4 4H6a6 6 0 1 0 6-6z"
+                                        />
+                                    </svg>
+                                </button>
                             </div>
-                            <div class="playlist-drawer__item-sub">
-                                {{ formatPathForDrawerDisplay(entry.path) }}
+                            <div class="playlist-drawer__item-text">
+                                <div class="playlist-drawer__item-title">
+                                    {{
+                                        row.entry.title?.trim() ||
+                                        getPathDisplayName(
+                                            row.entry.path,
+                                            "Untitled",
+                                        )
+                                    }}
+                                </div>
+                                <div class="playlist-drawer__item-sub">
+                                    {{ formatPathForDrawerDisplay(row.entry.path) }}
+                                </div>
                             </div>
                             <button
                                 class="playlist-drawer__remove"
                                 type="button"
                                 aria-label="Remove from playlist"
-                                @click.stop="emit('remove', entry)"
+                                @click.stop="emit('remove', row.entry)"
                             >
                                 <svg
                                     class="playlist-drawer__remove-icon"
@@ -982,6 +1303,20 @@ watch(
             </div>
         </aside>
     </transition>
+
+    <!-- Static hover preview (teleported so it floats over everything) -->
+    <Teleport to="body">
+        <div
+            v-if="hoverPreview && previewSrc"
+            class="playlist-drawer__preview"
+            :style="{
+                top: `${hoverPreview.top}px`,
+                left: `${hoverPreview.left}px`,
+            }"
+        >
+            <img :src="previewSrc" alt="" />
+        </div>
+    </Teleport>
 </template>
 <style scoped>
 .playlist-drawer__backdrop {
@@ -1207,6 +1542,25 @@ watch(
     gap: 8px;
 }
 
+/* Virtualized items list: rows are absolutely positioned within a spacer of the
+   full scroll height, so only the visible ~dozen are ever in the DOM. */
+.playlist-drawer__list--virtual {
+    display: block;
+    position: relative;
+    gap: 0;
+}
+.playlist-drawer__list--virtual .playlist-drawer__item {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    box-sizing: border-box;
+    /* Position is set via translateY on scroll — never transition it. */
+    transition:
+        box-shadow 0.15s ease,
+        border-color 0.15s ease;
+}
+
 .playlist-drawer__playlist {
     border: 1px solid rgba(0, 0, 0, 0.1);
     border-radius: 12px;
@@ -1416,9 +1770,144 @@ watch(
 
 .playlist-drawer__item-title,
 .playlist-drawer__item-sub,
+.playlist-drawer__item-text,
+.playlist-drawer__thumb,
 .playlist-drawer__remove {
     position: relative;
     z-index: 1;
+}
+
+/* Thumbnail rows */
+.playlist-drawer__item--thumbs {
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+}
+
+.playlist-drawer__item-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.playlist-drawer__thumb {
+    position: relative;
+    flex: none;
+    width: 76px;
+    height: 44px;
+    border-radius: 8px;
+    overflow: hidden;
+    background: rgba(0, 0, 0, 0.18);
+    display: grid;
+    place-items: center;
+}
+
+.playlist-drawer__thumb-regen,
+.playlist-drawer__thumb-play {
+    position: absolute;
+    bottom: 3px;
+    width: 18px;
+    height: 18px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: none;
+    border-radius: 5px;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    opacity: 0;
+    cursor: pointer;
+    transition: opacity 0.12s ease;
+}
+.playlist-drawer__thumb-regen {
+    right: 3px;
+}
+.playlist-drawer__thumb-play {
+    left: 3px;
+}
+.playlist-drawer__thumb-regen svg,
+.playlist-drawer__thumb-play svg {
+    width: 12px;
+    height: 12px;
+}
+.playlist-drawer__item:hover .playlist-drawer__thumb-regen,
+.playlist-drawer__item:hover .playlist-drawer__thumb-play {
+    opacity: 1;
+}
+.playlist-drawer__thumb-regen:hover,
+.playlist-drawer__thumb-play:hover {
+    background: rgba(57, 108, 216, 0.9);
+}
+/* Activated file: keep the play button visible + tinted as a state cue. */
+.playlist-drawer__thumb-play--on {
+    opacity: 1;
+    background: rgba(57, 108, 216, 0.85);
+}
+
+.playlist-drawer__thumb-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.playlist-drawer__thumb-ph {
+    color: rgba(255, 255, 255, 0.5);
+}
+.playlist-drawer__thumb-ph svg {
+    width: 18px;
+    height: 18px;
+}
+
+.playlist-drawer__preview {
+    position: fixed;
+    z-index: 400;
+    width: 300px;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #000;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55);
+    pointer-events: none;
+}
+.playlist-drawer__preview img {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+.playlist-drawer__preview--pinned {
+    pointer-events: auto;
+    cursor: pointer;
+    outline: 2px solid rgba(57, 108, 216, 0.7);
+}
+.playlist-drawer__preview-gen {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    min-height: 120px;
+}
+.playlist-drawer__preview-spinner {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 3px solid rgba(255, 255, 255, 0.25);
+    border-top-color: #fff;
+    animation: playlist-drawer-spin 0.8s linear infinite;
+}
+@keyframes playlist-drawer-spin {
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 .playlist-drawer__remove {

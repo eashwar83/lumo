@@ -123,6 +123,7 @@ export type AppMenuOptions = {
 
     addExternalSubtitle: () => void;
     findOnlineSubtitles: () => void;
+    generateAiSubtitles: () => void;
     toggleSubtitleVisibility: () => void;
     setDualSubEnabled: (enabled: boolean) => void;
     adjustSubtitleDelay: (delta: number) => void;
@@ -951,6 +952,12 @@ export const useAppMenu = (options: AppMenuOptions) => {
                 label: "Find Online Subtitles…",
                 disabled: !loaded,
                 run: options.findOnlineSubtitles,
+            },
+            {
+                kind: "action",
+                label: "Generate Subtitles (AI)…",
+                disabled: !options.isLocalMedia() || !options.clipExportAvailable(),
+                run: options.generateAiSubtitles,
             },
             sep,
             {

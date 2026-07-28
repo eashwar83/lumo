@@ -25,6 +25,7 @@ import ContextMenu from "./components/ContextMenu.vue";
 import OnlineSubtitleDialog from "./components/OnlineSubtitleDialog.vue";
 import MergeDialog from "./components/MergeDialog.vue";
 import SplitDialog from "./components/SplitDialog.vue";
+import SubtitleAiDialog from "./components/SubtitleAiDialog.vue";
 import WindowResizeRegions from "./components/WindowResizeRegions.vue";
 import { usePlaybackShortcuts } from "./composables/usePlaybackShortcuts";
 import { useUltraSlomo } from "./composables/useUltraSlomo";
@@ -1223,6 +1224,40 @@ type AiCurveResult = {
 const mergeOpen = ref(false);
 const splitOpen = ref(false);
 
+// AI subtitle generation modal.
+const subtitleAiOpen = ref(false);
+const onGenerateAiSubtitles = () => {
+    if (!isLocalMediaPath.value) {
+        showMessageOverlay("AI subtitles need a local video file", 3000);
+        return;
+    }
+    subtitleAiOpen.value = true;
+};
+const onAiSubtitlesLoaded = async (payload: {
+    path: string;
+    lineCount: number;
+}) => {
+    try {
+        await invoke("mpv_run_command", {
+            args: ["sub-add", payload.path, "select", "AI Subtitles"],
+        });
+        // If this file was already loaded (e.g. a previous range), mpv selects
+        // the cached copy instead of re-reading it — force a reload so newly
+        // merged lines actually appear.
+        const sid = await invoke<string | null>("mpv_get_property_string", {
+            name: "sid",
+        });
+        if (sid && sid !== "no" && sid !== "auto") {
+            await invoke("mpv_run_command", { args: ["sub-reload", sid] });
+        }
+    } catch (error) {
+        showMessageOverlay(
+            String(error).replace(/^Error:\s*/, "").slice(0, 140),
+            3200,
+        );
+    }
+};
+
 // Import mode chooser (Merge / Replace / Cancel) shared by favourites & settings
 // import. confirmImportMode resolves with the user's choice.
 type ImportMode = "merge" | "replace";
@@ -1871,6 +1906,7 @@ const { menus: appMenus } = useAppMenu({
             player.state.media.title || undefined,
         );
     },
+    generateAiSubtitles: onGenerateAiSubtitles,
     toggleSubtitleVisibility: () => void toggleSubtitleVisibility(),
     setDualSubEnabled: (enabled) => void tracks.setDualSubEnabled(enabled),
     adjustSubtitleDelay: (delta) => void adjustSubtitleDelay(delta),
@@ -1925,6 +1961,10 @@ const closeTopOverlay = (): boolean => {
     }
     if (splitOpen.value) {
         splitOpen.value = false;
+        return true;
+    }
+    if (subtitleAiOpen.value) {
+        subtitleAiOpen.value = false;
         return true;
     }
     if (aiPromptOpen.value) {
@@ -2294,6 +2334,17 @@ useAppStartupBindings({
             :current-position="player.state.playback.currentTime"
             @close="splitOpen = false"
             @notify="(msg: string) => showMessageOverlay(msg, 4000)"
+        />
+
+        <SubtitleAiDialog
+            :open="subtitleAiOpen"
+            :path="player.state.media.url"
+            :ab-start="abRange.pointA.value"
+            :ab-end="abRange.pointB.value"
+            :duration="player.state.playback.duration"
+            @close="subtitleAiOpen = false"
+            @notify="(msg: string) => showMessageOverlay(msg, 4000)"
+            @loaded="onAiSubtitlesLoaded"
         />
 
         <!-- Import mode chooser (favourites / settings) -->

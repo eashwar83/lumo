@@ -92,6 +92,10 @@ pub struct UiState {
     /// the frontend (`{ folders: [...], assignments: { path: folderId } }`).
     #[serde(default)]
     pub favorites_meta: Option<serde_json::Value>,
+    /// AI subtitle settings (transcription provider/key/model, target language).
+    /// Opaque JSON owned by the frontend.
+    #[serde(default)]
+    pub subtitle_ai: Option<serde_json::Value>,
 }
 
 impl Default for UiState {
@@ -126,6 +130,7 @@ impl Default for UiState {
             enhancement_history: None,
             ai_config: None,
             favorites_meta: None,
+            subtitle_ai: None,
         }
     }
 }
@@ -170,6 +175,7 @@ impl UiState {
             enhancement_history: incoming.enhancement_history.or(self.enhancement_history),
             ai_config: incoming.ai_config.or(self.ai_config),
             favorites_meta: incoming.favorites_meta.or(self.favorites_meta),
+            subtitle_ai: incoming.subtitle_ai.or(self.subtitle_ai),
         }
     }
 }

@@ -7,6 +7,7 @@ mod app_bootstrap;
 mod check_update;
 mod commands;
 mod ai_enhance;
+mod ai_subtitles;
 mod contact_sheet;
 mod media_edit;
 mod scenes;
@@ -456,10 +457,15 @@ pub fn run() {
             commands::playback::clip_export_available,
             commands::playback::open_export_folder,
             commands::playback::get_media_poster,
+            commands::playback::get_media_storyboard,
+            commands::playback::clear_preview_cache,
             commands::playback::get_scene_index,
             ai_enhance::ai_curve_correction,
             ai_enhance::ai_reference_thumbnail,
             ai_enhance::ai_list_models,
+            ai_subtitles::ai_subtitles_available,
+            ai_subtitles::generate_ai_subtitles,
+            ai_subtitles::cancel_ai_subtitles,
             media_edit::media_edit_info,
             media_edit::inspect_merge,
             media_edit::merge_files,
