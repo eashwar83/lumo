@@ -26,6 +26,7 @@ import OnlineSubtitleDialog from "./components/OnlineSubtitleDialog.vue";
 import MergeDialog from "./components/MergeDialog.vue";
 import SplitDialog from "./components/SplitDialog.vue";
 import SubtitleAiDialog from "./components/SubtitleAiDialog.vue";
+import SubtitleTranslateDialog from "./components/SubtitleTranslateDialog.vue";
 import WindowResizeRegions from "./components/WindowResizeRegions.vue";
 import { usePlaybackShortcuts } from "./composables/usePlaybackShortcuts";
 import { useUltraSlomo } from "./composables/useUltraSlomo";
@@ -1233,6 +1234,11 @@ const onGenerateAiSubtitles = () => {
     }
     subtitleAiOpen.value = true;
 };
+// AI subtitle translation modal (translate an existing .srt).
+const subtitleTranslateOpen = ref(false);
+const onTranslateAiSubtitles = () => {
+    subtitleTranslateOpen.value = true;
+};
 const onAiSubtitlesLoaded = async (payload: {
     path: string;
     lineCount: number;
@@ -1907,6 +1913,7 @@ const { menus: appMenus } = useAppMenu({
         );
     },
     generateAiSubtitles: onGenerateAiSubtitles,
+    translateAiSubtitles: onTranslateAiSubtitles,
     toggleSubtitleVisibility: () => void toggleSubtitleVisibility(),
     setDualSubEnabled: (enabled) => void tracks.setDualSubEnabled(enabled),
     adjustSubtitleDelay: (delta) => void adjustSubtitleDelay(delta),
@@ -1965,6 +1972,10 @@ const closeTopOverlay = (): boolean => {
     }
     if (subtitleAiOpen.value) {
         subtitleAiOpen.value = false;
+        return true;
+    }
+    if (subtitleTranslateOpen.value) {
+        subtitleTranslateOpen.value = false;
         return true;
     }
     if (aiPromptOpen.value) {
@@ -2343,6 +2354,13 @@ useAppStartupBindings({
             :ab-end="abRange.pointB.value"
             :duration="player.state.playback.duration"
             @close="subtitleAiOpen = false"
+            @notify="(msg: string) => showMessageOverlay(msg, 4000)"
+            @loaded="onAiSubtitlesLoaded"
+        />
+
+        <SubtitleTranslateDialog
+            :open="subtitleTranslateOpen"
+            @close="subtitleTranslateOpen = false"
             @notify="(msg: string) => showMessageOverlay(msg, 4000)"
             @loaded="onAiSubtitlesLoaded"
         />

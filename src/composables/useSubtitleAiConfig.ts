@@ -8,17 +8,27 @@ import { useAiConfig } from "./useAiConfig";
 
 export const TRANSCRIBE_PROVIDERS = [
     "Sarvam",
+    "Gemini",
     "Groq",
     "OpenAI",
     "Fireworks",
     "Lemonfox",
+    "Whisper (Local)",
     "Custom",
 ] as const;
 export type TranscribeProvider = (typeof TRANSCRIBE_PROVIDERS)[number];
 
-// Sarvam is India-first (best for Indic) with its own API; the rest speak the
-// OpenAI /audio/transcriptions shape.
+// Runs whisper.cpp on the user's machine — fully offline, no key or quota.
+export const isWhisper = (provider: string) => provider === "Whisper (Local)";
+
+// Sarvam is India-first (best for Indic) with its own API; Gemini transcribes via
+// its multimodal generateContent API; the rest speak the OpenAI
+// /audio/transcriptions shape.
 export const isSarvam = (provider: string) => provider === "Sarvam";
+export const isGemini = (provider: string) => provider === "Gemini";
+
+// Gemini's OpenAI-compatible base, used when Gemini does the (text) translation.
+const GEMINI_OPENAI_BASE = "https://generativelanguage.googleapis.com/v1beta/openai";
 
 // Languages Sarvam's own /translate endpoint can produce (mirrors the backend's
 // sarvam_language_code mapping). When the target is one of these, accurate-timing
@@ -42,18 +52,23 @@ export const sarvamCanTranslateTo = (code: string) =>
 
 const DEFAULT_BASE: Record<TranscribeProvider, string> = {
     Sarvam: "https://api.sarvam.ai",
+    Gemini: "https://generativelanguage.googleapis.com/v1beta",
     Groq: "https://api.groq.com/openai/v1",
     OpenAI: "https://api.openai.com/v1",
     Fireworks: "https://audio-prod.us-virginia-1.direct.fireworks.ai/v1",
     Lemonfox: "https://api.lemonfox.ai/v1",
+    "Whisper (Local)": "",
     Custom: "",
 };
 const DEFAULT_MODEL: Record<TranscribeProvider, string> = {
     Sarvam: "saaras:v3",
+    // Rolling alias → always the current stable Flash, so it won't get retired.
+    Gemini: "gemini-flash-latest",
     Groq: "whisper-large-v3",
     OpenAI: "whisper-1",
     Fireworks: "whisper-v3",
     Lemonfox: "whisper-1",
+    "Whisper (Local)": "",
     Custom: "whisper-1",
 };
 
@@ -124,6 +139,7 @@ export const SUBTITLE_LANGUAGES: { code: string; label: string }[] = (
 // set there is reused). Groq has no AI-Enhance equivalent.
 const AI_ENHANCE_EQUIVALENT: Record<string, string> = {
     OpenAI: "OpenAI",
+    Gemini: "Gemini",
     Custom: "Custom (OpenAI-compatible)",
 };
 
@@ -138,6 +154,9 @@ type SubtitleAiShape = {
     // Sarvam→English only: transcribe (real word timestamps) + chat-translate,
     // instead of Sarvam's direct translate which carries no timing.
     accurateTiming: boolean;
+    // Local whisper.cpp: path to the whisper-cli program and a ggml model file.
+    whisperExe: string;
+    whisperModel: string;
 };
 
 const provider = ref<TranscribeProvider>("Groq");
@@ -148,6 +167,8 @@ const sourceLanguage = ref<string>("auto");
 const translate = ref<boolean>(false);
 const targetLanguage = ref<string>("en");
 const accurateTiming = ref<boolean>(true);
+const whisperExe = ref<string>("");
+const whisperModel = ref<string>("");
 
 let initialized = false;
 let saveTimer: number | null = null;
@@ -166,6 +187,8 @@ const persist = () => {
                 translate: translate.value,
                 targetLanguage: targetLanguage.value,
                 accurateTiming: accurateTiming.value,
+                whisperExe: whisperExe.value,
+                whisperModel: whisperModel.value,
             } satisfies SubtitleAiShape,
         });
     }, 300);
@@ -192,6 +215,8 @@ const load = async () => {
     if (typeof cfg.accurateTiming === "boolean") {
         accurateTiming.value = cfg.accurateTiming;
     }
+    if (cfg.whisperExe) whisperExe.value = cfg.whisperExe;
+    if (cfg.whisperModel) whisperModel.value = cfg.whisperModel;
 };
 
 export const useSubtitleAiConfig = () => {
@@ -257,6 +282,58 @@ export const useSubtitleAiConfig = () => {
         accurateTiming.value = value;
         persist();
     };
+    const setWhisperExe = (value: string) => {
+        whisperExe.value = value;
+        persist();
+    };
+    const setWhisperModel = (value: string) => {
+        whisperModel.value = value;
+        persist();
+    };
+
+    // Decide how to translate to `targetCode`: Sarvam's own translator (Indic↔
+    // English), or a chat model (AI Enhance → else the provider's own chat).
+    type TranslationPlan =
+        | { mode: "sarvam" }
+        | { mode: "chat"; chatBase: string; chatKey: string; chatModel: string }
+        | { error: string };
+    const resolveTranslation = (targetCode: string): TranslationPlan => {
+        const p = provider.value;
+        if (isSarvam(p) && sarvamCanTranslateTo(targetCode)) {
+            return { mode: "sarvam" };
+        }
+        // Prefer a fully-configured AI Enhance provider.
+        if (aiConfig.currentKey.value.trim() && aiConfig.currentBaseUrl.value) {
+            return {
+                mode: "chat",
+                chatBase: aiConfig.currentBaseUrl.value,
+                chatKey: aiConfig.currentKey.value,
+                chatModel: aiConfig.currentModel.value,
+            };
+        }
+        // Gemini translates via its OpenAI-compatible endpoint.
+        if (isGemini(p) && currentKey.value.trim()) {
+            return {
+                mode: "chat",
+                chatBase: GEMINI_OPENAI_BASE,
+                chatKey: currentKey.value,
+                chatModel: currentModel.value,
+            };
+        }
+        // Groq / OpenAI can reuse their own key for the chat step.
+        const chatModel = TRANSCRIBE_CHAT_MODEL[p];
+        if (chatModel && currentKey.value.trim() && currentBaseUrl.value) {
+            return {
+                mode: "chat",
+                chatBase: currentBaseUrl.value,
+                chatKey: currentKey.value,
+                chatModel,
+            };
+        }
+        return {
+            error: "This target needs a chat model. Pick Sarvam/Gemini/Groq/OpenAI, configure AI Enhance, or choose a Sarvam-supported language.",
+        };
+    };
 
     return {
         provider,
@@ -269,6 +346,8 @@ export const useSubtitleAiConfig = () => {
         translate,
         targetLanguage,
         accurateTiming,
+        whisperExe,
+        whisperModel,
         setProvider,
         setKey,
         setBaseUrl,
@@ -277,5 +356,8 @@ export const useSubtitleAiConfig = () => {
         setTranslate,
         setTargetLanguage,
         setAccurateTiming,
+        setWhisperExe,
+        setWhisperModel,
+        resolveTranslation,
     };
 };

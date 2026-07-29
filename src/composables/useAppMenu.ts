@@ -124,6 +124,7 @@ export type AppMenuOptions = {
     addExternalSubtitle: () => void;
     findOnlineSubtitles: () => void;
     generateAiSubtitles: () => void;
+    translateAiSubtitles: () => void;
     toggleSubtitleVisibility: () => void;
     setDualSubEnabled: (enabled: boolean) => void;
     adjustSubtitleDelay: (delta: number) => void;
@@ -958,6 +959,11 @@ export const useAppMenu = (options: AppMenuOptions) => {
                 label: "Generate Subtitles (AI)…",
                 disabled: !options.isLocalMedia() || !options.clipExportAvailable(),
                 run: options.generateAiSubtitles,
+            },
+            {
+                kind: "action",
+                label: "Translate Subtitles (AI)…",
+                run: options.translateAiSubtitles,
             },
             sep,
             {

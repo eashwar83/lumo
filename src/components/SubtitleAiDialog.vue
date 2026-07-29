@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
+    isGemini,
     isSarvam,
+    isWhisper,
     sarvamCanTranslateTo,
     SUBTITLE_LANGUAGES,
     TRANSCRIBE_CHAT_MODEL,
@@ -36,6 +38,26 @@ const manualFrom = ref("");
 const manualTo = ref("");
 
 const sarvamSelected = computed(() => isSarvam(sub.provider.value));
+const whisperSelected = computed(() => isWhisper(sub.provider.value));
+
+const baseName = (p: string) => {
+    const s = p.replace(/\\/g, "/");
+    return s ? s.slice(s.lastIndexOf("/") + 1) : "";
+};
+const whisperExeName = computed(() => baseName(sub.whisperExe.value));
+const whisperModelName = computed(() => baseName(sub.whisperModel.value));
+
+const pickWhisperExe = async () => {
+    const picked = await openDialog({ multiple: false });
+    if (typeof picked === "string") sub.setWhisperExe(picked);
+};
+const pickWhisperModel = async () => {
+    const picked = await openDialog({
+        multiple: false,
+        filters: [{ name: "Whisper model", extensions: ["bin", "gguf"] }],
+    });
+    if (typeof picked === "string") sub.setWhisperModel(picked);
+};
 
 // The accurate-timing choice only matters for Sarvam → English, the one path
 // that would otherwise use Sarvam's timestamp-free direct translation.
@@ -140,12 +162,26 @@ watch(
 
 const run = async () => {
     if (generating.value) return;
-    if (!sub.currentKey.value.trim()) {
+    if (whisperSelected.value) {
+        if (!sub.whisperExe.value.trim() || !sub.whisperModel.value.trim()) {
+            statusText.value =
+                "Set the whisper-cli program and a model file (.bin) first.";
+            return;
+        }
+    } else if (!sub.currentKey.value.trim()) {
         statusText.value = "Enter your transcription API key first.";
         return;
     }
-    const engine = isSarvam(sub.provider.value) ? "sarvam" : "openai";
+    const engine = isWhisper(sub.provider.value)
+        ? "whisper"
+        : isSarvam(sub.provider.value)
+          ? "sarvam"
+          : isGemini(sub.provider.value)
+            ? "gemini"
+            : "openai";
     const translateTo = sub.translate.value ? sub.targetLanguage.value : null;
+    // Local whisper translates to English itself (offline `--translate`).
+    const whisperEnglish = engine === "whisper" && translateTo === "en";
     // Sarvam can translate Indic audio → English itself (no chat step needed),
     // but that path carries no timestamps. With "Accurate timing" we instead
     // transcribe (real word timings) and translate via Sarvam's own /translate.
@@ -164,7 +200,14 @@ const run = async () => {
     let chatBase: string | null = null;
     let chatKey: string | null = null;
     let chatModel: string | null = null;
-    if (translateTo && !sarvamDirectEnglish && !sarvamNativeTranslate) {
+    // Gemini transcribes and translates in one multimodal call — no chat needed.
+    if (
+        translateTo &&
+        !sarvamDirectEnglish &&
+        !sarvamNativeTranslate &&
+        !whisperEnglish &&
+        engine !== "gemini"
+    ) {
         if (aiConfig.currentKey.value.trim() && aiConfig.currentBaseUrl.value) {
             chatBase = aiConfig.currentBaseUrl.value;
             chatKey = aiConfig.currentKey.value;
@@ -217,6 +260,8 @@ const run = async () => {
             rangeEnd: range ? range.end : null,
             engine,
             accurateTiming: sub.accurateTiming.value,
+            whisperExe: sub.whisperExe.value || null,
+            whisperModel: sub.whisperModel.value || null,
         });
         emit("loaded", { path: result.srtPath, lineCount: result.lineCount });
         emit("notify", `Subtitles ready — ${result.lineCount} lines`);
@@ -286,6 +331,13 @@ const cancel = () => {
                     real sync (recommended for movies). Get a key at
                     dashboard.sarvam.ai.
                 </p>
+                <p v-if="whisperSelected" class="subai__note">
+                    Runs fully offline on your machine — no API key or quota. Point
+                    it at a whisper.cpp program (whisper-cli) and a ggml model file.
+                    Get models from huggingface.co/ggerganov/whisper.cpp — bigger
+                    models are more accurate but slower. “Translate to English”
+                    works offline; other languages still need a chat translator.
+                </p>
 
                 <div class="subai__grid">
                     <span class="subai__label">Provider</span>
@@ -304,38 +356,81 @@ const cancel = () => {
                         </option>
                     </select>
 
-                    <span class="subai__label">API Key</span>
-                    <input
-                        :value="sub.currentKey.value"
-                        class="subai__control"
-                        type="password"
-                        autocomplete="off"
-                        spellcheck="false"
-                        :disabled="generating"
-                        placeholder="Paste this provider's API key"
-                        @input="sub.setKey(($event.target as HTMLInputElement).value)"
-                    />
+                    <template v-if="!whisperSelected">
+                        <span class="subai__label">API Key</span>
+                        <input
+                            :value="sub.currentKey.value"
+                            class="subai__control"
+                            type="password"
+                            autocomplete="off"
+                            spellcheck="false"
+                            :disabled="generating"
+                            placeholder="Paste this provider's API key"
+                            @input="sub.setKey(($event.target as HTMLInputElement).value)"
+                        />
 
-                    <span class="subai__label">Base URL</span>
-                    <input
-                        :value="sub.currentBaseUrl.value"
-                        class="subai__control"
-                        type="text"
-                        spellcheck="false"
-                        :disabled="generating"
-                        :placeholder="sub.baseUrlPlaceholder.value"
-                        @input="sub.setBaseUrl(($event.target as HTMLInputElement).value)"
-                    />
+                        <span class="subai__label">Base URL</span>
+                        <input
+                            :value="sub.currentBaseUrl.value"
+                            class="subai__control"
+                            type="text"
+                            spellcheck="false"
+                            :disabled="generating"
+                            :placeholder="sub.baseUrlPlaceholder.value"
+                            @input="
+                                sub.setBaseUrl(($event.target as HTMLInputElement).value)
+                            "
+                        />
 
-                    <span class="subai__label">Model</span>
-                    <input
-                        :value="sub.currentModel.value"
-                        class="subai__control"
-                        type="text"
-                        spellcheck="false"
-                        :disabled="generating"
-                        @input="sub.setModel(($event.target as HTMLInputElement).value)"
-                    />
+                        <span class="subai__label">Model</span>
+                        <input
+                            :value="sub.currentModel.value"
+                            class="subai__control"
+                            type="text"
+                            spellcheck="false"
+                            :disabled="generating"
+                            @input="
+                                sub.setModel(($event.target as HTMLInputElement).value)
+                            "
+                        />
+                    </template>
+                    <template v-else>
+                        <span class="subai__label">Whisper program</span>
+                        <div class="subai__file">
+                            <span
+                                class="subai__file-name"
+                                :title="sub.whisperExe.value"
+                            >
+                                {{ whisperExeName || "whisper-cli(.exe)" }}
+                            </span>
+                            <button
+                                class="subai__btn"
+                                type="button"
+                                :disabled="generating"
+                                @click="pickWhisperExe"
+                            >
+                                Browse…
+                            </button>
+                        </div>
+
+                        <span class="subai__label">Model file</span>
+                        <div class="subai__file">
+                            <span
+                                class="subai__file-name"
+                                :title="sub.whisperModel.value"
+                            >
+                                {{ whisperModelName || "ggml-*.bin" }}
+                            </span>
+                            <button
+                                class="subai__btn"
+                                type="button"
+                                :disabled="generating"
+                                @click="pickWhisperModel"
+                            >
+                                Browse…
+                            </button>
+                        </div>
+                    </template>
 
                     <span class="subai__label">Spoken language</span>
                     <select
@@ -518,7 +613,11 @@ const cancel = () => {
                         <button
                             class="subai__btn subai__btn--primary"
                             type="button"
-                            :disabled="!sub.currentKey.value"
+                            :disabled="
+                                whisperSelected
+                                    ? !sub.whisperExe.value || !sub.whisperModel.value
+                                    : !sub.currentKey.value
+                            "
                             @click="run"
                         >
                             {{ savedResult ? "Generate more" : "Generate" }}
@@ -604,6 +703,22 @@ const cancel = () => {
 }
 .subai__control--inline {
     padding: 5px 8px;
+}
+.subai__file {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+.subai__file-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12.5px;
+    font-family: ui-monospace, monospace;
+    color: rgba(255, 255, 255, 0.72);
 }
 .subai__translate {
     display: flex;

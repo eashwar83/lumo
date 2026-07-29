@@ -134,6 +134,51 @@ fn cancelled() -> bool {
 }
 
 /// Extract a mono 16 kHz AAC clip for `[start, start+dur)`.
+/// Human-readable language name for a language code, for LLM prompts. Falls back
+/// to the code itself when unknown.
+fn language_name(code: &str) -> String {
+    let c = code.trim().to_ascii_lowercase();
+    let name = match c.as_str() {
+        "en" => "English",
+        "hi" => "Hindi",
+        "te" => "Telugu",
+        "ta" => "Tamil",
+        "kn" => "Kannada",
+        "ml" => "Malayalam",
+        "mr" => "Marathi",
+        "bn" => "Bengali",
+        "gu" => "Gujarati",
+        "pa" => "Punjabi",
+        "ur" => "Urdu",
+        "or" | "od" => "Odia",
+        "as" => "Assamese",
+        "ne" => "Nepali",
+        "si" => "Sinhala",
+        "ar" => "Arabic",
+        "zh" => "Chinese",
+        "ja" => "Japanese",
+        "ko" => "Korean",
+        "fr" => "French",
+        "de" => "German",
+        "es" => "Spanish",
+        "pt" => "Portuguese",
+        "ru" => "Russian",
+        "it" => "Italian",
+        "nl" => "Dutch",
+        "tr" => "Turkish",
+        "vi" => "Vietnamese",
+        "th" => "Thai",
+        "id" => "Indonesian",
+        "fa" => "Persian",
+        "pl" => "Polish",
+        "uk" => "Ukrainian",
+        "he" => "Hebrew",
+        "el" => "Greek",
+        _ => return code.trim().to_string(),
+    };
+    name.to_string()
+}
+
 fn extract_chunk(
     ffmpeg: &Path,
     input: &str,
@@ -141,6 +186,19 @@ fn extract_chunk(
     dur: f64,
     out: &Path,
 ) -> Result<(), String> {
+    // Pick the encoder from the output extension: Gemini wants a natively-typed
+    // audio (flac); the OpenAI-shaped and Sarvam endpoints take aac/m4a.
+    let ext = out
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let codec: &[&str] = match ext.as_str() {
+        "flac" => &["-c:a", "flac"],
+        "wav" => &["-c:a", "pcm_s16le"], // whisper.cpp wants 16-bit PCM WAV
+        "mp3" => &["-c:a", "libmp3lame", "-b:a", "64k"],
+        _ => &["-c:a", "aac", "-b:a", "64k"],
+    };
     let result = quiet_command(ffmpeg)
         .args(["-hide_banner", "-loglevel", "error", "-y", "-ss"])
         .arg(format!("{start}"))
@@ -148,7 +206,8 @@ fn extract_chunk(
         .arg(format!("{dur}"))
         .arg("-i")
         .arg(input)
-        .args(["-vn", "-ac", "1", "-ar", "16000", "-c:a", "aac", "-b:a", "64k"])
+        .args(["-vn", "-ac", "1", "-ar", "16000"])
+        .args(codec)
         .arg(out)
         .output()
         .map_err(|e| format!("Failed to run ffmpeg: {e}"))?;
@@ -375,6 +434,101 @@ fn transcribe_chunk(
                 });
             }
         }
+    }
+    Ok(segments)
+}
+
+/// Transcribe (and optionally translate) one chunk with Gemini's multimodal API.
+/// Gemini returns segment-level SRT which we parse; when `translate_to` is set it
+/// transcribes and translates in one call, so no separate chat step is needed.
+fn transcribe_chunk_gemini(
+    client: &reqwest::blocking::Client,
+    base: &str,
+    api_key: &str,
+    model: &str,
+    clip: &Path,
+    source_language: Option<&str>,
+    translate_to: Option<&str>,
+    chunk_dur: f64,
+) -> Result<Vec<Segment>, String> {
+    use base64::Engine as _;
+    let bytes = std::fs::read(clip).map_err(|e| e.to_string())?;
+    let audio_b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+
+    let src = source_language
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && *l != "auto");
+    let src_desc = match src {
+        Some(code) => format!("The speech is in {}.", language_name(code)),
+        None => "Detect the spoken language.".to_string(),
+    };
+    let task = match translate_to.map(str::trim).filter(|t| !t.is_empty()) {
+        Some(t) => format!(
+            "Transcribe the speech, then translate it into {0}. The subtitle text must be written in {0}.",
+            language_name(t)
+        ),
+        None => "Transcribe the speech verbatim.".to_string(),
+    };
+    let prompt = format!(
+        "You are a subtitle generator. {src_desc} {task} Output ONLY a valid SRT \
+subtitle document: sequential numbers, `HH:MM:SS,mmm --> HH:MM:SS,mmm` time codes \
+measured from the START of THIS audio clip (the clip begins at 00:00:00,000), then \
+the subtitle text. Keep each cue to one short, readable line, timed to when it is \
+actually spoken. If there is no speech, output nothing. No markdown, no code \
+fences, no commentary."
+    );
+
+    let url = format!("{}/models/{}:generateContent", base.trim_end_matches('/'), model);
+    let payload = json!({
+        "contents": [{
+            "parts": [
+                { "text": prompt },
+                { "inline_data": { "mime_type": "audio/flac", "data": audio_b64 } }
+            ]
+        }],
+        "generationConfig": { "temperature": 0.0 }
+    });
+
+    let resp = client
+        .post(&url)
+        .header("x-goog-api-key", api_key)
+        .json(&payload)
+        .send()
+        .map_err(|e| format!("Request failed: {e}"))?;
+    let status = resp.status();
+    if status.as_u16() == 429 {
+        let text = resp.text().unwrap_or_default();
+        let secs = parse_retry_seconds(&text).unwrap_or(60.0);
+        return Err(format!("RATE_LIMIT|{secs}|{}", provider_error(status, &text)));
+    }
+    let text = resp.text().unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!("Transcription {}", provider_error(status, &text)));
+    }
+    let body: Value =
+        serde_json::from_str(&text).map_err(|e| format!("Invalid response: {e}"))?;
+    let content = body
+        .pointer("/candidates/0/content/parts/0/text")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    // Strip any stray code fences the model added.
+    let cleaned = content
+        .trim()
+        .trim_start_matches("```srt")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
+    let mut segments = parse_srt(cleaned);
+    // Clamp to the clip so a hallucinated tail can't overrun into the next chunk.
+    segments.retain(|s| s.start < chunk_dur + 0.5);
+    for s in segments.iter_mut() {
+        s.start = s.start.min(chunk_dur);
+        s.end = s.end.min(chunk_dur).max(s.start);
+    }
+    if segments.is_empty() && !cleaned.is_empty() {
+        // Reply had text but no parseable timings — spread it across the clip.
+        let plain = cleaned.replace('\n', " ");
+        return Ok(distribute_segments(plain.trim(), 0.0, chunk_dur));
     }
     Ok(segments)
 }
@@ -888,6 +1042,100 @@ fn transcribe_chunk_sarvam(
     Ok(words_to_segments(words, starts, ends, fallback, speech_window))
 }
 
+/// Map our 2-letter UI code to a Whisper language code. Whisper uses ISO-639-1
+/// codes directly, so most pass through; "auto" lets it detect.
+fn whisper_language_arg(lang: Option<&str>) -> String {
+    match lang.map(str::trim).filter(|l| !l.is_empty() && *l != "auto") {
+        Some(code) => code.to_ascii_lowercase(),
+        None => "auto".to_string(),
+    }
+}
+
+/// Transcribe the whole range offline with a local whisper.cpp build. Extracts a
+/// 16 kHz WAV, runs `whisper-cli -osrt`, and parses the SRT it writes. With
+/// `translate_english` it uses whisper's built-in translate-to-English. Returns
+/// absolutely-timed segments (offset by the range start).
+fn run_whisper(
+    app: &tauri::AppHandle,
+    ffmpeg: &Path,
+    exe: &str,
+    model: &str,
+    input: &str,
+    eff_start: f64,
+    eff_end: f64,
+    language: Option<&str>,
+    translate_english: bool,
+    work: &Path,
+) -> Result<Vec<Segment>, String> {
+    if exe.trim().is_empty() || !Path::new(exe).exists() {
+        return Err("Set the path to whisper-cli (the whisper.cpp program) first".to_string());
+    }
+    if model.trim().is_empty() || !Path::new(model).exists() {
+        return Err("Set the path to a Whisper model file (.bin) first".to_string());
+    }
+
+    let wav = work.join("whisper_audio.wav");
+    extract_chunk(ffmpeg, input, eff_start, eff_end - eff_start, &wav)?;
+
+    emit_progress(app, "transcribe", 0, 1);
+    let out_base = work.join("whisper_out");
+    let mut cmd = quiet_command(Path::new(exe));
+    cmd.arg("-m")
+        .arg(model)
+        .arg("-f")
+        .arg(&wav)
+        .arg("-osrt")
+        .arg("-of")
+        .arg(&out_base)
+        .arg("-l")
+        .arg(whisper_language_arg(language))
+        // No console in a windowed app — discard whisper's chatter so a full pipe
+        // buffer can't stall it.
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    if translate_english {
+        cmd.arg("-tr");
+    }
+
+    // Spawn and poll so a cancel can kill the (potentially long) run.
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Couldn't launch whisper-cli: {e}"))?;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    return Err(
+                        "whisper-cli failed — check the program and model are compatible \
+(and that the model matches your CPU/GPU build)."
+                            .to_string(),
+                    );
+                }
+                break;
+            }
+            Ok(None) => {
+                if cancelled() {
+                    let _ = child.kill();
+                    return Err("Cancelled".to_string());
+                }
+                std::thread::sleep(Duration::from_millis(300));
+            }
+            Err(e) => return Err(format!("whisper-cli error: {e}")),
+        }
+    }
+
+    let srt_path = work.join("whisper_out.srt");
+    let content = std::fs::read_to_string(&srt_path)
+        .map_err(|e| format!("whisper-cli produced no subtitles: {e}"))?;
+    let mut segments = parse_srt(&content);
+    for s in segments.iter_mut() {
+        s.start += eff_start;
+        s.end += eff_start;
+    }
+    emit_progress(app, "transcribe", 1, 1);
+    Ok(segments)
+}
+
 fn output_srt_path(app: &tauri::AppHandle, video: &str, lang_suffix: &str) -> PathBuf {
     let stem = Path::new(video)
         .file_stem()
@@ -949,6 +1197,8 @@ pub(crate) async fn generate_ai_subtitles(
     range_end: Option<f64>,
     engine: Option<String>,
     accurate_timing: Option<bool>,
+    whisper_exe: Option<String>,
+    whisper_model: Option<String>,
 ) -> Result<SubtitleResult, String> {
     if path.trim().is_empty() || is_remote(&path) {
         return Err("AI subtitles need a local video file".to_string());
@@ -1006,7 +1256,17 @@ pub(crate) async fn generate_ai_subtitles(
         // saaras can translate Indic audio straight to English (`mode=translate`),
         // skipping the lossy transcribe-then-LLM-translate path.
         let is_sarvam = engine.as_deref() == Some("sarvam");
-        let chunk_secs = if is_sarvam { 28.0 } else { CHUNK_SECS };
+        let is_gemini = engine.as_deref() == Some("gemini");
+        let is_whisper = engine.as_deref() == Some("whisper");
+        // Gemini takes larger clips (it timestamps them itself); Sarvam has a 30s
+        // sync cap; the OpenAI-shaped endpoints take big chunks.
+        let chunk_secs = if is_sarvam {
+            28.0
+        } else if is_gemini {
+            60.0
+        } else {
+            CHUNK_SECS
+        };
         let target = translate_to
             .as_deref()
             .map(str::trim)
@@ -1019,6 +1279,12 @@ pub(crate) async fn generate_ai_subtitles(
         // (which returns real word-level timestamps) and translate via the chat AI.
         let want_accurate = accurate_timing.unwrap_or(false);
         let sarvam_direct_english = is_sarvam && target_is_english && !want_accurate;
+        // Gemini transcribes and translates in one multimodal call, so it produces
+        // the target-language track directly — no separate translate step.
+        let gemini_inline_translate = is_gemini && target.is_some();
+        // Local whisper can translate to English itself (offline). Other targets
+        // fall through to the shared translate step (which needs a provider).
+        let whisper_english_inline = is_whisper && target_is_english;
         let sarvam_mode = if sarvam_direct_english {
             "translate"
         } else {
@@ -1037,17 +1303,33 @@ pub(crate) async fn generate_ai_subtitles(
         );
         let _ = std::fs::create_dir_all(&cache_dir);
 
+        let mut segments: Vec<Segment> = Vec::new();
+
+        if is_whisper {
+            // Fully offline: one local whisper.cpp run over the whole range.
+            segments = run_whisper(
+                &app_handle,
+                &ffmpeg,
+                whisper_exe.as_deref().unwrap_or(""),
+                whisper_model.as_deref().unwrap_or(""),
+                &path,
+                eff_start,
+                eff_end,
+                source_language.as_deref(),
+                whisper_english_inline,
+                &work,
+            )?;
+        } else {
         // Break chunks at natural pauses (silence) rather than on a fixed grid, so
         // a song's tail and the dialogue after it fall into separate chunks — the
         // dialogue chunk then starts at the real pause instead of ~20s too early.
-        let silence_points = if is_sarvam {
+        let silence_points = if is_sarvam || is_gemini {
             detect_silence_points(&ffmpeg, &path, eff_start, eff_end)
         } else {
             Vec::new()
         };
         let chunk_ranges = build_chunk_ranges(eff_start, eff_end, chunk_secs, &silence_points);
         let total_chunks = chunk_ranges.len().max(1);
-        let mut segments: Vec<Segment> = Vec::new();
 
         for (chunk, &(start, chunk_end)) in chunk_ranges.iter().enumerate() {
             if cancelled() {
@@ -1066,7 +1348,8 @@ pub(crate) async fn generate_ai_subtitles(
             {
                 serde_json::from_str(&txt).unwrap_or_default()
             } else {
-                let clip = work.join(format!("chunk_{chunk:04}.m4a"));
+                let clip_ext = if is_gemini { "flac" } else { "m4a" };
+                let clip = work.join(format!("chunk_{chunk:04}.{clip_ext}"));
                 extract_chunk(&ffmpeg, &path, start, dur, &clip)?;
                 // Find the real spoken window so that any chunk which comes back
                 // without word timestamps (songs, music-heavy passages) has its
@@ -1089,6 +1372,17 @@ pub(crate) async fn generate_ai_subtitles(
                                 sarvam_lang.as_deref(),
                                 &clip,
                                 speech_window,
+                            )
+                        } else if is_gemini {
+                            transcribe_chunk_gemini(
+                                &client,
+                                &transcribe_base,
+                                &transcribe_key,
+                                &transcribe_model,
+                                &clip,
+                                source_language.as_deref(),
+                                target,
+                                dur,
                             )
                         } else {
                             transcribe_chunk(
@@ -1115,6 +1409,7 @@ pub(crate) async fn generate_ai_subtitles(
                 segments.push(seg);
             }
         }
+        }
 
         if segments.is_empty() {
             let _ = std::fs::remove_dir_all(&work);
@@ -1132,6 +1427,12 @@ pub(crate) async fn generate_ai_subtitles(
         if sarvam_direct_english {
             // Sarvam already produced English — no LLM translation step needed.
             lang_suffix = "en".to_string();
+        } else if whisper_english_inline {
+            // whisper --translate already produced English offline.
+            lang_suffix = "en".to_string();
+        } else if gemini_inline_translate {
+            // Gemini already produced the target-language track in one call.
+            lang_suffix = target.unwrap_or("en").to_string();
         } else if let Some(target) = translate_to
             .as_deref()
             .map(str::trim)
@@ -1249,7 +1550,7 @@ pub(crate) async fn generate_ai_subtitles(
         let _ = std::fs::remove_dir_all(&work);
         // Job finished — the transcript cache is no longer needed.
         let _ = std::fs::remove_dir_all(&cache_dir);
-        emit_progress(&app_handle, "done", total_chunks, total_chunks);
+        emit_progress(&app_handle, "done", 1, 1);
 
         let file_name = out_path
             .file_name()
@@ -1259,6 +1560,155 @@ pub(crate) async fn generate_ai_subtitles(
             srt_path: out_path.to_string_lossy().to_string(),
             file_name,
             line_count: merged.len(),
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    result
+}
+
+/// Translate an existing `.srt` file into another language, preserving the
+/// original timings. Reuses Sarvam's own translator for Indic↔English targets,
+/// otherwise a chat model (Groq / OpenAI / Gemini / AI Enhance).
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub(crate) async fn translate_subtitle_file(
+    app: tauri::AppHandle,
+    srt_path: String,
+    target_language: String,
+    engine: Option<String>,
+    transcribe_base: String,
+    transcribe_key: String,
+    source_language: Option<String>,
+    chat_base: Option<String>,
+    chat_key: Option<String>,
+    chat_model: Option<String>,
+) -> Result<SubtitleResult, String> {
+    let target = target_language.trim().to_string();
+    if target.is_empty() {
+        return Err("Choose a language to translate into".to_string());
+    }
+    let app_handle = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let content = std::fs::read_to_string(&srt_path)
+            .map_err(|e| format!("Couldn't read the subtitle file: {e}"))?;
+        let mut segments = parse_srt(&content);
+        if segments.is_empty() {
+            return Err("No subtitles found in that file".to_string());
+        }
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
+            .build()
+            .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
+
+        let is_sarvam = engine.as_deref() == Some("sarvam");
+        let sarvam_target = if is_sarvam {
+            sarvam_language_code(Some(&target))
+        } else {
+            None
+        };
+        let texts: Vec<String> = segments.iter().map(|s| s.text.clone()).collect();
+
+        if let Some(tgt) = sarvam_target {
+            let src = sarvam_language_code(source_language.as_deref())
+                .unwrap_or_else(|| "auto".to_string());
+            let mut ranges: Vec<(usize, usize)> = Vec::new();
+            let (mut start, mut chars) = (0usize, 0usize);
+            for (i, t) in texts.iter().enumerate() {
+                let len = t.chars().count() + 1;
+                if i > start && (chars + len > 900 || i - start >= 12) {
+                    ranges.push((start, i));
+                    start = i;
+                    chars = 0;
+                }
+                chars += len;
+            }
+            if start < texts.len() {
+                ranges.push((start, texts.len()));
+            }
+            let total = ranges.len();
+            for (bi, (s, e)) in ranges.into_iter().enumerate() {
+                if cancelled() {
+                    return Err("Cancelled".to_string());
+                }
+                emit_progress(&app_handle, "translate", bi, total);
+                let translated = translate_batch_sarvam(
+                    &client,
+                    &transcribe_base,
+                    &transcribe_key,
+                    &src,
+                    &tgt,
+                    &texts[s..e],
+                );
+                for (i, line) in translated.into_iter().enumerate() {
+                    if let Some(seg) = segments.get_mut(s + i) {
+                        seg.text = line;
+                    }
+                }
+            }
+        } else {
+            let base = chat_base.unwrap_or_default();
+            let key = chat_key.unwrap_or_default();
+            let model = chat_model.unwrap_or_default();
+            if base.is_empty() || key.is_empty() {
+                return Err(
+                    "Translation needs a chat model (Sarvam/Groq/OpenAI/Gemini or AI Enhance)."
+                        .to_string(),
+                );
+            }
+            let chat_url = format!("{}/chat/completions", api_root(&base));
+            let total = texts.len().div_ceil(TRANSLATE_BATCH);
+            for bi in 0..total {
+                if cancelled() {
+                    return Err("Cancelled".to_string());
+                }
+                emit_progress(&app_handle, "translate", bi, total);
+                let b = bi * TRANSLATE_BATCH;
+                let e = (b + TRANSLATE_BATCH).min(texts.len());
+                let translated =
+                    translate_batch(&client, &chat_url, &key, &model, &target, &texts[b..e]);
+                for (i, line) in translated.into_iter().enumerate() {
+                    if let Some(seg) = segments.get_mut(b + i) {
+                        seg.text = line;
+                    }
+                }
+            }
+        }
+
+        emit_progress(&app_handle, "done", 1, 1);
+
+        // Name the output next to the source, dropping a trailing ".ai" and any
+        // trailing language token so suffixes don't pile up.
+        let src_file = Path::new(&srt_path);
+        let stem = src_file
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "subtitles".to_string());
+        let mut base_stem = stem.as_str();
+        if let Some(s) = base_stem.strip_suffix(".ai") {
+            base_stem = s;
+        }
+        if let Some((head, tail)) = base_stem.rsplit_once('.') {
+            if (2..=3).contains(&tail.len()) && tail.chars().all(|c| c.is_ascii_alphabetic()) {
+                base_stem = head;
+            }
+        }
+        let name = format!("{base_stem}.{target}.srt");
+        let out_path = src_file
+            .parent()
+            .map(|p| p.join(&name))
+            .unwrap_or_else(|| PathBuf::from(&name));
+        let srt = build_srt(&segments);
+        std::fs::write(&out_path, srt).map_err(|e| format!("Failed to write subtitles: {e}"))?;
+        let file_name = out_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        Ok(SubtitleResult {
+            srt_path: out_path.to_string_lossy().to_string(),
+            file_name,
+            line_count: segments.len(),
         })
     })
     .await

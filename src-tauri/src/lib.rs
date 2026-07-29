@@ -466,6 +466,7 @@ pub fn run() {
             ai_subtitles::ai_subtitles_available,
             ai_subtitles::generate_ai_subtitles,
             ai_subtitles::cancel_ai_subtitles,
+            ai_subtitles::translate_subtitle_file,
             media_edit::media_edit_info,
             media_edit::inspect_merge,
             media_edit::merge_files,
