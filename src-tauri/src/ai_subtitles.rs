@@ -1755,6 +1755,711 @@ pub(crate) async fn translate_subtitle_file(
     result
 }
 
+// ---------------------------------------------------------------------------
+// Subtitle sync — re-time an existing .srt to this video.
+// ---------------------------------------------------------------------------
+
+/// Speech intervals (absolute seconds) across [start,end], as the complement of
+/// silencedetect's silences. Quick sync aligns the subtitle's cue pattern to
+/// this; smart sync uses it to find gaps to fill and orphans to drop.
+fn detect_speech_intervals(ffmpeg: &Path, input: &str, start: f64, end: f64) -> Vec<(f64, f64)> {
+    let dur = end - start;
+    if dur <= 0.0 {
+        return vec![];
+    }
+    let output = quiet_command(ffmpeg)
+        .args(["-hide_banner", "-nostats", "-ss"])
+        .arg(format!("{start}"))
+        .arg("-t")
+        .arg(format!("{dur}"))
+        .arg("-i")
+        .arg(input)
+        .args(["-vn", "-af", "silencedetect=noise=-30dB:d=0.4", "-f", "null", "-"])
+        .output();
+    let Ok(out) = output else {
+        return vec![(start, end)];
+    };
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let mut silences: Vec<(f64, f64)> = Vec::new();
+    let mut pending: Option<f64> = None;
+    for line in stderr.lines() {
+        if let Some(v) = parse_silence_seconds(line, "silence_start:") {
+            pending = Some(v + start);
+        }
+        if let Some(v) = parse_silence_seconds(line, "silence_end:") {
+            let s = pending.take().unwrap_or(start);
+            silences.push((s, v + start));
+        }
+    }
+    if let Some(s) = pending {
+        silences.push((s, end));
+    }
+    // Speech = the gaps between silences.
+    let mut speech = Vec::new();
+    let mut cursor = start;
+    for (s, e) in silences {
+        if s > cursor {
+            speech.push((cursor, s));
+        }
+        cursor = cursor.max(e);
+    }
+    if cursor < end {
+        speech.push((cursor, end));
+    }
+    speech
+}
+
+const SYNC_BIN: f64 = 0.25; // 250 ms resolution for the correlation
+// Common film/PAL/NTSC frame-rate conversion ratios (plus identity).
+const SYNC_SCALES: [f64; 7] = [
+    1.0,
+    24.0 / 25.0,
+    25.0 / 24.0,
+    (24000.0 / 1001.0) / 25.0,
+    25.0 / (24000.0 / 1001.0),
+    (24000.0 / 1001.0) / 24.0,
+    24.0 / (24000.0 / 1001.0),
+];
+
+/// Rasterise time intervals (scaled) into a coarse on/off signal.
+fn sync_signal(intervals: &[(f64, f64)], n: usize, scale: f64) -> Vec<u8> {
+    let mut sig = vec![0u8; n];
+    for &(s, e) in intervals {
+        let a = ((s * scale) / SYNC_BIN).floor().max(0.0) as usize;
+        let b = ((e * scale) / SYNC_BIN).ceil() as usize;
+        for slot in sig.iter_mut().take(b.min(n)).skip(a) {
+            *slot = 1;
+        }
+    }
+    sig
+}
+
+/// Best (scale, offset_seconds, score) aligning the subtitle cue pattern to the
+/// video's speech pattern, via a binned cross-correlation over candidate scales.
+fn best_alignment(
+    video_speech: &[(f64, f64)],
+    sub_cues: &[(f64, f64)],
+    duration: f64,
+) -> (f64, f64, f64) {
+    let n = ((duration / SYNC_BIN).ceil() as usize).max(1);
+    let vid = sync_signal(video_speech, n, 1.0);
+    let vid_sum: f64 = vid.iter().map(|&x| x as f64).sum();
+    let max_off = (120.0 / SYNC_BIN) as isize; // search +/- 120 s
+    let mut best = (1.0f64, 0.0f64, -1.0f64);
+    for &scale in SYNC_SCALES.iter() {
+        let sub = sync_signal(sub_cues, n, scale);
+        let sub_sum: f64 = sub.iter().map(|&x| x as f64).sum();
+        if sub_sum < 1.0 {
+            continue;
+        }
+        for off in -max_off..=max_off {
+            let (lo, hi) = if off >= 0 {
+                (off as usize, n)
+            } else {
+                (0usize, (n as isize + off).max(0) as usize)
+            };
+            let mut inter = 0f64;
+            for i in lo..hi {
+                let j = (i as isize - off) as usize;
+                inter += (vid[i] & sub[j]) as f64;
+            }
+            // Dice coefficient — rewards real overlap, not just large signals.
+            let score = 2.0 * inter / (vid_sum + sub_sum);
+            if score > best.2 {
+                best = (scale, off as f64 * SYNC_BIN, score);
+            }
+        }
+    }
+    best
+}
+
+fn synced_output_path(video: &str, suffix: &str) -> PathBuf {
+    let stem = Path::new(video)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "subtitles".to_string());
+    let name = format!("{stem}.{suffix}.srt");
+    Path::new(video)
+        .parent()
+        .map(|p| p.join(&name))
+        .unwrap_or_else(|| PathBuf::from(name))
+}
+
+/// Quick sync: no AI. Find the global offset + frame-rate scale that best lines
+/// the subtitle's cue pattern up with where the video actually has speech.
+#[tauri::command]
+pub(crate) async fn quick_sync_subtitle(
+    app: tauri::AppHandle,
+    srt_path: String,
+    video_path: String,
+) -> Result<SubtitleResult, String> {
+    if is_remote(&video_path) {
+        return Err("Subtitle sync needs a local video file".to_string());
+    }
+    let configured = crate::store::ui_state_store::load_setting_value(&app, FFMPEG_PATH_SETTING)
+        .ok()
+        .flatten();
+    tauri::async_runtime::spawn_blocking(move || {
+        let ffmpeg = crate::mpv::find_ffmpeg(configured.as_deref())
+            .ok_or_else(|| "Subtitle sync needs ffmpeg (Settings → Advanced).".to_string())?;
+        let duration = crate::mpv::probe_duration(&video_path).unwrap_or(0.0);
+        if duration <= 0.0 {
+            return Err("Could not read the video's duration".to_string());
+        }
+        let content = std::fs::read_to_string(&srt_path)
+            .map_err(|e| format!("Couldn't read the subtitle file: {e}"))?;
+        let mut segments = parse_srt(&content);
+        if segments.is_empty() {
+            return Err("No subtitles found in that file".to_string());
+        }
+
+        emit_progress(&app, "transcribe", 0, 1);
+        let speech = detect_speech_intervals(&ffmpeg, &video_path, 0.0, duration);
+        if speech.is_empty() {
+            return Err("No speech detected in the video to sync against".to_string());
+        }
+        let cues: Vec<(f64, f64)> = segments.iter().map(|s| (s.start, s.end)).collect();
+        let (scale, offset, score) = best_alignment(&speech, &cues, duration);
+        if score < 0.15 {
+            return Err(
+                "Couldn't confidently line these subtitles up with the audio — the file may be for a very different cut. Try Smart sync.".to_string(),
+            );
+        }
+        for seg in segments.iter_mut() {
+            seg.start = (seg.start * scale + offset).max(0.0);
+            seg.end = (seg.end * scale + offset).max(seg.start + 0.2);
+        }
+        segments.retain(|s| s.start < duration + 1.0);
+        segments.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap_or(std::cmp::Ordering::Equal));
+
+        let out_path = synced_output_path(&video_path, "synced");
+        std::fs::write(&out_path, build_srt(&segments))
+            .map_err(|e| format!("Failed to write subtitles: {e}"))?;
+        emit_progress(&app, "done", 1, 1);
+        let file_name = out_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        Ok(SubtitleResult {
+            srt_path: out_path.to_string_lossy().to_string(),
+            file_name,
+            line_count: segments.len(),
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+// --- Smart sync: content-aware alignment --------------------------------------
+
+/// Bundle of everything needed to transcribe (and translate) a region.
+struct SyncEngine {
+    engine: String,
+    transcribe_base: String,
+    transcribe_key: String,
+    transcribe_model: String,
+    source_language: Option<String>,
+    sub_language: String,
+    chat_base: Option<String>,
+    chat_key: Option<String>,
+    chat_model: Option<String>,
+    whisper_exe: Option<String>,
+    whisper_model: Option<String>,
+}
+
+/// Word set of a line, lower-cased and stripped to alphanumerics, for fuzzy
+/// cross-translation matching.
+fn word_set(text: &str) -> std::collections::HashSet<String> {
+    text.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.len() > 1)
+        .map(|w| w.to_string())
+        .collect()
+}
+
+/// Translate lines to the subtitle language (Sarvam's own translator, else chat).
+fn translate_texts(cfg: &SyncEngine, client: &reqwest::blocking::Client, texts: &[String]) -> Vec<String> {
+    if texts.is_empty() {
+        return vec![];
+    }
+    let sarvam_target = if cfg.engine == "sarvam" {
+        sarvam_language_code(Some(&cfg.sub_language))
+    } else {
+        None
+    };
+    if let Some(tgt) = sarvam_target {
+        let src = sarvam_language_code(cfg.source_language.as_deref())
+            .unwrap_or_else(|| "auto".to_string());
+        return translate_batch_sarvam(client, &cfg.transcribe_base, &cfg.transcribe_key, &src, &tgt, texts);
+    }
+    let base = cfg.chat_base.clone().unwrap_or_default();
+    let key = cfg.chat_key.clone().unwrap_or_default();
+    let model = cfg.chat_model.clone().unwrap_or_default();
+    if base.is_empty() || key.is_empty() {
+        return texts.to_vec();
+    }
+    let url = format!("{}/chat/completions", api_root(&base));
+    translate_batch(client, &url, &key, &model, &cfg.sub_language, texts)
+}
+
+/// Transcribe [start, start+dur] of the video and return segments in the
+/// subtitle language, absolutely timed.
+fn transcribe_region(
+    cfg: &SyncEngine,
+    app: &tauri::AppHandle,
+    client: &reqwest::blocking::Client,
+    ffmpeg: &Path,
+    video: &str,
+    start: f64,
+    dur: f64,
+    work: &Path,
+) -> Result<Vec<Segment>, String> {
+    let is_gemini = cfg.engine == "gemini";
+    let is_sarvam = cfg.engine == "sarvam";
+    let is_whisper = cfg.engine == "whisper";
+    let target_is_english = cfg.sub_language.eq_ignore_ascii_case("en");
+
+    if is_whisper {
+        let mut segs = run_whisper(
+            app,
+            ffmpeg,
+            cfg.whisper_exe.as_deref().unwrap_or(""),
+            cfg.whisper_model.as_deref().unwrap_or(""),
+            video,
+            start,
+            start + dur,
+            cfg.source_language.as_deref(),
+            target_is_english,
+            work,
+        )?;
+        if !target_is_english {
+            let texts: Vec<String> = segs.iter().map(|s| s.text.clone()).collect();
+            for (i, t) in translate_texts(cfg, client, &texts).into_iter().enumerate() {
+                if let Some(s) = segs.get_mut(i) {
+                    s.text = t;
+                }
+            }
+        }
+        return Ok(segs);
+    }
+
+    let ext = if is_gemini { "flac" } else { "m4a" };
+    let clip = work.join(format!("sync_{}.{ext}", (start * 1000.0) as i64));
+    extract_chunk(ffmpeg, video, start, dur, &clip)?;
+    let mut local: Vec<Segment> = if is_gemini {
+        transcribe_chunk_gemini(
+            client,
+            &cfg.transcribe_base,
+            &cfg.transcribe_key,
+            &cfg.transcribe_model,
+            &clip,
+            cfg.source_language.as_deref(),
+            Some(&cfg.sub_language),
+            dur,
+        )?
+    } else if is_sarvam {
+        let window = detect_speech_window(ffmpeg, &clip, dur);
+        let sarvam_lang = sarvam_language_code(cfg.source_language.as_deref());
+        transcribe_chunk_sarvam(
+            client,
+            &cfg.transcribe_base,
+            &cfg.transcribe_key,
+            &cfg.transcribe_model,
+            "transcribe",
+            sarvam_lang.as_deref(),
+            &clip,
+            window,
+        )?
+    } else {
+        let url = format!("{}/audio/transcriptions", api_root(&cfg.transcribe_base));
+        transcribe_chunk(
+            client,
+            &url,
+            &cfg.transcribe_key,
+            &cfg.transcribe_model,
+            &clip,
+            cfg.source_language.as_deref(),
+        )?
+    };
+    let _ = std::fs::remove_file(&clip);
+    // Gemini already returned the target language; others may need translation.
+    if !is_gemini {
+        let src_is_target = cfg
+            .source_language
+            .as_deref()
+            .map(|l| l.eq_ignore_ascii_case(&cfg.sub_language))
+            .unwrap_or(false);
+        if !src_is_target {
+            let texts: Vec<String> = local.iter().map(|s| s.text.clone()).collect();
+            for (i, t) in translate_texts(cfg, client, &texts).into_iter().enumerate() {
+                if let Some(s) = local.get_mut(i) {
+                    s.text = t;
+                }
+            }
+        }
+    }
+    for s in local.iter_mut() {
+        s.start += start;
+        s.end += start;
+    }
+    Ok(local)
+}
+
+/// Transcribe the whole video into a dense, precisely-timed reference in the
+/// subtitle language. This is the "ground-truth clock" the original subtitle is
+/// aligned against.
+fn build_reference(
+    cfg: &SyncEngine,
+    app: &tauri::AppHandle,
+    client: &reqwest::blocking::Client,
+    ffmpeg: &Path,
+    video: &str,
+    duration: f64,
+    work: &Path,
+) -> Vec<Segment> {
+    let chunk_secs = match cfg.engine.as_str() {
+        "sarvam" => 28.0,
+        "gemini" => 60.0,
+        "whisper" => duration.max(1.0), // one whisper run over the whole film
+        _ => CHUNK_SECS,
+    };
+    let silence = if cfg.engine == "sarvam" || cfg.engine == "gemini" {
+        detect_silence_points(ffmpeg, video, 0.0, duration)
+    } else {
+        Vec::new()
+    };
+    let ranges = build_chunk_ranges(0.0, duration, chunk_secs, &silence);
+    let total = ranges.len().max(1);
+    let mut reference: Vec<Segment> = Vec::new();
+    for (i, &(a, b)) in ranges.iter().enumerate() {
+        if cancelled() {
+            break;
+        }
+        emit_progress(app, "transcribe", i, total);
+        if let Ok(mut segs) = transcribe_region(cfg, app, client, ffmpeg, video, a, b - a, work) {
+            reference.append(&mut segs);
+        }
+    }
+    reference.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap_or(std::cmp::Ordering::Equal));
+    reference
+}
+
+/// Align the original subtitle lines to the reference by text (Needleman-Wunsch),
+/// then rebuild: matched lines keep their (human) text at the reference's precise
+/// time; short unmatched runs are interpolated (an ASR miss, not a cut); long
+/// unmatched runs are dropped (a cut scene); reference lines with no match are
+/// AI-filled (an added scene). De-duplicates near-identical fills.
+fn align_subs(orig: &[Segment], reference: &[Segment]) -> Vec<Segment> {
+    let n = orig.len();
+    let m = reference.len();
+    if m == 0 || n == 0 {
+        return orig.to_vec();
+    }
+    let ow: Vec<std::collections::HashSet<String>> =
+        orig.iter().map(|s| word_set(&s.text)).collect();
+    let rw: Vec<std::collections::HashSet<String>> =
+        reference.iter().map(|s| word_set(&s.text)).collect();
+    let sim = |i: usize, j: usize| -> f64 {
+        let (a, b) = (&ow[i], &rw[j]);
+        if a.is_empty() || b.is_empty() {
+            return 0.0;
+        }
+        let inter = a.intersection(b).count() as f64;
+        2.0 * inter / (a.len() as f64 + b.len() as f64)
+    };
+    const TH: f64 = 0.34; // min similarity to call it a match
+    const GAP: f64 = 0.12; // penalty for skipping a line on either side
+    const NEG: f64 = -1.0e6;
+
+    let mut dp = vec![vec![0f64; m + 1]; n + 1];
+    let mut bt = vec![vec![0u8; m + 1]; n + 1]; // 1=match, 2=skip orig, 3=skip ref
+    for i in 1..=n {
+        dp[i][0] = -(i as f64) * GAP;
+        bt[i][0] = 2;
+    }
+    for j in 1..=m {
+        dp[0][j] = -(j as f64) * GAP;
+        bt[0][j] = 3;
+    }
+    for i in 1..=n {
+        for j in 1..=m {
+            let s = sim(i - 1, j - 1);
+            let m_score = if s >= TH { dp[i - 1][j - 1] + s } else { NEG };
+            let up = dp[i - 1][j] - GAP;
+            let left = dp[i][j - 1] - GAP;
+            if m_score >= up && m_score >= left {
+                dp[i][j] = m_score;
+                bt[i][j] = 1;
+            } else if up >= left {
+                dp[i][j] = up;
+                bt[i][j] = 2;
+            } else {
+                dp[i][j] = left;
+                bt[i][j] = 3;
+            }
+        }
+    }
+
+    // Backtrack into forward-ordered ops.
+    enum Op {
+        Match(usize, usize),
+        DropO(usize),
+        FillR(usize),
+    }
+    let mut ops: Vec<Op> = Vec::new();
+    let (mut i, mut j) = (n, m);
+    while i > 0 || j > 0 {
+        match bt[i][j] {
+            1 => {
+                ops.push(Op::Match(i - 1, j - 1));
+                i -= 1;
+                j -= 1;
+            }
+            2 => {
+                ops.push(Op::DropO(i - 1));
+                i -= 1;
+            }
+            _ => {
+                ops.push(Op::FillR(j - 1));
+                j -= 1;
+            }
+        }
+    }
+    ops.reverse();
+
+    // Helper: map an original time onto the reference clock, given the last and
+    // next matched (orig_time -> ref_time) pairs.
+    let interp = |ot: f64, p: Option<(f64, f64)>, q: Option<(f64, f64)>| -> f64 {
+        match (p, q) {
+            (Some((o0, r0)), Some((o1, r1))) if (o1 - o0).abs() > 0.01 => {
+                r0 + (ot - o0) / (o1 - o0) * (r1 - r0)
+            }
+            (Some((o0, r0)), _) => ot + (r0 - o0),
+            (_, Some((o1, r1))) => ot + (r1 - o1),
+            _ => ot,
+        }
+    };
+
+    // Each output line is tagged with whether it's an AI fill (true) or your
+    // original text (false).
+    let mut out: Vec<(Segment, bool)> = Vec::new();
+    let push_line = |out: &mut Vec<(Segment, bool)>, start: f64, end: f64, text: &str, fill: bool| {
+        let text = text.trim();
+        if text.is_empty() {
+            return;
+        }
+        // Skip a line that just repeats its neighbour (different line splitting).
+        if let Some((prev, _)) = out.last() {
+            let a = word_set(&prev.text);
+            let b = word_set(text);
+            if !a.is_empty() && !b.is_empty() {
+                let inter = a.intersection(&b).count() as f64;
+                if 2.0 * inter / (a.len() as f64 + b.len() as f64) > 0.6 {
+                    return;
+                }
+            }
+        }
+        out.push((
+            Segment {
+                start: start.max(0.0),
+                end: end.max(start + 0.3),
+                text: text.to_string(),
+            },
+            fill,
+        ));
+    };
+
+    let mut pending_drop: Vec<usize> = Vec::new(); // buffered orig-only run
+    let mut last_match: Option<(f64, f64)> = None; // (orig_time, ref_time)
+
+    let flush_drops = |out: &mut Vec<(Segment, bool)>,
+                       run: &mut Vec<usize>,
+                       prev: Option<(f64, f64)>,
+                       next: Option<(f64, f64)>| {
+        if run.is_empty() {
+            return;
+        }
+        // A short unmatched run between matches is likely an ASR miss → keep,
+        // interpolated. A long run is a cut scene → drop.
+        if run.len() < 4 {
+            for &oi in run.iter() {
+                let s = interp(orig[oi].start, prev, next);
+                let e = interp(orig[oi].end, prev, next);
+                push_line(out, s, e, &orig[oi].text, false);
+            }
+        }
+        run.clear();
+    };
+
+    for op in ops.iter() {
+        match *op {
+            Op::Match(oi, rj) => {
+                flush_drops(&mut out, &mut pending_drop, last_match, Some((orig[oi].start, reference[rj].start)));
+                push_line(&mut out, reference[rj].start, reference[rj].end, &orig[oi].text, false);
+                last_match = Some((orig[oi].start, reference[rj].start));
+            }
+            Op::DropO(oi) => pending_drop.push(oi),
+            Op::FillR(rj) => {
+                flush_drops(&mut out, &mut pending_drop, last_match, None);
+                push_line(&mut out, reference[rj].start, reference[rj].end, &reference[rj].text, true);
+            }
+        }
+    }
+    flush_drops(&mut out, &mut pending_drop, last_match, None);
+
+    out.sort_by(|a, b| a.0.start.partial_cmp(&b.0.start).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Never show two cues at once. When a human line and an AI fill collide on the
+    // same moment (the same dialogue in two translations), keep the human one;
+    // otherwise clip the earlier cue so they play back-to-back.
+    let mut resolved: Vec<(Segment, bool)> = Vec::new();
+    for (seg, fill) in out.into_iter() {
+        if let Some((last, last_fill)) = resolved.last_mut() {
+            if seg.start < last.end - 0.15 {
+                let overlap = (last.end.min(seg.end) - seg.start).max(0.0);
+                let shorter = (seg.end - seg.start).min(last.end - last.start).max(0.1);
+                let strong = overlap / shorter > 0.4;
+                if strong && fill != *last_fill {
+                    if fill {
+                        continue; // drop the AI fill, keep the human line
+                    }
+                    *last = seg; // replace an AI line with the human one
+                    *last_fill = false;
+                    continue;
+                }
+                last.end = (seg.start - 0.05).max(last.start + 0.3);
+            }
+        }
+        resolved.push((seg, fill));
+    }
+
+    resolved.into_iter().map(|(s, _)| s).collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub(crate) async fn smart_sync_subtitle(
+    app: tauri::AppHandle,
+    srt_path: String,
+    video_path: String,
+    engine: Option<String>,
+    transcribe_base: String,
+    transcribe_key: String,
+    transcribe_model: String,
+    source_language: Option<String>,
+    sub_language: Option<String>,
+    chat_base: Option<String>,
+    chat_key: Option<String>,
+    chat_model: Option<String>,
+    whisper_exe: Option<String>,
+    whisper_model: Option<String>,
+) -> Result<SubtitleResult, String> {
+    if is_remote(&video_path) {
+        return Err("Subtitle sync needs a local video file".to_string());
+    }
+    let configured = crate::store::ui_state_store::load_setting_value(&app, FFMPEG_PATH_SETTING)
+        .ok()
+        .flatten();
+    CANCEL.store(false, Ordering::SeqCst);
+    let app_handle = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let ffmpeg = crate::mpv::find_ffmpeg(configured.as_deref())
+            .ok_or_else(|| "Subtitle sync needs ffmpeg (Settings → Advanced).".to_string())?;
+        let duration = crate::mpv::probe_duration(&video_path).unwrap_or(0.0);
+        if duration <= 0.0 {
+            return Err("Could not read the video's duration".to_string());
+        }
+        let content = std::fs::read_to_string(&srt_path)
+            .map_err(|e| format!("Couldn't read the subtitle file: {e}"))?;
+        let mut subs = parse_srt(&content);
+        if subs.is_empty() {
+            return Err("No subtitles found in that file".to_string());
+        }
+        subs.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap_or(std::cmp::Ordering::Equal));
+
+        let work = app_handle
+            .path()
+            .app_cache_dir()
+            .map_err(|e| e.to_string())?
+            .join("ai_subtitles_work");
+        let _ = std::fs::remove_dir_all(&work);
+        std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
+
+        let cfg = SyncEngine {
+            engine: engine.clone().unwrap_or_else(|| "gemini".to_string()),
+            transcribe_base,
+            transcribe_key,
+            transcribe_model,
+            source_language,
+            sub_language: sub_language
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| "en".to_string()),
+            chat_base,
+            chat_key,
+            chat_model,
+            whisper_exe,
+            whisper_model,
+        };
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
+            .build()
+            .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
+
+        // Transcribe the whole video into a dense, precisely-timed reference…
+        let reference = build_reference(&cfg, &app_handle, &client, &ffmpeg, &video_path, duration, &work);
+        if cancelled() {
+            let _ = std::fs::remove_dir_all(&work);
+            return Err("Cancelled".to_string());
+        }
+
+        if reference.len() < 5 {
+            // Reference too sparse to align against — fall back to a global fit.
+            let speech = detect_speech_intervals(&ffmpeg, &video_path, 0.0, duration);
+            let cues: Vec<(f64, f64)> = subs.iter().map(|s| (s.start, s.end)).collect();
+            let (scale, offset, score) = best_alignment(&speech, &cues, duration);
+            if score < 0.15 {
+                let _ = std::fs::remove_dir_all(&work);
+                return Err(
+                    "Couldn't transcribe enough of the video to sync against — check the AI engine/key and languages.".to_string(),
+                );
+            }
+            for s in subs.iter_mut() {
+                s.start = (s.start * scale + offset).max(0.0);
+                s.end = (s.end * scale + offset).max(s.start + 0.2);
+            }
+        } else {
+            // …then align the original subtitle line-by-line onto it.
+            subs = align_subs(&subs, &reference);
+        }
+
+        subs.retain(|s| !s.text.trim().is_empty() && s.start < duration + 1.0);
+        subs.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap_or(std::cmp::Ordering::Equal));
+        if subs.is_empty() {
+            let _ = std::fs::remove_dir_all(&work);
+            return Err("Nothing left after syncing — the match was too poor".to_string());
+        }
+
+        let out_path = synced_output_path(&video_path, "synced");
+        std::fs::write(&out_path, build_srt(&subs))
+            .map_err(|e| format!("Failed to write subtitles: {e}"))?;
+        let _ = std::fs::remove_dir_all(&work);
+        emit_progress(&app_handle, "done", 1, 1);
+        let file_name = out_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        Ok(SubtitleResult {
+            srt_path: out_path.to_string_lossy().to_string(),
+            file_name,
+            line_count: subs.len(),
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    result
+}
+
 fn is_remote(path: &str) -> bool {
     let l = path.to_ascii_lowercase();
     l.starts_with("http://")

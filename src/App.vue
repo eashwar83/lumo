@@ -27,6 +27,7 @@ import MergeDialog from "./components/MergeDialog.vue";
 import SplitDialog from "./components/SplitDialog.vue";
 import SubtitleAiDialog from "./components/SubtitleAiDialog.vue";
 import SubtitleTranslateDialog from "./components/SubtitleTranslateDialog.vue";
+import SubtitleSyncDialog from "./components/SubtitleSyncDialog.vue";
 import WindowResizeRegions from "./components/WindowResizeRegions.vue";
 import { usePlaybackShortcuts } from "./composables/usePlaybackShortcuts";
 import { useUltraSlomo } from "./composables/useUltraSlomo";
@@ -1239,6 +1240,15 @@ const subtitleTranslateOpen = ref(false);
 const onTranslateAiSubtitles = () => {
     subtitleTranslateOpen.value = true;
 };
+// AI subtitle sync modal (re-time an existing .srt to this video).
+const subtitleSyncOpen = ref(false);
+const onSyncAiSubtitles = () => {
+    if (!isLocalMediaPath.value) {
+        showMessageOverlay("Subtitle sync needs a local video file", 3000);
+        return;
+    }
+    subtitleSyncOpen.value = true;
+};
 const onAiSubtitlesLoaded = async (payload: {
     path: string;
     lineCount: number;
@@ -1914,6 +1924,7 @@ const { menus: appMenus } = useAppMenu({
     },
     generateAiSubtitles: onGenerateAiSubtitles,
     translateAiSubtitles: onTranslateAiSubtitles,
+    syncAiSubtitles: onSyncAiSubtitles,
     toggleSubtitleVisibility: () => void toggleSubtitleVisibility(),
     setDualSubEnabled: (enabled) => void tracks.setDualSubEnabled(enabled),
     adjustSubtitleDelay: (delta) => void adjustSubtitleDelay(delta),
@@ -1976,6 +1987,10 @@ const closeTopOverlay = (): boolean => {
     }
     if (subtitleTranslateOpen.value) {
         subtitleTranslateOpen.value = false;
+        return true;
+    }
+    if (subtitleSyncOpen.value) {
+        subtitleSyncOpen.value = false;
         return true;
     }
     if (aiPromptOpen.value) {
@@ -2361,6 +2376,14 @@ useAppStartupBindings({
         <SubtitleTranslateDialog
             :open="subtitleTranslateOpen"
             @close="subtitleTranslateOpen = false"
+            @notify="(msg: string) => showMessageOverlay(msg, 4000)"
+            @loaded="onAiSubtitlesLoaded"
+        />
+
+        <SubtitleSyncDialog
+            :open="subtitleSyncOpen"
+            :path="player.state.media.url"
+            @close="subtitleSyncOpen = false"
             @notify="(msg: string) => showMessageOverlay(msg, 4000)"
             @loaded="onAiSubtitlesLoaded"
         />

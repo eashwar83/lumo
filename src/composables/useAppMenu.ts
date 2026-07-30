@@ -125,6 +125,7 @@ export type AppMenuOptions = {
     findOnlineSubtitles: () => void;
     generateAiSubtitles: () => void;
     translateAiSubtitles: () => void;
+    syncAiSubtitles: () => void;
     toggleSubtitleVisibility: () => void;
     setDualSubEnabled: (enabled: boolean) => void;
     adjustSubtitleDelay: (delta: number) => void;
@@ -964,6 +965,12 @@ export const useAppMenu = (options: AppMenuOptions) => {
                 kind: "action",
                 label: "Translate Subtitles (AI)…",
                 run: options.translateAiSubtitles,
+            },
+            {
+                kind: "action",
+                label: "Sync Subtitles (AI)…",
+                disabled: !options.isLocalMedia() || !options.clipExportAvailable(),
+                run: options.syncAiSubtitles,
             },
             sep,
             {
