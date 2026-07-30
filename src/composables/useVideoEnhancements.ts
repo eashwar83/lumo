@@ -69,6 +69,7 @@ export type StoredVideoEnhancements = {
     sharpenRadius?: number;
     aiUpscale?: AiUpscaleMode;
     denoise?: boolean;
+    deblock?: boolean;
     deinterlace?: boolean;
     exposure?: number;
     temperature?: number;
@@ -88,6 +89,8 @@ export type VideoEnhancementsState = {
     /** Unsharp matrix size in px (odd, 3..15). */
     sharpenRadius: number;
     denoise: boolean;
+    /** Remove blocking/compression artefacts (ffmpeg `deblock`). */
+    deblock: boolean;
     deinterlace: boolean;
     aiUpscale: AiUpscaleMode;
     exposure: number;
@@ -137,6 +140,7 @@ const QUALITY_PRESETS: Record<QualityPreset, Record<string, string>> = {
 };
 
 const DENOISE_LABEL = "lumo-denoise";
+const DEBLOCK_LABEL = "lumo-deblock";
 
 const DEFAULT_STATE: VideoEnhancementsState = {
     qualityPreset: "balanced",
@@ -144,6 +148,7 @@ const DEFAULT_STATE: VideoEnhancementsState = {
     sharpenAmount: 0,
     sharpenRadius: 5,
     denoise: false,
+    deblock: false,
     deinterlace: false,
     aiUpscale: "off",
     exposure: 0,
@@ -177,6 +182,7 @@ type LookState = {
     sharpenAmount: number;
     sharpenRadius: number;
     denoise: boolean;
+    deblock: boolean;
     deinterlace: boolean;
     exposure: number;
     temperature: number;
@@ -191,6 +197,7 @@ const DEFAULT_LOOK: LookState = {
     sharpenAmount: 0,
     sharpenRadius: 5,
     denoise: false,
+    deblock: false,
     deinterlace: false,
     exposure: 0,
     temperature: 0,
@@ -232,6 +239,7 @@ export const useVideoEnhancements = (options: VideoEnhancementsOptions = {}) => 
         sharpenAmount: state.sharpenAmount,
         sharpenRadius: state.sharpenRadius,
         denoise: state.denoise,
+        deblock: state.deblock,
         deinterlace: state.deinterlace,
         exposure: state.exposure,
         temperature: state.temperature,
@@ -246,6 +254,7 @@ export const useVideoEnhancements = (options: VideoEnhancementsOptions = {}) => 
         state.sharpenAmount = look.sharpenAmount;
         state.sharpenRadius = look.sharpenRadius;
         state.denoise = look.denoise;
+        state.deblock = look.deblock;
         state.deinterlace = look.deinterlace;
         state.exposure = look.exposure;
         state.temperature = look.temperature;
@@ -456,7 +465,8 @@ export const useVideoEnhancements = (options: VideoEnhancementsOptions = {}) => 
     // such filters, so either one forces hwdec copy-back. Sharpening is a GPU
     // shader and stays fully hardware-decoded.
     const syncHwdec = async () => {
-        const needsSoftwareFrames = state.denoise || state.deinterlace;
+        const needsSoftwareFrames =
+            state.denoise || state.deblock || state.deinterlace;
         const want = needsSoftwareFrames ? "auto-copy" : "auto";
         if (want === lastHwdec) return;
         await runCommand(["set", "hwdec", want]);
@@ -465,9 +475,18 @@ export const useVideoEnhancements = (options: VideoEnhancementsOptions = {}) => 
 
     // hwdec must be switched to a copy mode BEFORE inserting the lavfi filter —
     // it won't attach under non-copy hardware decoding (silently no-ops).
+    // Deblock runs first (clean the block edges), then denoise.
     const rebuildVideoFilters = async () => {
+        await runCommand(["vf", "remove", `@${DEBLOCK_LABEL}`]);
         await runCommand(["vf", "remove", `@${DENOISE_LABEL}`]);
         await syncHwdec();
+        if (state.deblock) {
+            await runCommand([
+                "vf",
+                "add",
+                `@${DEBLOCK_LABEL}:lavfi=[deblock=filter=strong:block=8]`,
+            ]);
+        }
         if (state.denoise) {
             await runCommand(["vf", "add", `@${DENOISE_LABEL}:hqdn3d`]);
         }
@@ -512,12 +531,13 @@ export const useVideoEnhancements = (options: VideoEnhancementsOptions = {}) => 
     };
 
     // One-click treatment for old, heavily compressed SD transfers: the visible
-    // damage there is banding and blocking, not softness, so debanding leads,
-    // denoise cleans the mosquito noise, a gentle unsharp restores some edge
-    // definition without amplifying the artefacts, and a little grain masks
-    // whatever smoothing left behind.
+    // damage there is banding and blocking, not softness — so debanding and
+    // deblocking lead, denoise cleans the mosquito noise, a gentle unsharp
+    // restores some edge definition without amplifying the artefacts, and a
+    // little grain masks whatever smoothing left behind.
     const applyOldFilmRestore = async () => {
         state.deband = "strong";
+        state.deblock = true;
         state.denoise = true;
         state.sharpenAmount = 25;
         state.sharpenRadius = 3;
@@ -548,6 +568,13 @@ export const useVideoEnhancements = (options: VideoEnhancementsOptions = {}) => 
         await rebuildVideoFilters();
         persistLook();
         onMessage?.(`Denoise ${enabled ? "on" : "off"}`);
+    };
+
+    const setDeblock = async (enabled: boolean) => {
+        state.deblock = enabled;
+        await rebuildVideoFilters();
+        persistLook();
+        onMessage?.(`Deblock ${enabled ? "on" : "off"}`);
     };
 
     const setDeinterlace = async (enabled: boolean) => {
@@ -677,6 +704,7 @@ export const useVideoEnhancements = (options: VideoEnhancementsOptions = {}) => 
                 ? normalizeRadius(stored.sharpenRadius)
                 : DEFAULT_LOOK.sharpenRadius,
         denoise: stored.denoise === true,
+        deblock: stored.deblock === true,
         deinterlace: stored.deinterlace === true,
         exposure: clamp(Math.round(stored.exposure ?? 0), -100, 100),
         temperature: clamp(Math.round(stored.temperature ?? 0), -100, 100),
@@ -759,6 +787,7 @@ export const useVideoEnhancements = (options: VideoEnhancementsOptions = {}) => 
         setSharpenAmount,
         setSharpenRadius,
         setDenoise,
+        setDeblock,
         setDeinterlace,
         setAiUpscale,
         setColorGrade,

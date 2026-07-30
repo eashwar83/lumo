@@ -44,6 +44,7 @@ type Snapshot = {
     sharpenAmount: number;
     sharpenRadius: number;
     denoise: boolean;
+    deblock: boolean;
     deinterlace: boolean;
     exposure: number;
     temperature: number;
@@ -143,6 +144,7 @@ export const useEnhancementHistory = (options: UseEnhancementHistoryOptions) => 
             sharpenAmount: s.sharpenAmount,
             sharpenRadius: s.sharpenRadius,
             denoise: s.denoise,
+            deblock: s.deblock,
             deinterlace: s.deinterlace,
             exposure: s.exposure,
             temperature: s.temperature,
@@ -190,6 +192,7 @@ export const useEnhancementHistory = (options: UseEnhancementHistoryOptions) => 
             enhancements.setSharpenAmount(snap.sharpenAmount);
             enhancements.setSharpenRadius(snap.sharpenRadius);
             await enhancements.setDenoise(snap.denoise);
+            await enhancements.setDeblock(snap.deblock);
             await enhancements.setDeinterlace(snap.deinterlace);
             enhancements.setColorGrade("exposure", snap.exposure);
             enhancements.setColorGrade("temperature", snap.temperature);
