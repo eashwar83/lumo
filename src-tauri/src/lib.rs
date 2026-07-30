@@ -463,6 +463,7 @@ pub fn run() {
             ai_enhance::ai_curve_correction,
             ai_enhance::ai_reference_thumbnail,
             ai_enhance::ai_list_models,
+            ai_enhance::describe_clip,
             ai_subtitles::ai_subtitles_available,
             ai_subtitles::generate_ai_subtitles,
             ai_subtitles::cancel_ai_subtitles,

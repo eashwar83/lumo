@@ -49,6 +49,7 @@ export type AppMenuOptions = {
     aspectLabel: () => string;
     hasAbRange: () => boolean;
     clipExportAvailable: () => boolean;
+    describeClip: () => void;
     /** Formatted accelerator for a rebindable action. */
     keyFor: (id: ShortcutActionId) => string | undefined;
 
@@ -859,6 +860,12 @@ export const useAppMenu = (options: AppMenuOptions) => {
                 label: "Old Film Restore",
                 disabled: !loaded,
                 run: () => void enh.applyOldFilmRestore(),
+            },
+            {
+                kind: "action",
+                label: "Describe A–B Clip (AI)…",
+                disabled: !options.isLocalMedia() || !options.hasAbRange(),
+                run: options.describeClip,
             },
             {
                 kind: "action",

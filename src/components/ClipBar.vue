@@ -22,6 +22,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
     (e: "export", payload: { asGif: boolean; gifWidth: number }): void;
+    (e: "describe"): void;
 }>();
 
 const showSaveMenu = ref(false);
@@ -131,6 +132,16 @@ const onClearMarkers = () => {
                     @click="emit('export', { asGif: false, gifWidth: 0 })"
                 >
                     {{ props.exporting ? "Exporting…" : "Export clip" }}
+                </button>
+
+                <button
+                    class="clipbar__btn"
+                    type="button"
+                    :disabled="!props.canExport"
+                    title="Describe this clip with AI"
+                    @click="emit('describe')"
+                >
+                    Describe (AI)
                 </button>
 
                 <div class="clipbar__gif">

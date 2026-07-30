@@ -16,6 +16,7 @@ use image::ImageEncoder;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::path::Path;
+use tauri::Manager;
 use std::time::Duration;
 
 const FRAME_COUNT: u32 = 9;
@@ -41,6 +42,13 @@ a gentle, tasteful colour correction that makes it look its best: fix exposure, 
 contrast, colour casts and dull colour while keeping skin tones natural and \
 avoiding clipping or over-saturation. Subtle corrections look best. Respond with \
 ONLY a JSON object — no prose, no markdown fences.";
+
+const DESCRIBE_SYSTEM: &str = "You are a film scene analyst. You are given a few \
+frames sampled in order from one short clip of a film, and sometimes the dialogue \
+spoken during it. Describe what happens in the clip: the setting, who is present, \
+their actions and apparent emotions, and how the moment develops. Be concise \
+(3–6 sentences), concrete and grounded — do not invent details you cannot see, \
+and do not mention frames, images, or that you are an AI.";
 
 const USER_PROMPT: &str = "Return a JSON object with exactly these keys:\n\
 - \"rgb\", \"r\", \"g\", \"b\": each an array of 2 to 5 control points, where each \
@@ -511,6 +519,122 @@ model (e.g. one with 'vl' or 'vision' in its name)."
             .take(200)
             .collect(),
     })
+}
+
+/// Describe a clip [start, end] of the video: sample frames across the range,
+/// send them (plus any dialogue) to the vision model, and return prose.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub(crate) async fn describe_clip(
+    app: tauri::AppHandle,
+    path: String,
+    start: f64,
+    end: f64,
+    provider: String,
+    api_key: String,
+    model: Option<String>,
+    base_url: Option<String>,
+    dialogue: Option<String>,
+) -> Result<String, String> {
+    if api_key.trim().is_empty() {
+        return Err("Set your AI API key in Settings → AI Enhance".to_string());
+    }
+    if !(end > start) {
+        return Err("Set an A–B range first (press K to mark start and end)".to_string());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = provider_config(&provider, model, base_url)?;
+        if cfg.default_model.is_empty() {
+            return Err("Set a model name in Settings → AI Enhance".to_string());
+        }
+
+        let work = app
+            .path()
+            .app_cache_dir()
+            .map_err(|e| e.to_string())?
+            .join("ai_describe_work");
+        let _ = std::fs::remove_dir_all(&work);
+        let span = (end - start).max(0.5);
+        // Aim for ~10 frames across the range (fps is an integer ≥ 1).
+        let fps = ((10.0 / span).round() as u32).clamp(1, 10);
+        crate::mpv::generate_range_frames(&path, &work, start, end, fps, FRAME_WIDTH)?;
+        let mut frames = collect_frames(&work);
+        let _ = std::fs::remove_dir_all(&work);
+        if frames.is_empty() {
+            return Err("Could not sample any frames from that range".to_string());
+        }
+        // Cap to a dozen evenly-spaced frames to keep the request light.
+        if frames.len() > 12 {
+            let stepf = frames.len() as f64 / 12.0;
+            frames = (0..12)
+                .map(|i| frames[((i as f64) * stepf) as usize].clone())
+                .collect();
+        }
+
+        let user_prompt = match dialogue.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            Some(d) => format!(
+                "Dialogue spoken during this clip:\n{d}\n\nDescribe what happens in this clip."
+            ),
+            None => "Describe what happens in this clip.".to_string(),
+        };
+
+        let no_refs: Vec<String> = Vec::new();
+        let mut payload = if cfg.anthropic {
+            build_anthropic_request(&cfg.default_model, &user_prompt, &frames, &no_refs)
+        } else {
+            let strict_openai = cfg.base_url.contains("api.openai.com");
+            build_openai_request(&cfg.default_model, &user_prompt, &frames, &no_refs, strict_openai)
+        };
+        // Swap the colour-grading system prompt for the description one. Anthropic
+        // carries it top-level; OpenAI-shaped requests use the first message.
+        if cfg.anthropic {
+            payload["system"] = Value::from(DESCRIBE_SYSTEM);
+        } else if let Some(msgs) = payload.get_mut("messages").and_then(|m| m.as_array_mut()) {
+            if let Some(first) = msgs.first_mut() {
+                first["content"] = Value::from(DESCRIBE_SYSTEM);
+            }
+        }
+
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
+            .build()
+            .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
+        let (chat_url, _) = endpoints(&cfg.base_url, cfg.anthropic);
+        let mut req = client.post(&chat_url).json(&payload);
+        req = if cfg.anthropic {
+            req.header("x-api-key", &api_key)
+                .header("anthropic-version", "2023-06-01")
+        } else {
+            req.header("authorization", format!("Bearer {api_key}"))
+        };
+        let response = req.send().map_err(|e| format!("Request failed: {e}"))?;
+        let status = response.status();
+        let text = response.text().unwrap_or_default();
+        if !status.is_success() {
+            let detail = serde_json::from_str::<Value>(&text)
+                .ok()
+                .and_then(|v| {
+                    v.get("error")
+                        .and_then(|e| e.get("message").or(Some(e)))
+                        .map(|m| m.to_string())
+                })
+                .unwrap_or_else(|| text.chars().take(300).collect());
+            let hint = if status.as_u16() == 400 {
+                "  Tip: pick a vision model (name contains 'vl' or 'vision')."
+            } else {
+                ""
+            };
+            return Err(format!("{provider} error ({status}): {detail}{hint}"));
+        }
+        let body: Value =
+            serde_json::from_str(&text).map_err(|e| format!("Invalid response: {e}"))?;
+        extract_text(cfg.anthropic, &body)
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| "The model returned an empty description".to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Names that are clearly not chat/vision models — filtered out of the list.
