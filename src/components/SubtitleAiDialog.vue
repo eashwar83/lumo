@@ -110,7 +110,13 @@ const effectiveRange = computed<{ start: number; end: number } | null>(() => {
 
 const generating = ref(false);
 const statusText = ref("");
-const progress = ref<{ stage: string; done: number; total: number } | null>(null);
+const progress = ref<{
+    stage: string;
+    done: number;
+    total: number;
+    wait?: number;
+    quota?: string;
+} | null>(null);
 // The last successful run, so we can show where it saved and offer "Save a copy…".
 const savedResult = ref<{ srtPath: string; fileName: string; lineCount: number } | null>(
     null,
@@ -132,12 +138,22 @@ const progressLabel = computed(() => {
     if (p.stage === "translate") {
         return `Translating… batch ${p.done + 1}/${p.total}`;
     }
+    if (p.stage === "rate_wait") {
+        const quota = p.quota ? ` — ${p.quota}` : "";
+        return `Rate limit — resuming in ${p.wait ?? 0}s (${p.done}/${p.total} chunks done)${quota}`;
+    }
     if (p.stage === "done") return "Finishing…";
     return "Working…";
 });
 
 onMounted(async () => {
-    unlisten = await listen<{ stage: string; done: number; total: number }>(
+    unlisten = await listen<{
+        stage: string;
+        done: number;
+        total: number;
+        wait?: number;
+        quota?: string;
+    }>(
         "ai_subtitles_progress",
         (event) => {
             progress.value = event.payload;

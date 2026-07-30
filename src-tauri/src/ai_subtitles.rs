@@ -355,15 +355,35 @@ fn detect_speech_window(ffmpeg: &Path, clip: &Path, chunk_dur: f64) -> (f64, f64
 }
 
 fn provider_error(status: reqwest::StatusCode, text: &str) -> String {
-    let detail = serde_json::from_str::<Value>(text)
-        .ok()
+    let parsed = serde_json::from_str::<Value>(text).ok();
+    let detail = parsed
+        .as_ref()
         .and_then(|v| {
             v.get("error")
                 .and_then(|e| e.get("message").or(Some(e)))
                 .map(|m| m.to_string())
         })
         .unwrap_or_else(|| text.chars().take(200).collect());
-    format!("({status}): {detail}")
+    // Google quota errors name the exact quota (e.g. "...PerMinute...-FreeTier")
+    // in error.details[].violations[].quotaId — the message alone doesn't say
+    // which limit tripped, so surface it.
+    let quotas: Vec<String> = parsed
+        .as_ref()
+        .and_then(|v| v.get("error")?.get("details")?.as_array())
+        .map(|details| {
+            details
+                .iter()
+                .filter_map(|d| d.get("violations")?.as_array())
+                .flatten()
+                .filter_map(|viol| viol.get("quotaId")?.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    if quotas.is_empty() {
+        format!("({status}): {detail}")
+    } else {
+        format!("({status}): {detail} [quota: {}]", quotas.join(", "))
+    }
 }
 
 /// Transcribe one audio file to timestamped segments.
@@ -742,39 +762,78 @@ fn cache_dir_for(
 /// Run a transcription attempt, waiting out short per-minute rate limits and
 /// stopping (so a later re-run resumes from the cache) on the hourly audio cap.
 fn retry_transcription<F>(
+    app: &tauri::AppHandle,
     mut attempt_fn: F,
     chunk: usize,
     total: usize,
+    pace_secs: &mut u64,
 ) -> Result<Vec<Segment>, String>
 where
     F: FnMut() -> Result<Vec<Segment>, String>,
 {
+    // Pace requests once we've been rate-limited: a few seconds between chunks
+    // stays under a tight per-minute cap, which beats eating the provider's
+    // ~60s penalty wait every few chunks.
+    for _ in 0..*pace_secs {
+        if cancelled() {
+            return Err("Cancelled".to_string());
+        }
+        std::thread::sleep(Duration::from_secs(1));
+    }
     let mut attempt = 0;
     loop {
         match attempt_fn() {
-            Ok(segments) => return Ok(segments),
+            Ok(segments) => {
+                *pace_secs = pace_secs.saturating_sub(1);
+                return Ok(segments);
+            }
             Err(e) if e.starts_with("RATE_LIMIT|") => {
                 let secs = e
                     .split('|')
                     .nth(1)
                     .and_then(|s| s.parse::<f64>().ok())
                     .unwrap_or(3600.0);
-                if secs <= 45.0 && attempt < 4 {
+                // The provider's own reason, e.g. "[quota: ...PerMinute...]".
+                let quota = e
+                    .find("[quota:")
+                    .map(|i| e[i..].trim_end_matches(']').trim_start_matches("[quota:").trim().to_string())
+                    .unwrap_or_default();
+                if secs <= 180.0 && attempt < 6 {
+                    *pace_secs = (*pace_secs + 5).min(20);
                     let wait = (secs.max(1.0) + 1.0).ceil() as u64;
-                    for _ in 0..wait {
+                    for elapsed in 0..wait {
                         if cancelled() {
                             return Err("Cancelled".to_string());
                         }
+                        let _ = app.emit(
+                            "ai_subtitles_progress",
+                            json!({
+                                "stage": "rate_wait",
+                                "done": chunk,
+                                "total": total,
+                                "wait": wait - elapsed,
+                                "quota": quota,
+                            }),
+                        );
                         std::thread::sleep(Duration::from_secs(1));
                     }
+                    emit_progress(app, "transcribe", chunk, total);
                     attempt += 1;
                     continue;
                 }
                 let mins = (secs / 60.0).ceil().max(1.0) as i64;
+                // Quote the provider's own reason so the user can see WHICH
+                // quota tripped (free vs paid tier, per-minute vs per-day).
+                let detail = e.splitn(3, '|').nth(2).unwrap_or("").trim().to_string();
+                let detail = if detail.is_empty() {
+                    String::new()
+                } else {
+                    format!(" Provider says: {detail}")
+                };
                 return Err(format!(
-                    "Rate limit reached — {chunk}/{total} chunks done. The free tier \
-caps audio per hour; run Generate again in about {mins} min to resume from here \
-(finished parts are cached, so they won't re-count)."
+                    "Rate limit reached — {chunk}/{total} chunks done. Run Generate \
+again in about {mins} min to resume from here (finished parts are cached, so they \
+won't re-count).{detail}"
                 ));
             }
             Err(e) => return Err(e),
@@ -1368,6 +1427,7 @@ pub(crate) async fn generate_ai_subtitles(
         };
         let chunk_ranges = build_chunk_ranges(eff_start, eff_end, chunk_secs, &silence_points);
         let total_chunks = chunk_ranges.len().max(1);
+        let mut pace_secs: u64 = 0;
 
         for (chunk, &(start, chunk_end)) in chunk_ranges.iter().enumerate() {
             if cancelled() {
@@ -1399,6 +1459,7 @@ pub(crate) async fn generate_ai_subtitles(
                     (0.0, dur)
                 };
                 let segs = retry_transcription(
+                    &app_handle,
                     || {
                         if is_sarvam {
                             transcribe_chunk_sarvam(
@@ -1435,6 +1496,7 @@ pub(crate) async fn generate_ai_subtitles(
                     },
                     chunk,
                     total_chunks,
+                    &mut pace_secs,
                 )?;
                 let _ = std::fs::remove_file(&clip);
                 let _ =
