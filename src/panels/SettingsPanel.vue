@@ -4,6 +4,7 @@ import { useSettingsPanel } from "../composables/useSettingsPanel";
 import { getPathDisplayName } from "../utils/getPathDisplayName";
 import ShortcutSettings from "../components/ShortcutSettings.vue";
 import AiSettings from "../components/AiSettings.vue";
+import SubtitleAiSettings from "../components/SubtitleAiSettings.vue";
 import type { CommandDef } from "../types/commands";
 import type { CustomShortcutsController } from "../composables/useCustomShortcuts";
 import { THEME_SETTING_GROUP_TITLE } from "../constants/theme";
@@ -237,6 +238,7 @@ type Block =
     | { kind: "shader"; key: string }
     | { kind: "shortcuts"; key: string; group: SettingGroup }
     | { kind: "ai"; key: string; title: string }
+    | { kind: "subtitleAi"; key: string; title: string }
     | { kind: "about"; key: string };
 
 const activeBlocks = computed<Block[]>(() => {
@@ -311,6 +313,11 @@ const activeBlocks = computed<Block[]>(() => {
                 kind: "ai",
                 key: "adv-ai",
                 title: "AI Enhance (Cloud)",
+            });
+            blocks.push({
+                kind: "subtitleAi",
+                key: "adv-subtitle-ai",
+                title: "Subtitles (AI)",
             });
             const experiments = visibleOfTitle(EXPERIMENTS_GROUP_TITLE);
             if (experiments.length) {
@@ -1513,6 +1520,14 @@ onBeforeUnmount(() => {
                                         {{ block.title }}
                                     </div>
                                     <AiSettings />
+                                </template>
+
+                                <!-- Subtitles (AI) default engine -->
+                                <template v-else-if="block.kind === 'subtitleAi'">
+                                    <div class="settings-section__title">
+                                        {{ block.title }}
+                                    </div>
+                                    <SubtitleAiSettings />
                                 </template>
 
                                 <!-- About -->

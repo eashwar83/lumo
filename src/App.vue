@@ -1254,6 +1254,39 @@ const onAiSubtitlesLoaded = async (payload: {
     lineCount: number;
 }) => {
     try {
+        // Remove any external subtitle track already pointing at this file, so
+        // re-running (same output filename) doesn't pile up duplicate tracks.
+        const samePath = (a: string, b: string) =>
+            a.replace(/\\/g, "/").toLowerCase() ===
+            b.replace(/\\/g, "/").toLowerCase();
+        try {
+            const countRaw = await invoke<string | null>("mpv_get_property_string", {
+                name: "track-list/count",
+            });
+            const count = Number.parseInt(countRaw ?? "0", 10) || 0;
+            const staleIds: string[] = [];
+            for (let i = 0; i < count; i += 1) {
+                const type = await invoke<string | null>("mpv_get_property_string", {
+                    name: `track-list/${i}/type`,
+                });
+                if (type !== "sub") continue;
+                const fn = await invoke<string | null>("mpv_get_property_string", {
+                    name: `track-list/${i}/external-filename`,
+                });
+                if (fn && samePath(fn, payload.path)) {
+                    const id = await invoke<string | null>("mpv_get_property_string", {
+                        name: `track-list/${i}/id`,
+                    });
+                    if (id) staleIds.push(id);
+                }
+            }
+            for (const id of staleIds) {
+                await invoke("mpv_run_command", { args: ["sub-remove", id] });
+            }
+        } catch {
+            /* track-list probe is best-effort */
+        }
+
         await invoke("mpv_run_command", {
             args: ["sub-add", payload.path, "select", "AI Subtitles"],
         });
