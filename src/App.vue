@@ -2570,7 +2570,12 @@ useAppStartupBindings({
         </PlayerControls>
 
         <PlaylistPeekButton
-            v-show="!isPlaylistOpen && !isCurvesOpen"
+            v-show="
+                !isPlaylistOpen &&
+                !isCurvesOpen &&
+                !isAudioPanelOpen &&
+                !isSettingsOpen
+            "
             :disabled="
                 tracks.showAudioMenu.value ||
                 tracks.showSubMenu.value ||

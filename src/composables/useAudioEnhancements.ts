@@ -5,6 +5,8 @@ import { createDebouncedUiStateSaver, loadUiState } from "./useUiStateStore";
 // Audio processing, driven entirely through mpv's audio-filter chain (`af
 // add`/`af remove` with labels) plus lavfi. No new backend command is needed.
 //
+//   Voice isolation -> mid/side: boost the centre (dialogue), cut the sides
+//                      (music/effects panned wide) so speech is pulled forward
 //   Night mode      -> acompressor + alimiter  (tames explosions, lifts dialogue)
 //   Dialogue boost  -> presence-band peaking EQ + a touch of mud cut
 //   Graphic EQ      -> 10 chained `equalizer` biquads
@@ -39,6 +41,8 @@ export const EQ_GAIN_RANGE = 12; // dB, +/-
 
 export type AudioEnhancementsState = {
     nightMode: NightModeLevel;
+    /** 0 = off .. 100 = strongest centre emphasis / side reduction. */
+    voiceIsolation: number;
     /** 0 = off .. 100 = strongest presence lift. */
     dialogueBoost: number;
     /** Post-volume gain in percent, 100 = unity, up to 300. */
@@ -52,6 +56,7 @@ export type AudioEnhancementsState = {
 
 export type StoredAudioEnhancements = {
     nightMode?: string;
+    voiceIsolation?: number;
     dialogueBoost?: number;
     gain?: number;
     eqEnabled?: boolean;
@@ -78,11 +83,12 @@ export const EQ_PRESETS: EqPreset[] = [
 ];
 
 // mpv filter labels — one per stage so they can be toggled independently.
+const LABEL_VOICE = "lumo-voice";
 const LABEL_EQ = "lumo-eq";
 const LABEL_DIALOGUE = "lumo-dialogue";
 const LABEL_NIGHT = "lumo-night";
 const LABEL_GAIN = "lumo-gain";
-const ALL_LABELS = [LABEL_EQ, LABEL_DIALOGUE, LABEL_NIGHT, LABEL_GAIN];
+const ALL_LABELS = [LABEL_VOICE, LABEL_EQ, LABEL_DIALOGUE, LABEL_NIGHT, LABEL_GAIN];
 
 // Night mode = downward compression with make-up gain, then a brick-wall
 // limiter so the make-up can't clip. Thresholds are linear amplitude
@@ -109,6 +115,7 @@ const LIMITER = "alimiter=limit=0.95:level=0";
 
 const DEFAULT_STATE: AudioEnhancementsState = {
     nightMode: "off",
+    voiceIsolation: 0,
     dialogueBoost: 0,
     gain: 100,
     eqEnabled: false,
@@ -165,6 +172,17 @@ const buildDialogueGraph = (amount: number): string => {
     ].join(",");
 };
 
+// Voice isolation: dialogue sits in the centre of the mix, while music and
+// effects are panned wide. Fold to stereo (so 5.1's centre channel lands in the
+// mid), then boost the mid and cut the side — pulling speech forward and pushing
+// the score back. 0..100 maps mid 1.0..1.5 and side 1.0..0.15.
+const buildVoiceGraph = (amount: number): string => {
+    const strength = clamp(amount, 0, 100) / 100;
+    const mid = (1 + strength * 0.5).toFixed(3);
+    const side = (1 - strength * 0.85).toFixed(3);
+    return `aformat=channel_layouts=stereo,stereotools=mlev=${mid}:slev=${side}`;
+};
+
 export const useAudioEnhancements = () => {
     const state = reactive<AudioEnhancementsState>({
         ...DEFAULT_STATE,
@@ -191,6 +209,7 @@ export const useAudioEnhancements = () => {
         saver.saveDebounced({
             audioEnhancements: {
                 nightMode: state.nightMode,
+                voiceIsolation: state.voiceIsolation,
                 dialogueBoost: state.dialogueBoost,
                 gain: state.gain,
                 eqEnabled: state.eqEnabled,
@@ -210,6 +229,11 @@ export const useAudioEnhancements = () => {
         const run = async () => {
             for (const label of ALL_LABELS) {
                 await runCommand(["af", "remove", `@${label}`]);
+            }
+
+            if (state.voiceIsolation > 0) {
+                const graph = buildVoiceGraph(state.voiceIsolation);
+                await runCommand(["af", "add", `@${LABEL_VOICE}:lavfi=[${graph}]`]);
             }
 
             if (state.eqEnabled) {
@@ -280,6 +304,12 @@ export const useAudioEnhancements = () => {
         await setNightMode(next);
     };
 
+    const setVoiceIsolation = (value: number) => {
+        state.voiceIsolation = clamp(Math.round(value), 0, 100);
+        scheduleRebuild();
+        persist();
+    };
+
     const setDialogueBoost = (value: number) => {
         state.dialogueBoost = clamp(Math.round(value), 0, 100);
         scheduleRebuild();
@@ -348,6 +378,7 @@ export const useAudioEnhancements = () => {
 
     const reset = async () => {
         state.nightMode = DEFAULT_STATE.nightMode;
+        state.voiceIsolation = DEFAULT_STATE.voiceIsolation;
         state.dialogueBoost = DEFAULT_STATE.dialogueBoost;
         state.gain = DEFAULT_STATE.gain;
         state.eqEnabled = DEFAULT_STATE.eqEnabled;
@@ -362,6 +393,7 @@ export const useAudioEnhancements = () => {
     const isActive = computed(
         () =>
             state.nightMode !== "off" ||
+            state.voiceIsolation > 0 ||
             state.dialogueBoost > 0 ||
             state.gain > 100 ||
             (state.eqEnabled && state.eqBands.some((g) => Math.abs(g) >= 0.05)),
@@ -391,6 +423,9 @@ export const useAudioEnhancements = () => {
             if (isNightModeLevel(stored.nightMode)) {
                 state.nightMode = stored.nightMode;
             }
+            if (typeof stored.voiceIsolation === "number") {
+                state.voiceIsolation = clamp(Math.round(stored.voiceIsolation), 0, 100);
+            }
             if (typeof stored.dialogueBoost === "number") {
                 state.dialogueBoost = clamp(Math.round(stored.dialogueBoost), 0, 100);
             }
@@ -418,6 +453,7 @@ export const useAudioEnhancements = () => {
         isActive,
         setNightMode,
         cycleNightMode,
+        setVoiceIsolation,
         setDialogueBoost,
         setGain,
         setEqEnabled,

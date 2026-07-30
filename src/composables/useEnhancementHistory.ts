@@ -55,6 +55,7 @@ type Snapshot = {
     deband: DebandLevel;
     aiUpscale: AiUpscaleMode;
     nightMode: NightModeLevel;
+    voiceIsolation: number;
     dialogueBoost: number;
     gain: number;
     eqEnabled: boolean;
@@ -153,6 +154,7 @@ export const useEnhancementHistory = (options: UseEnhancementHistoryOptions) => 
             deband: s.deband,
             aiUpscale: s.aiUpscale,
             nightMode: a.nightMode,
+            voiceIsolation: a.voiceIsolation,
             dialogueBoost: a.dialogueBoost,
             gain: a.gain,
             eqEnabled: a.eqEnabled,
@@ -200,6 +202,7 @@ export const useEnhancementHistory = (options: UseEnhancementHistoryOptions) => 
             await enhancements.setAiUpscale(snap.aiUpscale);
 
             await audio.setNightMode(snap.nightMode);
+            audio.setVoiceIsolation(snap.voiceIsolation);
             audio.setDialogueBoost(snap.dialogueBoost);
             audio.setGain(snap.gain);
             audio.setEqBands(snap.eqBands);

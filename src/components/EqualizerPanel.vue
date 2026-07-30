@@ -123,6 +123,21 @@ const formatGain = (gain: number) => {
             <!-- Dialogue + gain -->
             <section class="eq__section">
                 <ControlSlider
+                    label="Voice isolation"
+                    :value="props.audio.state.voiceIsolation"
+                    :min="0"
+                    :max="100"
+                    :step="1"
+                    unit="%"
+                    :precision="0"
+                    @change="props.audio.setVoiceIsolation($event)"
+                    @reset="props.audio.setVoiceIsolation(0)"
+                />
+                <p class="eq__hint">
+                    Pulls dialogue out of loud music and effects by emphasising the
+                    centre of the mix. Higher = clearer speech but narrower stereo.
+                </p>
+                <ControlSlider
                     label="Dialogue boost"
                     :value="props.audio.state.dialogueBoost"
                     :min="0"
@@ -133,6 +148,11 @@ const formatGain = (gain: number) => {
                     @change="props.audio.setDialogueBoost($event)"
                     @reset="props.audio.setDialogueBoost(0)"
                 />
+                <p class="eq__hint">
+                    Sharpens speech by lifting the presence frequencies (~2–4 kHz)
+                    and trimming muddiness — crisper voices. Pairs well with Voice
+                    isolation.
+                </p>
                 <div class="eq__row">
                     <span class="eq__heading">Volume boost</span>
                     <div class="eq__seg">

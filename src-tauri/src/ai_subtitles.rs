@@ -88,13 +88,25 @@ fn build_srt(segments: &[Segment]) -> String {
 
 /// Parse `HH:MM:SS,mmm` into seconds.
 fn parse_srt_time(s: &str) -> Option<f64> {
-    let (hms, ms) = s.trim().split_once(',')?;
-    let mut parts = hms.split(':');
-    let h: f64 = parts.next()?.trim().parse().ok()?;
-    let m: f64 = parts.next()?.trim().parse().ok()?;
-    let sec: f64 = parts.next()?.trim().parse().ok()?;
-    let milli: f64 = ms.trim().parse().ok()?;
-    Some(h * 3600.0 + m * 60.0 + sec + milli / 1000.0)
+    let s = s.trim();
+    // Milliseconds after ',' or '.'; models sometimes use either (or omit them).
+    let (hms, milli) = match s.rsplit_once(',').or_else(|| s.rsplit_once('.')) {
+        Some((a, b)) => (a, b.trim().parse::<f64>().unwrap_or(0.0)),
+        None => (s, 0.0),
+    };
+    // Colon fields, seconds-last. Accept HH:MM:SS, MM:SS, or SS — some models
+    // drop the hours on short clips (e.g. "00:03,000" instead of "00:00:03,000").
+    let parts: Vec<f64> = hms
+        .split(':')
+        .map(|p| p.trim().parse::<f64>().ok())
+        .collect::<Option<Vec<_>>>()?;
+    let secs = match parts.as_slice() {
+        [h, m, s] => h * 3600.0 + m * 60.0 + s,
+        [m, s] => m * 60.0 + s,
+        [s] => *s,
+        _ => return None,
+    };
+    Some(secs + milli / 1000.0)
 }
 
 /// Parse an existing .srt into segments (so new ranges can merge into it).
@@ -526,9 +538,22 @@ fences, no commentary."
         s.end = s.end.min(chunk_dur).max(s.start);
     }
     if segments.is_empty() && !cleaned.is_empty() {
-        // Reply had text but no parseable timings — spread it across the clip.
-        let plain = cleaned.replace('\n', " ");
-        return Ok(distribute_segments(plain.trim(), 0.0, chunk_dur));
+        // Reply had text but no parseable timings — spread the dialogue across the
+        // clip, dropping SRT scaffolding (cue numbers, `-->` timing lines) so they
+        // never leak into the on-screen text.
+        let plain = cleaned
+            .lines()
+            .map(str::trim)
+            .filter(|l| {
+                !l.is_empty()
+                    && !l.contains("-->")
+                    && !l.chars().all(|c| c.is_ascii_digit())
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        if !plain.is_empty() {
+            return Ok(distribute_segments(&plain, 0.0, chunk_dur));
+        }
     }
     Ok(segments)
 }
@@ -1042,6 +1067,14 @@ fn transcribe_chunk_sarvam(
     Ok(words_to_segments(words, starts, ends, fallback, speech_window))
 }
 
+/// Threads for whisper.cpp: most of the machine, leaving 1–2 cores for the UI.
+fn whisper_thread_count() -> usize {
+    let cores = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+    cores.saturating_sub(2).clamp(4, 12)
+}
+
 /// Map our 2-letter UI code to a Whisper language code. Whisper uses ISO-639-1
 /// codes directly, so most pass through; "auto" lets it detect.
 fn whisper_language_arg(lang: Option<&str>) -> String {
@@ -1089,6 +1122,10 @@ fn run_whisper(
         .arg(&out_base)
         .arg("-l")
         .arg(whisper_language_arg(language))
+        // whisper.cpp defaults to only 4 threads — use most of the machine so a
+        // multi-core CPU isn't left idle (leave 1–2 cores for the UI).
+        .arg("-t")
+        .arg(whisper_thread_count().to_string())
         // No console in a windowed app — discard whisper's chatter so a full pipe
         // buffer can't stall it.
         .stdout(std::process::Stdio::null())
@@ -1203,7 +1240,8 @@ pub(crate) async fn generate_ai_subtitles(
     if path.trim().is_empty() || is_remote(&path) {
         return Err("AI subtitles need a local video file".to_string());
     }
-    if transcribe_key.trim().is_empty() {
+    // Local Whisper needs no key — it uses a program + model path instead.
+    if engine.as_deref() != Some("whisper") && transcribe_key.trim().is_empty() {
         return Err("Set a transcription API key in Settings → Subtitles (AI)".to_string());
     }
     CANCEL.store(false, Ordering::SeqCst);
