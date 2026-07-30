@@ -100,6 +100,7 @@ const emit = defineEmits<{
     (e: "toggle-dual-sub", enabled: boolean): void;
     (e: "add-external-audio"): void;
     (e: "add-external-sub"): void;
+    (e: "remove-sub", track: MediaTrack): void;
     (e: "find-online-sub"): void;
     (e: "toggle-fullscreen"): void;
     (e: "update:showSubtitleAdvancedSettings", value: boolean): void;
@@ -869,6 +870,20 @@ watch(
                                         </span>
                                     </span>
                                 </span>
+                                <span
+                                    v-if="row.track.external"
+                                    class="track-menu__remove"
+                                    role="button"
+                                    tabindex="0"
+                                    title="Remove this subtitle"
+                                    aria-label="Remove this subtitle"
+                                    @click.stop="emit('remove-sub', row.track)"
+                                    @keydown.enter.stop.prevent="
+                                        emit('remove-sub', row.track)
+                                    "
+                                >
+                                    ✕
+                                </span>
                             </button>
                         </div>
                     </div>
@@ -1344,6 +1359,29 @@ watch(
                                     :class="{
                                         'track-menu__mode-switch--on':
                                             props.enhancements.state.denoise,
+                                    }"
+                                >
+                                    <span class="track-menu__mode-thumb"></span>
+                                </span>
+                            </button>
+
+                            <button
+                                class="enh__toggle"
+                                type="button"
+                                title="Remove blocking / compression artefacts (great for old, heavily compressed rips)"
+                                :aria-pressed="props.enhancements.state.deblock"
+                                @click.stop="
+                                    props.enhancements.setDeblock(
+                                        !props.enhancements.state.deblock,
+                                    )
+                                "
+                            >
+                                <span class="enh__label">Deblock</span>
+                                <span
+                                    class="track-menu__mode-switch"
+                                    :class="{
+                                        'track-menu__mode-switch--on':
+                                            props.enhancements.state.deblock,
                                     }"
                                 >
                                     <span class="track-menu__mode-thumb"></span>
@@ -2058,6 +2096,25 @@ watch(
 .track-menu__item--subtitle {
     align-items: center;
     min-width: 0;
+}
+
+.track-menu__remove {
+    flex: none;
+    margin-left: auto;
+    width: 22px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    font-size: 12px;
+    line-height: 1;
+    color: rgba(255, 255, 255, 0.4);
+    cursor: pointer;
+}
+.track-menu__remove:hover {
+    background: rgba(255, 90, 90, 0.22);
+    color: #ff9a9a;
 }
 
 .track-menu__text--subtitle {

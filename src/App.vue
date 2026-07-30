@@ -28,6 +28,7 @@ import SplitDialog from "./components/SplitDialog.vue";
 import SubtitleAiDialog from "./components/SubtitleAiDialog.vue";
 import SubtitleTranslateDialog from "./components/SubtitleTranslateDialog.vue";
 import SubtitleSyncDialog from "./components/SubtitleSyncDialog.vue";
+import ClipDescribeDialog from "./components/ClipDescribeDialog.vue";
 import WindowResizeRegions from "./components/WindowResizeRegions.vue";
 import { usePlaybackShortcuts } from "./composables/usePlaybackShortcuts";
 import { useUltraSlomo } from "./composables/useUltraSlomo";
@@ -1249,6 +1250,25 @@ const onSyncAiSubtitles = () => {
     }
     subtitleSyncOpen.value = true;
 };
+// Describe the current A–B clip with AI.
+const describeClipOpen = ref(false);
+const describeClipStart = ref(0);
+const describeClipEnd = ref(0);
+const onDescribeClip = () => {
+    const a = abRange.pointA.value;
+    const b = abRange.pointB.value;
+    if (a == null || b == null || b <= a) {
+        showMessageOverlay("Mark an A–B range first (press K twice)", 3000);
+        return;
+    }
+    if (!isLocalMediaPath.value) {
+        showMessageOverlay("Clip description needs a local video file", 3000);
+        return;
+    }
+    describeClipStart.value = a;
+    describeClipEnd.value = b;
+    describeClipOpen.value = true;
+};
 const onAiSubtitlesLoaded = async (payload: {
     path: string;
     lineCount: number;
@@ -1958,6 +1978,7 @@ const { menus: appMenus } = useAppMenu({
     generateAiSubtitles: onGenerateAiSubtitles,
     translateAiSubtitles: onTranslateAiSubtitles,
     syncAiSubtitles: onSyncAiSubtitles,
+    describeClip: onDescribeClip,
     toggleSubtitleVisibility: () => void toggleSubtitleVisibility(),
     setDualSubEnabled: (enabled) => void tracks.setDualSubEnabled(enabled),
     adjustSubtitleDelay: (delta) => void adjustSubtitleDelay(delta),
@@ -2024,6 +2045,10 @@ const closeTopOverlay = (): boolean => {
     }
     if (subtitleSyncOpen.value) {
         subtitleSyncOpen.value = false;
+        return true;
+    }
+    if (describeClipOpen.value) {
+        describeClipOpen.value = false;
         return true;
     }
     if (aiPromptOpen.value) {
@@ -2421,6 +2446,15 @@ useAppStartupBindings({
             @loaded="onAiSubtitlesLoaded"
         />
 
+        <ClipDescribeDialog
+            :open="describeClipOpen"
+            :path="player.state.media.url"
+            :start="describeClipStart"
+            :end="describeClipEnd"
+            @close="describeClipOpen = false"
+            @notify="(msg: string) => showMessageOverlay(msg, 3000)"
+        />
+
         <!-- Import mode chooser (favourites / settings) -->
         <transition name="fade-in">
             <div
@@ -2607,6 +2641,7 @@ useAppStartupBindings({
             @toggle-dual-sub="tracks.setDualSubEnabled"
             @add-external-audio="tracks.addExternalAudioTrack"
             @add-external-sub="tracks.addExternalSubtitleTrack"
+            @remove-sub="tracks.removeSubtitleTrack"
             @find-online-sub="player.state.media.url.trim() && tracks.searchOnlineSubtitleTracks(player.state.media.url, player.state.media.title || undefined)"
             @toggle-fullscreen="onToggleFullscreen"
             @update:show-subtitle-advanced-settings="tracks.showSubtitleAdvancedSettings.value = $event"
@@ -2621,6 +2656,7 @@ useAppStartupBindings({
                     :can-export="isLocalMediaPath"
                     :clip-available="isClipExportAvailable"
                     @export="onExportClip"
+                    @describe="onDescribeClip"
                 />
             </template>
         </PlayerControls>

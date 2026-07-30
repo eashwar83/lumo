@@ -399,6 +399,35 @@ export const usePlaybackHistory = () => {
         await saveHistoryEntry(nextEntry);
     };
 
+    // Drop a remembered external track so it isn't re-added on the next load.
+    const forgetExternalTrack = async (
+        path: string,
+        kind: "audio" | "sub",
+        trackPath: string,
+    ) => {
+        const normalizedPath = normalizePlaybackKey(path);
+        const trimmed = trackPath.trim();
+        if (!normalizedPath || !trimmed) return;
+        const existing = findEntry(normalizedPath);
+        if (!existing) return;
+        const audio = normalizeTrackList(existing.externalAudioTracks);
+        const sub = normalizeTrackList(existing.externalSubTracks);
+        const list = kind === "audio" ? audio : sub;
+        const wanted = trimmed.replace(/\\/g, "/").toLowerCase();
+        const idx = list.findIndex(
+            (p) => p.replace(/\\/g, "/").toLowerCase() === wanted,
+        );
+        if (idx === -1) return;
+        list.splice(idx, 1);
+        const nextEntry: HistoryEntry = {
+            ...existing,
+            externalAudioTracks: audio,
+            externalSubTracks: sub,
+        };
+        upsertEntry(nextEntry);
+        await saveHistoryEntry(nextEntry);
+    };
+
     onMounted(() => {
         void loadHistory();
     });
@@ -422,5 +451,6 @@ export const usePlaybackHistory = () => {
         togglePinned,
         getExternalTracks,
         recordExternalTrack,
+        forgetExternalTrack,
     };
 };

@@ -17,6 +17,11 @@ type HistoryApi = {
         kind: "audio" | "sub",
         trackPath: string,
     ) => Promise<void>;
+    forgetExternalTrack: (
+        path: string,
+        kind: "audio" | "sub",
+        trackPath: string,
+    ) => Promise<void>;
 };
 
 type ExternalSubtitleMatch = {
@@ -451,6 +456,46 @@ export const useMediaTracks = (
         });
     };
 
+    // Remove an external subtitle track (the ✕ in the track menu): drop it from
+    // mpv now, and forget it so it isn't re-added when the file reloads.
+    const removeSubtitleTrack = async (track: MediaTrack) => {
+        const id = String(track.id);
+        if (id === "0") return;
+        // Look up the track's file path (MediaTrack doesn't carry it) so we can
+        // also un-remember it.
+        let filePath = "";
+        try {
+            const countRaw = await invoke<string | null>("mpv_get_property_string", {
+                name: "track-list/count",
+            });
+            const count = Number.parseInt(countRaw ?? "0", 10) || 0;
+            for (let i = 0; i < count; i += 1) {
+                const tid = await invoke<string | null>("mpv_get_property_string", {
+                    name: `track-list/${i}/id`,
+                });
+                const type = await invoke<string | null>("mpv_get_property_string", {
+                    name: `track-list/${i}/type`,
+                });
+                if (type === "sub" && tid === id) {
+                    filePath =
+                        (await invoke<string | null>("mpv_get_property_string", {
+                            name: `track-list/${i}/external-filename`,
+                        })) ?? "";
+                    break;
+                }
+            }
+        } catch {
+            /* best-effort path lookup */
+        }
+        await invoke("mpv_run_command", { args: ["sub-remove", id] });
+        if (filePath) {
+            const mediaKey = getMediaKey();
+            if (mediaKey && history) {
+                await history.forgetExternalTrack(mediaKey, "sub", filePath);
+            }
+        }
+    };
+
     const searchOnlineSubtitleTracks = async (
         playbackKey: string,
         mediaTitle?: string,
@@ -728,6 +773,7 @@ export const useMediaTracks = (
         setActiveSubTarget: subtitleState.setActiveSubTarget,
         addExternalAudioTrack,
         addExternalSubtitleTrack,
+        removeSubtitleTrack,
         searchOnlineSubtitleTracks,
         setOnlineSubtitleProvider,
         addSelectedOnlineSubtitleTrack,
