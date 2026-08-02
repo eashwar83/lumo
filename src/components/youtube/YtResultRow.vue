@@ -30,6 +30,7 @@ const emit = defineEmits<{
     (e: "play", item: YoutubeItem): void;
     (e: "open", item: YoutubeItem): void;
     (e: "toggle-heart", item: YoutubeItem): void;
+    (e: "download", item: YoutubeItem): void;
 }>();
 
 const metaLine = () => {
@@ -141,8 +142,9 @@ const onActivate = () => {
             <button
                 class="yt-row__action"
                 type="button"
-                title="Download (coming soon)"
-                disabled
+                title="Download…"
+                :disabled="props.item.kind !== 'video'"
+                @click="emit('download', props.item)"
             >
                 <svg
                     viewBox="0 0 24 24"

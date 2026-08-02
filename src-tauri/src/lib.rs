@@ -547,7 +547,15 @@ pub fn run() {
             youtube::youtube_warmup,
             youtube::youtube_video_context,
             youtube::youtube_preresolve,
-            youtube::youtube_sponsorblock
+            youtube::youtube_sponsorblock,
+            youtube::youtube_download_add,
+            youtube::youtube_download_list,
+            youtube::youtube_download_pause,
+            youtube::youtube_download_resume,
+            youtube::youtube_download_cancel,
+            youtube::youtube_download_remove,
+            youtube::youtube_download_clear_done,
+            youtube::youtube_download_open_folder
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

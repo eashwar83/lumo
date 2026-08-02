@@ -3,6 +3,13 @@ import { computed, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { HistoryEntry } from "../types/history";
 import YtResultRow from "../components/youtube/YtResultRow.vue";
+import YtDownloadDialog from "../components/youtube/YtDownloadDialog.vue";
+import {
+    useYouTubeDownloads,
+    formatEta,
+    formatSpeed,
+    type DownloadOptions,
+} from "../composables/useYouTubeDownloads";
 import {
     useYouTubeModule,
     type YoutubeItem,
@@ -90,6 +97,49 @@ const onListScroll = () => {
 const onFilterChange = () => {
     void yt.applyFilters();
 };
+
+const downloads = useYouTubeDownloads();
+const downloadTarget = ref<YoutubeItem | null>(null);
+const isDownloadDialogOpen = ref(false);
+
+const onDownloadRequest = (item: YoutubeItem) => {
+    downloadTarget.value = item;
+    isDownloadDialogOpen.value = true;
+};
+
+const onDownloadConfirm = async (options: DownloadOptions) => {
+    const target = downloadTarget.value;
+    isDownloadDialogOpen.value = false;
+    if (!target) return;
+    try {
+        await downloads.add({ url: target.url, title: target.title }, options);
+        emit("notify", options.front ? "Downloading…" : "Added to queue");
+        yt.activeTab.value = "downloads";
+    } catch (error) {
+        emit(
+            "notify",
+            String(error).replace(/^Error:\s*/, "").slice(0, 160),
+        );
+    }
+};
+
+const statusLabel = (item: { status: string; error?: string | null }) => {
+    if (item.error) return item.error;
+    switch (item.status) {
+        case "queued":
+            return "Queued";
+        case "downloading":
+            return "Downloading";
+        case "paused":
+            return "Paused";
+        case "done":
+            return "In Library ✓";
+        case "cancelled":
+            return "Cancelled";
+        default:
+            return item.status;
+    }
+};
 </script>
 
 <template>
@@ -107,6 +157,11 @@ const onFilterChange = () => {
                     @click="yt.activeTab.value = tab.id"
                 >
                     {{ tab.label }}
+                    <span
+                        v-if="tab.id === 'downloads' && downloads.activeCount.value"
+                        class="yt-tab__badge"
+                        >{{ downloads.activeCount.value }}</span
+                    >
                 </button>
             </div>
         </div>
@@ -230,6 +285,7 @@ const onFilterChange = () => {
                                 thumbnailUrl: $event.thumbnailUrl,
                             })
                         "
+                        @download="onDownloadRequest"
                     />
                     <div
                         v-if="yt.isLoadingMore.value"
@@ -325,10 +381,123 @@ const onFilterChange = () => {
             </div>
         </div>
 
+        <template v-else-if="yt.activeTab.value === 'downloads'">
+            <div class="yt-dl-toolbar">
+                <span class="yt-dl-toolbar__count">
+                    {{ downloads.items.value.length }} item{{
+                        downloads.items.value.length === 1 ? "" : "s"
+                    }}
+                    · {{ downloads.activeCount.value }} active
+                </span>
+                <div class="yt-dl-toolbar__actions">
+                    <button
+                        class="yt-chip"
+                        type="button"
+                        @click="downloads.openFolder()"
+                    >
+                        Open folder
+                    </button>
+                    <button
+                        class="yt-chip"
+                        type="button"
+                        @click="downloads.clearDone()"
+                    >
+                        Clear finished
+                    </button>
+                </div>
+            </div>
+            <div class="yt-list">
+                <div v-if="!downloads.items.value.length" class="yt-state">
+                    Downloads you start appear here
+                </div>
+                <div
+                    v-for="item in downloads.items.value"
+                    :key="item.id"
+                    class="yt-row yt-row--download"
+                    :class="{ 'yt-row--failed': item.status === 'failed' }"
+                >
+                    <div class="yt-row__meta">
+                        <div class="yt-row__title">{{ item.title }}</div>
+                        <div class="yt-dl-progress">
+                            <span
+                                class="yt-dl-progress__fill"
+                                :style="{
+                                    width: item.progressPercent + '%',
+                                }"
+                            ></span>
+                        </div>
+                        <div class="yt-row__sub">
+                            {{ statusLabel(item) }}
+                            <span v-if="item.status === 'downloading'">
+                                · {{ Math.round(item.progressPercent) }}%
+                                <span v-if="formatSpeed(item.speedBps)">
+                                    · {{ formatSpeed(item.speedBps) }}</span
+                                >
+                                <span v-if="formatEta(item.etaSeconds)">
+                                    · {{ formatEta(item.etaSeconds) }}</span
+                                >
+                            </span>
+                        </div>
+                    </div>
+                    <div class="yt-row__actions">
+                        <button
+                            v-if="
+                                item.status === 'downloading' ||
+                                item.status === 'queued'
+                            "
+                            class="yt-chip"
+                            type="button"
+                            @click="downloads.pause(item.id)"
+                        >
+                            Pause
+                        </button>
+                        <button
+                            v-else-if="
+                                item.status === 'paused' ||
+                                item.status === 'failed'
+                            "
+                            class="yt-chip"
+                            type="button"
+                            @click="downloads.resume(item.id)"
+                        >
+                            Resume
+                        </button>
+                        <button
+                            v-if="item.status === 'done'"
+                            class="yt-chip"
+                            type="button"
+                            @click="
+                                emit('play-youtube', {
+                                    url: item.filePath || item.url,
+                                    title: item.title,
+                                })
+                            "
+                        >
+                            Play
+                        </button>
+                        <button
+                            class="yt-chip"
+                            type="button"
+                            @click="downloads.remove(item.id)"
+                        >
+                            ✕
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </template>
+
         <div v-else class="yt-state yt-state--placeholder">
-            {{ yt.activeTab.value === "trending" ? "Trending" : "Downloads" }}
-            arrives in a later milestone
+            Trending arrives in a later milestone
         </div>
+
+        <YtDownloadDialog
+            :open="isDownloadDialogOpen"
+            :item="downloadTarget"
+            :queue-ahead="downloads.activeCount.value"
+            @close="isDownloadDialogOpen = false"
+            @confirm="onDownloadConfirm"
+        />
     </section>
 </template>
 

@@ -6,6 +6,7 @@
 //! so no console window flashes over the player.
 
 mod data;
+mod downloads;
 mod innertube;
 mod pot;
 mod sponsorblock;
@@ -13,6 +14,15 @@ mod thumbs;
 mod watch;
 mod ytdlp;
 
+pub(crate) use downloads::{
+    __cmd__youtube_download_add, __cmd__youtube_download_cancel,
+    __cmd__youtube_download_clear_done, __cmd__youtube_download_list,
+    __cmd__youtube_download_open_folder, __cmd__youtube_download_pause,
+    __cmd__youtube_download_remove, __cmd__youtube_download_resume,
+    youtube_download_add, youtube_download_cancel, youtube_download_clear_done,
+    youtube_download_list, youtube_download_open_folder, youtube_download_pause,
+    youtube_download_remove, youtube_download_resume,
+};
 pub(crate) use pot::{ensure_pot_server, shutdown_pot_server};
 pub(crate) use sponsorblock::{__cmd__youtube_sponsorblock, youtube_sponsorblock};
 

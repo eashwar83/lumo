@@ -346,6 +346,57 @@
     background: var(--yt-progress);
 }
 
+/* --- Downloads --------------------------------------------------------------- */
+
+.yt-tab__badge {
+    margin-left: 6px;
+    background: var(--yt-accent);
+    color: #17151f;
+    font-size: 10.5px;
+    font-weight: 800;
+    border-radius: 999px;
+    padding: 0 5px;
+}
+
+.yt-dl-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.yt-dl-toolbar__count {
+    font-size: 12px;
+    color: var(--yt-text-dim);
+}
+
+.yt-dl-toolbar__actions {
+    display: flex;
+    gap: 6px;
+}
+
+.yt-row--download {
+    align-items: center;
+}
+
+.yt-row--failed {
+    border-color: rgba(232, 85, 109, 0.5);
+}
+
+.yt-dl-progress {
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.09);
+    overflow: hidden;
+}
+
+.yt-dl-progress__fill {
+    display: block;
+    height: 100%;
+    background: var(--yt-progress);
+    transition: width 0.25s ease;
+}
+
 /* --- States ----------------------------------------------------------------- */
 
 .yt-state {
