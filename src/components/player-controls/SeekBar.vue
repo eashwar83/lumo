@@ -15,6 +15,8 @@ const props = defineProps<{
     abPointB?: number | null;
     /** Chapter or detected-scene start times, in seconds. */
     sceneMarks?: number[];
+    /** SponsorBlock ranges to tint green, in seconds. */
+    sponsorSegments?: { startSeconds: number; endSeconds: number }[];
 }>();
 
 const emit = defineEmits<{
@@ -214,6 +216,21 @@ const scenePercents = computed(() =>
 const abStartPercent = computed(() => toPercent(props.abPointA));
 const abEndPercent = computed(() => toPercent(props.abPointB));
 
+/** SponsorBlock segments as percent spans along the bar. */
+const sponsorSpans = computed(() => {
+    if (!props.duration || !props.sponsorSegments?.length) return [];
+    return props.sponsorSegments
+        .map((segment) => {
+            const left = (segment.startSeconds / props.duration) * 100;
+            const right = (segment.endSeconds / props.duration) * 100;
+            return {
+                left: Math.max(0, left),
+                width: Math.max(0.15, Math.min(100, right) - Math.max(0, left)),
+            };
+        })
+        .filter((span) => span.width > 0 && span.left < 100);
+});
+
 /** The shaded span between A and B; null until both ends exist. */
 const abSpan = computed(() => {
     const start = abStartPercent.value;
@@ -286,6 +303,12 @@ onUnmounted(() => {
                 :key="`scene-${index}`"
                 class="scene-mark"
                 :style="{ left: mark + '%' }"
+            ></div>
+            <div
+                v-for="(span, index) in sponsorSpans"
+                :key="`sb-${index}`"
+                class="sponsor-span"
+                :style="{ left: span.left + '%', width: span.width + '%' }"
             ></div>
             <div
                 v-if="abSpan"
@@ -401,6 +424,16 @@ onUnmounted(() => {
     height: 100%;
     background: rgba(255, 214, 92, 0.42);
     z-index: 3;
+    pointer-events: none;
+}
+
+/* SponsorBlock ranges: green tint under the A-B layer. */
+.sponsor-span {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    background: rgba(159, 216, 164, 0.55);
+    z-index: 2;
     pointer-events: none;
 }
 

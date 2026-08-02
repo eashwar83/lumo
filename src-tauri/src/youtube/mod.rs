@@ -8,11 +8,13 @@
 mod data;
 mod innertube;
 mod pot;
+mod sponsorblock;
 mod thumbs;
 mod watch;
 mod ytdlp;
 
 pub(crate) use pot::{ensure_pot_server, shutdown_pot_server};
+pub(crate) use sponsorblock::{__cmd__youtube_sponsorblock, youtube_sponsorblock};
 
 use serde::{Deserialize, Serialize};
 

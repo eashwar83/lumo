@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import type { HistoryEntry } from "../types/history";
 import type { NetworkPlayRequest } from "../types/network";
 import type { FavoriteFolder, PlaylistEntry } from "../types/playlist";
@@ -45,7 +46,15 @@ const emit = defineEmits<{
     (e: "import-favorites"): void;
     (e: "play-youtube", payload: { url: string; title?: string }): void;
     (e: "youtube-notify", message: string): void;
+    (
+        e: "toggle-youtube-favorite",
+        payload: { url: string; title: string; thumbnailUrl?: string | null },
+    ): void;
 }>();
+
+const youtubeFavoritePaths = computed(
+    () => new Set(props.favorites.map((entry) => entry.path)),
+);
 
 const showPanels = () => !props.isFileLoaded;
 </script>
@@ -111,8 +120,13 @@ const showPanels = () => !props.isFileLoaded;
             <YouTubePanel
                 v-show="showPanels() && props.mode === 'youtube'"
                 :is-visible="showPanels() && props.mode === 'youtube'"
+                :favorite-paths="youtubeFavoritePaths"
+                :history="props.history"
                 @play-youtube="emit('play-youtube', $event)"
                 @notify="emit('youtube-notify', $event)"
+                @toggle-youtube-favorite="
+                    emit('toggle-youtube-favorite', $event)
+                "
             />
 
             <NetworkPanel

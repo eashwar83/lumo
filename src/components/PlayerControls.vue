@@ -19,6 +19,7 @@ const props = defineProps<{
     abPointA?: number | null;
     abPointB?: number | null;
     sceneMarks?: number[];
+    sponsorSegments?: { startSeconds: number; endSeconds: number }[];
     progressPercent: number;
     bufferedPercent: number;
     volume: number;
@@ -251,6 +252,7 @@ onUnmounted(() => {
                 :ab-point-a="abPointA"
                 :ab-point-b="abPointB"
                 :scene-marks="sceneMarks"
+                :sponsor-segments="sponsorSegments"
                 @seek="emit('seek', $event)"
             />
             <div ref="controlsViewportRef" class="controls-main-viewport">

@@ -9,6 +9,12 @@ type YoutubeVideoContext = {
     chapters: YoutubeChapter[];
 };
 
+export type SponsorSegment = {
+    category: string;
+    startSeconds: number;
+    endSeconds: number;
+};
+
 type UseYouTubeWatchOptions = {
     mediaUrl: () => string;
     isFileLoaded: () => boolean;
@@ -18,6 +24,7 @@ type UseYouTubeWatchOptions = {
     ) => void;
     /** Pushes chapter marks onto the seek bar / scene navigation. */
     setSceneMarkers: (markers: { start: number; label: string }[]) => void;
+    seekTo: (seconds: number) => void;
 };
 
 const AUTOPLAY_STORAGE_KEY = "lumo.youtubeAutoplayNext";
@@ -41,7 +48,13 @@ export const useYouTubeWatch = (options: UseYouTubeWatchOptions) => {
     const activeTab: Ref<"upnext" | "chapters"> = ref("upnext");
     const related = ref<YoutubeItem[]>([]);
     const chapters = ref<YoutubeChapter[]>([]);
+    const sponsorSegments = ref<SponsorSegment[]>([]);
     const isLoadingContext = ref(false);
+    // Segment start-times already skipped (or undone) this session — a
+    // segment fires at most once so deliberate seek-backs aren't fought.
+    let suppressedSegments = new Set<number>();
+    const sponsorToast = ref<{ from: number; to: number } | null>(null);
+    let sponsorToastTimer: number | null = null;
     const autoplayNext = ref(
         (typeof localStorage === "undefined"
             ? "1"
@@ -90,11 +103,21 @@ export const useYouTubeWatch = (options: UseYouTubeWatchOptions) => {
             const token = ++contextToken;
             related.value = [];
             chapters.value = [];
+            sponsorSegments.value = [];
+            suppressedSegments = new Set();
+            sponsorToast.value = null;
             if (!videoId) {
                 isDrawerOpen.value = false;
                 options.setUpNextQueue([]);
                 return;
             }
+            invoke<SponsorSegment[]>("youtube_sponsorblock", { videoId })
+                .then((segments) => {
+                    if (token === contextToken) {
+                        sponsorSegments.value = segments;
+                    }
+                })
+                .catch(() => {});
             isLoadingContext.value = true;
             try {
                 const context = await invoke<YoutubeVideoContext>(
@@ -122,6 +145,44 @@ export const useYouTubeWatch = (options: UseYouTubeWatchOptions) => {
         { immediate: true },
     );
 
+    const hideSponsorToast = () => {
+        sponsorToast.value = null;
+        if (sponsorToastTimer !== null) {
+            window.clearTimeout(sponsorToastTimer);
+            sponsorToastTimer = null;
+        }
+    };
+
+    /** Driven by the playback clock; skips over sponsor segments once each. */
+    const onPlaybackTick = (currentTime: number) => {
+        if (!sponsorSegments.value.length) return;
+        const segment = sponsorSegments.value.find(
+            (candidate) =>
+                currentTime >= candidate.startSeconds &&
+                currentTime < candidate.endSeconds - 0.3 &&
+                !suppressedSegments.has(candidate.startSeconds),
+        );
+        if (!segment) return;
+        suppressedSegments.add(segment.startSeconds);
+        options.seekTo(segment.endSeconds + 0.05);
+        sponsorToast.value = {
+            from: segment.startSeconds,
+            to: segment.endSeconds,
+        };
+        if (sponsorToastTimer !== null) window.clearTimeout(sponsorToastTimer);
+        sponsorToastTimer = window.setTimeout(() => {
+            sponsorToast.value = null;
+            sponsorToastTimer = null;
+        }, 6000);
+    };
+
+    const undoSponsorSkip = () => {
+        const toast = sponsorToast.value;
+        if (!toast) return;
+        hideSponsorToast();
+        options.seekTo(toast.from);
+    };
+
     const toggleDrawer = () => {
         isDrawerOpen.value = !isDrawerOpen.value;
     };
@@ -137,10 +198,15 @@ export const useYouTubeWatch = (options: UseYouTubeWatchOptions) => {
         activeTab,
         related,
         chapters,
+        sponsorSegments,
+        sponsorToast,
         isLoadingContext,
         autoplayNext,
         isYoutubeWatch,
         setAutoplayNext,
+        onPlaybackTick,
+        undoSponsorSkip,
+        hideSponsorToast,
         toggleDrawer,
         closeDrawer,
     };

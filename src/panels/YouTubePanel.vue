@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import type { HistoryEntry } from "../types/history";
 import YtResultRow from "../components/youtube/YtResultRow.vue";
 import {
     useYouTubeModule,
@@ -10,11 +11,33 @@ import {
 
 const props = defineProps<{
     isVisible: boolean;
+    favoritePaths: Set<string>;
+    history: HistoryEntry[];
 }>();
+
+const YT_URL_PATTERN = /(^|\/\/)(www\.|m\.)?(youtube\.com\/(watch|shorts|live)|youtu\.be\/)/i;
+
+const ytHistory = computed(() =>
+    props.history.filter((entry) => YT_URL_PATTERN.test(entry.path)),
+);
+
+const historyProgress = (entry: HistoryEntry) => {
+    if (!entry.duration || entry.duration <= 0) return 0;
+    return Math.min(100, Math.round((entry.lastPosition / entry.duration) * 100));
+};
+
+const historyThumb = (entry: HistoryEntry) => {
+    const match = entry.path.match(/(?:v=|youtu\.be\/|shorts\/|live\/)([\w-]{11})/);
+    return match ? `https://i.ytimg.com/vi/${match[1]}/mqdefault.jpg` : "";
+};
 
 const emit = defineEmits<{
     (e: "play-youtube", payload: { url: string; title?: string }): void;
     (e: "notify", message: string): void;
+    (
+        e: "toggle-youtube-favorite",
+        payload: { url: string; title: string; thumbnailUrl?: string | null },
+    ): void;
 }>();
 
 const yt = useYouTubeModule();
@@ -197,8 +220,16 @@ const onFilterChange = () => {
                         v-for="item in yt.items.value"
                         :key="`${item.kind}:${item.id}`"
                         :item="item"
+                        :is-favorite="props.favoritePaths.has(item.url)"
                         @play="onPlay"
                         @open="onOpen"
+                        @toggle-heart="
+                            emit('toggle-youtube-favorite', {
+                                url: $event.url,
+                                title: $event.title,
+                                thumbnailUrl: $event.thumbnailUrl,
+                            })
+                        "
                     />
                     <div
                         v-if="yt.isLoadingMore.value"
@@ -238,14 +269,64 @@ const onFilterChange = () => {
             </div>
         </template>
 
+        <div
+            v-else-if="yt.activeTab.value === 'history'"
+            class="yt-list yt-list--history"
+        >
+            <div v-if="!ytHistory.length" class="yt-state">
+                Videos you watch appear here — history stays on this device
+            </div>
+            <div
+                v-for="entry in ytHistory"
+                :key="entry.path"
+                class="yt-row"
+                role="button"
+                tabindex="0"
+                @click="
+                    emit('play-youtube', {
+                        url: entry.path,
+                        title: entry.title?.trim() || undefined,
+                    })
+                "
+                @keydown.enter="
+                    emit('play-youtube', {
+                        url: entry.path,
+                        title: entry.title?.trim() || undefined,
+                    })
+                "
+            >
+                <div class="yt-row__thumb">
+                    <img
+                        v-if="historyThumb(entry)"
+                        class="yt-row__thumb-img"
+                        :src="historyThumb(entry)"
+                        alt=""
+                        loading="lazy"
+                        referrerpolicy="no-referrer"
+                    />
+                    <span
+                        v-if="historyProgress(entry) > 0"
+                        class="yt-row__resume"
+                        :style="{ width: historyProgress(entry) + '%' }"
+                    ></span>
+                </div>
+                <div class="yt-row__meta">
+                    <div class="yt-row__title">
+                        {{ entry.title?.trim() || entry.path }}
+                    </div>
+                    <div class="yt-row__sub">
+                        {{
+                            historyProgress(entry) > 0
+                                ? `${historyProgress(entry)}% watched`
+                                : "Started"
+                        }}
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div v-else class="yt-state yt-state--placeholder">
-            {{
-                yt.activeTab.value === "trending"
-                    ? "Trending"
-                    : yt.activeTab.value === "history"
-                      ? "Watch history"
-                      : "Downloads"
-            }}
+            {{ yt.activeTab.value === "trending" ? "Trending" : "Downloads" }}
             arrives in a later milestone
         </div>
     </section>

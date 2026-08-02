@@ -394,38 +394,7 @@ pub(crate) async fn resolve(
         is_live_playback,
     };
     resolve_cache_put(cache_key, &resolved);
-    prewarm_stream(&resolved.url);
     Ok(Some(resolved))
-}
-
-/// Kicks the stream open in the background right after resolving: the local
-/// proxy connects to googlevideo, absorbs TLS setup and any remaining
-/// availability ramp, so mpv's own open (or a later cache-hit play) starts
-/// immediately.
-fn prewarm_stream(playback_url: &str) {
-    let targets: Vec<String> = if let Some(rest) = playback_url.strip_prefix("edl://") {
-        rest.split(';')
-            .filter_map(|part| {
-                let idx = part.find("http")?;
-                Some(part[idx..].to_string())
-            })
-            .collect()
-    } else if playback_url.starts_with("http") {
-        vec![playback_url.to_string()]
-    } else {
-        return;
-    };
-    for target in targets {
-        std::thread::spawn(move || {
-            let Ok(client) = reqwest::blocking::Client::builder()
-                .timeout(Duration::from_secs(90))
-                .build()
-            else {
-                return;
-            };
-            let _ = client.get(&target).header("Range", "bytes=0-1").send();
-        });
-    }
 }
 
 pub(crate) async fn try_resolve(

@@ -4,6 +4,7 @@ import type { YoutubeItem } from "../../composables/useYouTubeModule";
 
 const props = defineProps<{
     item: YoutubeItem;
+    isFavorite?: boolean;
 }>();
 
 // Loaded directly by the webview like a browser would — instant and cached
@@ -28,6 +29,7 @@ const thumbSrc = computed(() => {
 const emit = defineEmits<{
     (e: "play", item: YoutubeItem): void;
     (e: "open", item: YoutubeItem): void;
+    (e: "toggle-heart", item: YoutubeItem): void;
 }>();
 
 const metaLine = () => {
@@ -157,13 +159,19 @@ const onActivate = () => {
             </button>
             <button
                 class="yt-row__action yt-row__action--heart"
+                :class="{ 'yt-row__action--heart-on': props.isFavorite }"
                 type="button"
-                title="Add to Favourites (coming soon)"
-                disabled
+                :title="
+                    props.isFavorite
+                        ? 'Remove from Favourites'
+                        : 'Add to Favourites'
+                "
+                :aria-pressed="props.isFavorite"
+                @click="emit('toggle-heart', props.item)"
             >
                 <svg
                     viewBox="0 0 24 24"
-                    fill="none"
+                    :fill="props.isFavorite ? 'currentColor' : 'none'"
                     stroke="currentColor"
                     stroke-width="2"
                     stroke-linecap="round"

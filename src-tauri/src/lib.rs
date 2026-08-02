@@ -546,7 +546,8 @@ pub fn run() {
             youtube::youtube_thumbnail,
             youtube::youtube_warmup,
             youtube::youtube_video_context,
-            youtube::youtube_preresolve
+            youtube::youtube_preresolve,
+            youtube::youtube_sponsorblock
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

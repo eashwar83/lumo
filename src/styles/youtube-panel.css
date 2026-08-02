@@ -328,9 +328,22 @@
     color: var(--yt-heart);
 }
 
+.yt-row__action--heart-on {
+    color: var(--yt-heart);
+}
+
 .yt-row__action:disabled {
     opacity: 0.4;
     cursor: default;
+}
+
+/* Blue resume bar along the bottom edge of history thumbnails (mock). */
+.yt-row__resume {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    height: 3px;
+    background: var(--yt-progress);
 }
 
 /* --- States ----------------------------------------------------------------- */

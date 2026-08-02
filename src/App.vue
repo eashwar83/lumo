@@ -18,6 +18,7 @@ import MainPanels from "./components/MainPanels.vue";
 import SideActionsNav from "./components/SideActionsNav.vue";
 import PlaybackOverlays from "./components/PlaybackOverlays.vue";
 import YtPlayerDrawer from "./components/youtube/YtPlayerDrawer.vue";
+import YtSponsorToast from "./components/youtube/YtSponsorToast.vue";
 import PlaylistPeekButton from "./components/PlaylistPeekButton.vue";
 import PlaylistDrawer from "./components/PlaylistDrawer.vue";
 import PlaylistCreationDialog from "./components/PlaylistCreationDialog.vue";
@@ -521,6 +522,22 @@ const onToggleFavorite = async () => {
 const onPlayFavorite = async (entry: PlaylistEntry) => {
     clearNavSelectionDuringLoad.value = false;
     await playPath(entry.path, entry.title?.trim() || undefined);
+};
+
+const onToggleYoutubeFavorite = (payload: {
+    url: string;
+    title: string;
+    thumbnailUrl?: string | null;
+}) => {
+    const wasFavorite = playlistState.isFavorite(payload.url);
+    playlistState.toggleFavorite({
+        path: payload.url,
+        title: payload.title,
+        iconUrl: payload.thumbnailUrl ?? undefined,
+    });
+    showMessageOverlay(
+        wasFavorite ? "Removed from Favourites" : "Added to Favourites",
+    );
 };
 
 const onPlayYoutube = async (payload: { url: string; title?: string }) => {
@@ -1883,7 +1900,16 @@ const ytWatch = useYouTubeWatch({
     setSceneMarkers: (markers) => {
         sceneIndex.markers.value = markers;
     },
+    seekTo: (seconds) => onSeek(seconds),
 });
+
+watch(
+    () => player.state.playback.currentTime,
+    (currentTime) => {
+        if (!player.state.playback.isPlaying) return;
+        ytWatch.onPlaybackTick(currentTime);
+    },
+);
 
 const isPaletteOpen = ref(false);
 
@@ -2422,6 +2448,12 @@ useAppStartupBindings({
             :seek-overlay-right-pulse-token="seekOverlayRightPulseToken"
         />
 
+        <YtSponsorToast
+            :toast="ytWatch.sponsorToast.value"
+            @undo="ytWatch.undoSponsorSkip()"
+            @dismiss="ytWatch.hideSponsorToast()"
+        />
+
         <YtPlayerDrawer
             :open="ytWatch.isDrawerOpen.value"
             :active-tab="ytWatch.activeTab.value"
@@ -2472,6 +2504,7 @@ useAppStartupBindings({
             @import-favorites="onImportFavorites"
             @play-youtube="onPlayYoutube"
             @youtube-notify="(message) => showMessageOverlay(message, 2600)"
+            @toggle-youtube-favorite="onToggleYoutubeFavorite"
         />
 
         <PlaylistDrawer
@@ -2680,6 +2713,7 @@ useAppStartupBindings({
             :ab-point-a="abRange.pointA.value"
             :ab-point-b="abRange.pointB.value"
             :scene-marks="sceneIndex.markers.value.map((m) => m.start)"
+            :sponsor-segments="ytWatch.sponsorSegments.value"
             :is-live-playback="player.state.media.isLivePlayback"
             :volume="player.state.playback.volume"
             :progress-percent="player.progressPercent.value"
