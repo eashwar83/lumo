@@ -411,17 +411,71 @@ fn to_mpv_msg_level(level: &str) -> &'static str {
 
 pub(crate) fn resolve_ytdl_path(app: &tauri::AppHandle) -> Option<String> {
     if let Some(configured_path) = load_setting_value(app, YTDL_PATH_SETTING_LABEL) {
-        let resolved = normalize_existing_ytdl_path(configured_path);
-        if resolved.is_none() {
-            warn!("Configured yt-dlp path is unavailable; skipping ytdl startup options");
+        if let Some(resolved) = normalize_existing_ytdl_path(configured_path) {
+            return Some(resolved);
         }
-        return resolved;
+        warn!("Configured yt-dlp path is unavailable; falling back to the bundled binary");
     }
 
     std::env::var("SOIA_YTDL_PATH")
         .ok()
         .and_then(normalize_existing_ytdl_path)
+        .or_else(native_python_ytdlp_path)
+        .or_else(|| bundled_ytdl_path(app))
         .or_else(platform_default_ytdl_path)
+}
+
+/// A native (ARM64) Python with the yt-dlp module resolves ~7× faster than
+/// the bundled x64 exe under emulation. Returns the python.exe path; the
+/// command builders recognise it and insert `-m yt_dlp`.
+pub(crate) fn native_python_ytdlp_path() -> Option<String> {
+    static CACHE: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    CACHE
+        .get_or_init(|| {
+            #[cfg(windows)]
+            {
+                let local = std::env::var("LOCALAPPDATA").ok()?;
+                let python_root = Path::new(&local).join("Programs").join("Python");
+                let entries = fs::read_dir(&python_root).ok()?;
+                for entry in entries.flatten() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if !name.to_ascii_lowercase().ends_with("-arm64") {
+                        continue;
+                    }
+                    let python = entry.path().join("python.exe");
+                    let module = entry
+                        .path()
+                        .join("Lib")
+                        .join("site-packages")
+                        .join("yt_dlp")
+                        .join("__init__.py");
+                    if python.is_file() && module.is_file() {
+                        return Some(python.to_string_lossy().into_owned());
+                    }
+                }
+                None
+            }
+            #[cfg(not(windows))]
+            {
+                None
+            }
+        })
+        .clone()
+}
+
+#[cfg(windows)]
+const BUNDLED_YTDLP_RESOURCE: &str = "binaries/yt-dlp.exe";
+#[cfg(not(windows))]
+const BUNDLED_YTDLP_RESOURCE: &str = "binaries/yt-dlp";
+
+/// The yt-dlp copy shipped inside the app bundle, so streaming sites work
+/// out of the box. An explicit setting or env var always wins over this.
+pub(crate) fn bundled_ytdl_path(app: &tauri::AppHandle) -> Option<String> {
+    let resolved = app
+        .path()
+        .resolve(BUNDLED_YTDLP_RESOURCE, tauri::path::BaseDirectory::Resource)
+        .ok()?;
+    is_usable_ytdl_file(&resolved).then(|| resolved.to_string_lossy().into_owned())
 }
 
 fn normalize_existing_ytdl_path(value: String) -> Option<String> {

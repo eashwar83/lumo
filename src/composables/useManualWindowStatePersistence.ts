@@ -30,21 +30,34 @@ const normalizeDimension = (value: unknown): number | undefined => {
     return rounded > 0 ? rounded : undefined;
 };
 
+// Windows parks minimized windows at -32000,-32000 with a degenerate size;
+// geometry captured in that state must never be saved or restored (it makes
+// the window invisible on next launch).
+const MIN_SANE_DIMENSION = 200;
+const MIN_SANE_COORDINATE = -20000;
+
+const isSaneCoordinate = (value: number | undefined): value is number =>
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    value > MIN_SANE_COORDINATE;
+
 const normalizePersistedWindowState = (
     value: unknown,
 ): ManualWindowState | null => {
     if (!value || typeof value !== "object") return null;
     const candidate = value as ManualWindowState;
-    const width = normalizeDimension(candidate.width);
-    const height = normalizeDimension(candidate.height);
-    const x =
-        typeof candidate.x === "number" && Number.isFinite(candidate.x)
-            ? Math.round(candidate.x)
-            : undefined;
-    const y =
-        typeof candidate.y === "number" && Number.isFinite(candidate.y)
-            ? Math.round(candidate.y)
-            : undefined;
+    let width = normalizeDimension(candidate.width);
+    let height = normalizeDimension(candidate.height);
+    if (
+        width !== undefined &&
+        height !== undefined &&
+        (width < MIN_SANE_DIMENSION || height < MIN_SANE_DIMENSION)
+    ) {
+        width = undefined;
+        height = undefined;
+    }
+    const x = isSaneCoordinate(candidate.x) ? Math.round(candidate.x) : undefined;
+    const y = isSaneCoordinate(candidate.y) ? Math.round(candidate.y) : undefined;
     const isMaximized =
         typeof candidate.isMaximized === "boolean"
             ? candidate.isMaximized
@@ -87,6 +100,7 @@ export const useManualWindowStatePersistence = ({
 
         const isFullscreen = await currentWindow.isFullscreen().catch(() => false);
         if (isFullscreen) return;
+        if (await currentWindow.isMinimized().catch(() => false)) return;
 
         const scale = await currentWindow.scaleFactor().catch(() => 1);
         const isMaximized = await currentWindow.isMaximized().catch(() => false);
@@ -105,14 +119,22 @@ export const useManualWindowStatePersistence = ({
             nextState.height = normalizeDimension(
                 innerSize ? innerSize.height / scale : undefined,
             );
-            nextState.x =
-                typeof outerPosition?.x === "number"
-                    ? Math.round(outerPosition.x)
-                    : undefined;
-            nextState.y =
-                typeof outerPosition?.y === "number"
-                    ? Math.round(outerPosition.y)
-                    : undefined;
+            nextState.x = isSaneCoordinate(outerPosition?.x)
+                ? Math.round(outerPosition.x)
+                : undefined;
+            nextState.y = isSaneCoordinate(outerPosition?.y)
+                ? Math.round(outerPosition.y)
+                : undefined;
+            if (
+                (nextState.width !== undefined &&
+                    nextState.width < MIN_SANE_DIMENSION) ||
+                (nextState.height !== undefined &&
+                    nextState.height < MIN_SANE_DIMENSION)
+            ) {
+                // Degenerate capture (e.g. mid-minimize); keep the last
+                // good geometry instead.
+                return;
+            }
         }
 
         await saveUiState({

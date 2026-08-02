@@ -879,6 +879,7 @@ watch(
             'top-bar--compact-macos': shouldReserveMacTrafficLightsSpace,
             'top-bar--compact-non-playback':
                 props.compactModeEnabled && !props.isFileLoaded,
+            'top-bar--non-playback': !props.isFileLoaded,
             'top-bar--fullscreen': props.isFullscreen,
         }"
     >
@@ -912,7 +913,7 @@ watch(
                     </svg>
                 </button>
                 <button
-                    v-if="!props.compactModeEnabled || props.isFileLoaded"
+                    v-if="props.isFileLoaded"
                     class="icon-button top-bar__info"
                     :class="{ 'top-bar__info--active': props.isInfoOpen }"
                     type="button"
@@ -1305,6 +1306,17 @@ watch(
     --top-bar-playlist-size: 36px;
     --top-bar-playlist-margin-top: 4px;
     --top-bar-playlist-svg-size: 90%;
+}
+
+/* On the home/panel screens the bar shares the 48px band above the panels
+   (--top-bar-height); without this the input and icons hug the window edge. */
+.top-bar--non-playback {
+    padding-top: 6px;
+}
+
+.top-bar--non-playback .top-bar__window-controls {
+    /* Keep the min/max/close cluster anchored to the window corner. */
+    margin-top: -10px;
 }
 
 .top-bar--compact-macos.top-bar--fullscreen {

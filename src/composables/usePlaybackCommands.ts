@@ -84,10 +84,16 @@ export const usePlaybackCommands = (
   const loadFile = async (
     resumePosition?: number,
     autoPlay = true,
+    qualityMaxHeight?: number,
   ): Promise<LoadFileResult> => {
     if (state.media.url) {
       return await invoke<LoadFileResult>("load_file", {
-        payload: { url: state.media.url, resumePosition, autoPlay },
+        payload: {
+          url: state.media.url,
+          resumePosition,
+          autoPlay,
+          qualityMaxHeight,
+        },
       });
     }
     return {};

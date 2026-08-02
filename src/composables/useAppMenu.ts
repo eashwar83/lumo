@@ -68,7 +68,9 @@ export type AppMenuOptions = {
     // --- commands ---
     openFilePicker: () => void;
     openFileOrFolderPicker: () => void;
-    gotoPanel: (panel: "home" | "history" | "favorites" | "network") => void;
+    gotoPanel: (
+        panel: "home" | "history" | "favorites" | "youtube" | "network",
+    ) => void;
     addToPlaylist: () => void;
     exportContactSheet: () => void;
     exportClip: (asGif: boolean) => void;
@@ -197,6 +199,11 @@ export const useAppMenu = (options: AppMenuOptions) => {
                 label: "Open Network Stream…",
                 shortcut: key("openNetworkStream"),
                 run: () => options.gotoPanel("network"),
+            },
+            {
+                kind: "action",
+                label: "Open YouTube…",
+                run: () => options.gotoPanel("youtube"),
             },
             sep,
             {
@@ -1078,6 +1085,11 @@ export const useAppMenu = (options: AppMenuOptions) => {
             kind: "action",
             label: "Favourites",
             run: () => options.gotoPanel("favorites"),
+        },
+        {
+            kind: "action",
+            label: "YouTube",
+            run: () => options.gotoPanel("youtube"),
         },
         { kind: "action", label: "Network", run: () => options.gotoPanel("network") },
         sep,

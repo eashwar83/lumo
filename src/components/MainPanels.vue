@@ -6,6 +6,7 @@ import HomePanel from "../panels/HomePanel.vue";
 import HistoryPanel from "../panels/HistoryPanel.vue";
 import FavoritesPanel from "../panels/FavoritesPanel.vue";
 import NetworkPanel from "../panels/NetworkPanel.vue";
+import YouTubePanel from "../panels/YouTubePanel.vue";
 
 const props = defineProps<{
     isFileLoaded: boolean;
@@ -18,7 +19,7 @@ const props = defineProps<{
     favoritesByFolder: Record<string, PlaylistEntry[]>;
     favoriteFolderCounts: Record<string, number>;
     activeFavoriteFolderId: string | null;
-    mode: "home" | "history" | "favorites" | "network" | "settings";
+    mode: "home" | "history" | "favorites" | "youtube" | "network" | "settings";
     currentUrl: string;
 }>();
 
@@ -42,6 +43,8 @@ const emit = defineEmits<{
     (e: "remove-many-favorites", paths: string[]): void;
     (e: "export-favorites"): void;
     (e: "import-favorites"): void;
+    (e: "play-youtube", payload: { url: string; title?: string }): void;
+    (e: "youtube-notify", message: string): void;
 }>();
 
 const showPanels = () => !props.isFileLoaded;
@@ -57,7 +60,8 @@ const showPanels = () => !props.isFileLoaded;
                     'main-panels__content--aligned-panel':
                         props.mode === 'network' ||
                         props.mode === 'settings' ||
-                        props.mode === 'favorites',
+                        props.mode === 'favorites' ||
+                        props.mode === 'youtube',
                 },
             ]"
         >
@@ -102,6 +106,13 @@ const showPanels = () => !props.isFileLoaded;
                 @remove-many="emit('remove-many-favorites', $event)"
                 @export="emit('export-favorites')"
                 @import="emit('import-favorites')"
+            />
+
+            <YouTubePanel
+                v-show="showPanels() && props.mode === 'youtube'"
+                :is-visible="showPanels() && props.mode === 'youtube'"
+                @play-youtube="emit('play-youtube', $event)"
+                @notify="emit('youtube-notify', $event)"
             />
 
             <NetworkPanel

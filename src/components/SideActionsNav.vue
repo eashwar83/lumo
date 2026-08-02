@@ -3,6 +3,7 @@ type SideActionId =
     | "home"
     | "history"
     | "favorites"
+    | "youtube"
     | "network"
     | "settings";
 
@@ -98,6 +99,32 @@ const onNavigate = (panel: SideActionId) => {
                 <path
                     d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"
                 />
+            </svg>
+        </button>
+        <button
+            class="side-actions__btn side-actions__btn--youtube"
+            :class="{
+                'side-actions__btn--active': navActivePanel === 'youtube',
+            }"
+            type="button"
+            title="YouTube"
+            aria-label="YouTube"
+            @click="onNavigate('youtube')"
+        >
+            <svg
+                class="side-actions__icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+            >
+                <path
+                    d="M2.5 17a24.12 24.12 0 0 1 0-10 2 2 0 0 1 1.4-1.4 49.56 49.56 0 0 1 16.2 0A2 2 0 0 1 21.5 7a24.12 24.12 0 0 1 0 10 2 2 0 0 1-1.4 1.4 49.55 49.55 0 0 1-16.2 0A2 2 0 0 1 2.5 17"
+                />
+                <path d="m10 15 5-3-5-3z" />
             </svg>
         </button>
         <button
@@ -201,6 +228,11 @@ const onNavigate = (panel: SideActionId) => {
 
 .side-actions__btn--active .side-actions__icon {
     transform: scale(1.05);
+}
+
+/* Mock: active YouTube entry carries a 2px violet inset accent on the left. */
+.side-actions__btn--youtube.side-actions__btn--active {
+    box-shadow: inset 2px 0 0 0 var(--yt-accent, #8b7cf7);
 }
 
 .side-actions__icon {

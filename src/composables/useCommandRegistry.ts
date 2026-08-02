@@ -67,6 +67,8 @@ export type CommandRegistryOptions = {
     autoCropNow: () => void;
     clearCrop: () => void;
 
+    openYouTube: () => void;
+
     toggleSplitCompare: () => void;
     getSplitPosition: () => number;
     setSplitPosition: (value: number) => void;
@@ -211,6 +213,8 @@ export const useCommandRegistry = (options: CommandRegistryOptions) => {
 
         action("subtitle.syncByEar", "Sync subtitles to this moment", "Subtitles",
             options.syncSubtitlesByEar);
+
+        action("youtube.open", "YouTube: Search", "YouTube", options.openYouTube);
 
         action("scene.next", "Next scene", "Scenes", options.nextScene);
         action("scene.previous", "Previous scene", "Scenes", options.previousScene);

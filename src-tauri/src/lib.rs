@@ -19,6 +19,7 @@ mod platform;
 mod playback_source;
 mod remote_control;
 mod subtitles;
+mod youtube;
 use mpv::MpvHandle;
 use tauri::{Emitter, Listener, Manager};
 mod store;
@@ -370,6 +371,10 @@ fn queue_open_media_paths(app: &tauri::AppHandle, paths: Vec<String>, emit_event
 }
 
 fn handle_run_event(app_handle: &tauri::AppHandle, event: tauri::RunEvent) {
+    if matches!(event, tauri::RunEvent::Exit) {
+        youtube::shutdown_pot_server();
+    }
+
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     if let tauri::RunEvent::Opened { urls } = event {
         let paths = collect_open_media_paths_from_urls(urls);
@@ -536,7 +541,12 @@ pub fn run() {
             commands::persistence::set_media_association_to_soia,
             check_update::has_available_update,
             check_update::should_use_embedded_update_install,
-            check_update::consume_pending_update_note_prompt
+            check_update::consume_pending_update_note_prompt,
+            youtube::youtube_search,
+            youtube::youtube_thumbnail,
+            youtube::youtube_warmup,
+            youtube::youtube_video_context,
+            youtube::youtube_preresolve
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

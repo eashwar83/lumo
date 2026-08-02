@@ -146,3 +146,19 @@ body,
     font-family: Roboto, Arial, sans-serif;
     color: var(--text-color);
 }
+
+/* YouTube module palette (from the design mock; brand-fixed, theme-independent). */
+:root {
+    --yt-bg: #141417;
+    --yt-card: #1c1c21;
+    --yt-card-hover: #212127;
+    --yt-border: #26262c;
+    --yt-border-hover: #38383f;
+    --yt-accent: #8b7cf7;
+    --yt-progress: #2f8ef5;
+    --yt-heart: #e8556d;
+    --yt-success: #9fd8a4;
+    --yt-text: #ececef;
+    --yt-text-dim: #9a9aa2;
+    --yt-text-faint: #6f6f78;
+}

@@ -445,7 +445,7 @@ export const defaultSettingGroups: SettingGroup[] = [
                 displayLabel: "Video Download Tool (yt-dlp)",
                 value: "",
                 type: "path",
-                placeholder: "Select the yt-dlp executable...",
+                placeholder: "Built-in (leave empty to use the bundled yt-dlp)",
                 browseTitle: "Select yt-dlp executable",
             },
             {

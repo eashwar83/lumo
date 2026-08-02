@@ -7,6 +7,7 @@ type SideActionId =
     | "home"
     | "history"
     | "favorites"
+    | "youtube"
     | "network"
     | "settings";
 type ClearConfirmTarget = "playlist" | "history" | null;
@@ -95,7 +96,11 @@ export const useAppUiActions = ({
         if (player.state.media.isFileLoaded) {
             closePlaylist();
             await onStopPlayback();
-            if (["home", "history", "favorites", "network"].includes(panel)) {
+            if (
+                ["home", "history", "favorites", "youtube", "network"].includes(
+                    panel,
+                )
+            ) {
                 player.state.media.url = "";
                 player.state.media.title = "";
             }

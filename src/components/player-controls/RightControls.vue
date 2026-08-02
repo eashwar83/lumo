@@ -69,6 +69,8 @@ const props = defineProps<{
     hasAudioTracks: boolean;
     hasSubTracks: boolean;
     isFullscreen: boolean;
+    /** Label for the YouTube quality chip; null hides it (non-YouTube media). */
+    youtubeQualityLabel: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -104,7 +106,26 @@ const emit = defineEmits<{
     (e: "find-online-sub"): void;
     (e: "toggle-fullscreen"): void;
     (e: "update:showSubtitleAdvancedSettings", value: boolean): void;
+    (e: "set-youtube-quality", height: number | null): void;
+    (e: "toggle-youtube-drawer"): void;
 }>();
+
+const YT_QUALITY_OPTIONS: { height: number | null; label: string }[] = [
+    { height: null, label: "Auto" },
+    { height: 2160, label: "2160p" },
+    { height: 1440, label: "1440p" },
+    { height: 1080, label: "1080p" },
+    { height: 720, label: "720p" },
+    { height: 480, label: "480p" },
+    { height: 360, label: "360p" },
+];
+
+const showYtQualityMenu = ref(false);
+
+const onPickYtQuality = (height: number | null) => {
+    showYtQualityMenu.value = false;
+    emit("set-youtube-quality", height);
+};
 
 const DEBAND_LEVELS: DebandLevel[] = ["off", "light", "medium", "strong"];
 
@@ -421,6 +442,70 @@ watch(
 
 <template>
     <div class="controls-right">
+        <div v-if="props.youtubeQualityLabel !== null" class="track-menu-container">
+            <button
+                class="icon-button icon-button--player yt-quality-chip"
+                type="button"
+                title="Stream quality"
+                :aria-expanded="showYtQualityMenu"
+                @click.stop="showYtQualityMenu = !showYtQualityMenu"
+            >
+                {{ props.youtubeQualityLabel }}
+            </button>
+
+            <transition name="fade-up">
+                <div v-if="showYtQualityMenu" class="track-menu">
+                    <div class="track-menu__header">Quality</div>
+                    <div class="track-menu__list">
+                        <button
+                            v-for="option in YT_QUALITY_OPTIONS"
+                            :key="option.label"
+                            class="track-menu__item"
+                            :class="{
+                                'track-menu__item--active':
+                                    props.youtubeQualityLabel === option.label,
+                            }"
+                            type="button"
+                            @click="onPickYtQuality(option.height)"
+                        >
+                            <span class="track-menu__check">
+                                <svg
+                                    v-if="props.youtubeQualityLabel === option.label"
+                                    viewBox="0 0 24 24"
+                                    fill="currentColor"
+                                >
+                                    <path
+                                        d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"
+                                    />
+                                </svg>
+                            </span>
+                            <span class="track-menu__text">{{ option.label }}</span>
+                        </button>
+                    </div>
+                </div>
+            </transition>
+        </div>
+
+        <button
+            v-if="props.youtubeQualityLabel !== null"
+            class="icon-button icon-button--player"
+            type="button"
+            title="Up next & chapters"
+            aria-label="Up next and chapters"
+            @click.stop="emit('toggle-youtube-drawer')"
+        >
+            <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+            >
+                <path d="M3 6h13M3 12h13M3 18h9" />
+                <path d="m17 14 4 3-4 3z" fill="currentColor" stroke="none" />
+            </svg>
+        </button>
+
         <div class="track-menu-container">
             <button
                 class="icon-button icon-button--player"
@@ -1503,6 +1588,13 @@ watch(
 </template>
 
 <style scoped>
+.yt-quality-chip {
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+    letter-spacing: 0.01em;
+}
+
 .icon-button--lg.pip-toggle svg {
     width: 26px !important;
     height: 26px !important;

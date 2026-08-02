@@ -17,6 +17,7 @@ import PlayerHeader from "./components/PlayerHeader.vue";
 import MainPanels from "./components/MainPanels.vue";
 import SideActionsNav from "./components/SideActionsNav.vue";
 import PlaybackOverlays from "./components/PlaybackOverlays.vue";
+import YtPlayerDrawer from "./components/youtube/YtPlayerDrawer.vue";
 import PlaylistPeekButton from "./components/PlaylistPeekButton.vue";
 import PlaylistDrawer from "./components/PlaylistDrawer.vue";
 import PlaylistCreationDialog from "./components/PlaylistCreationDialog.vue";
@@ -48,6 +49,7 @@ import { useSplitCompare } from "./composables/useSplitCompare";
 import { useEnhancementHistory } from "./composables/useEnhancementHistory";
 import { useSubtitleSyncByEar } from "./composables/useSubtitleSyncByEar";
 import { useSceneIndex } from "./composables/useSceneIndex";
+import { useYouTubeWatch } from "./composables/useYouTubeWatch";
 import {
     createDebouncedUiStateSaver,
     loadUiState,
@@ -297,7 +299,13 @@ const {
 });
 
 const onSideNavNavigate = async (
-    panel: "home" | "history" | "favorites" | "network" | "settings",
+    panel:
+        | "home"
+        | "history"
+        | "favorites"
+        | "youtube"
+        | "network"
+        | "settings",
 ) => {
     clearNavSelectionDuringLoad.value = false;
     // Settings opens as a modal over live playback — it must not stop the video
@@ -513,6 +521,90 @@ const onToggleFavorite = async () => {
 const onPlayFavorite = async (entry: PlaylistEntry) => {
     clearNavSelectionDuringLoad.value = false;
     await playPath(entry.path, entry.title?.trim() || undefined);
+};
+
+const onPlayYoutube = async (payload: { url: string; title?: string }) => {
+    clearNavSelectionDuringLoad.value = false;
+    try {
+        await playPath(payload.url, payload.title?.trim() || undefined);
+    } catch (error) {
+        // Unresolvable video (age/region-locked, removed…): stop the
+        // spinner and say why instead of loading forever.
+        isLoading.value = false;
+        showMessageOverlay(
+            String(error).replace(/^Error:\s*/, "").slice(0, 200),
+            4200,
+        );
+    }
+};
+
+// --- YouTube per-video quality override ----------------------------------
+const ytQualityOverride = ref<number | null>(null);
+const isYoutubePlayback = computed(() =>
+    /(^|\.)((youtube\.com)|(youtu\.be))\//i.test(
+        (player.state.media.url || "").replace(/^https?:\/\//i, ""),
+    ),
+);
+const youtubeQualityLabel = computed(() => {
+    if (!isYoutubePlayback.value || !player.state.media.isFileLoaded) {
+        return null;
+    }
+    return ytQualityOverride.value ? `${ytQualityOverride.value}p` : "Auto";
+});
+watch(
+    () => player.state.media.url,
+    () => {
+        ytQualityOverride.value = null;
+    },
+);
+// YouTube slow-starts anonymous streams (anti-bot ramp, occasionally a
+// minute); without a status line users read the wait as a dead player.
+let ytLoadingNoticeTimers: number[] = [];
+watch(
+    () => isLoading.value && isYoutubePlayback.value,
+    (loadingYoutube) => {
+        ytLoadingNoticeTimers.forEach((timer) => window.clearTimeout(timer));
+        ytLoadingNoticeTimers = [];
+        if (!loadingYoutube) return;
+        ytLoadingNoticeTimers.push(
+            window.setTimeout(() => {
+                if (isLoading.value && isYoutubePlayback.value) {
+                    showMessageOverlay(
+                        "YouTube is slow-starting this stream — hang on…",
+                        3600,
+                    );
+                }
+            }, 10_000),
+            window.setTimeout(() => {
+                if (isLoading.value && isYoutubePlayback.value) {
+                    showMessageOverlay(
+                        "Still throttled by YouTube — first plays can take up to a minute",
+                        5000,
+                    );
+                }
+            }, 32_000),
+        );
+    },
+);
+
+const onSetYoutubeQuality = async (height: number | null) => {
+    if (!isYoutubePlayback.value) return;
+    if (height === ytQualityOverride.value) return;
+    ytQualityOverride.value = height;
+    const position = player.state.playback.currentTime;
+    const autoPlay = player.state.playback.isPlaying;
+    showMessageOverlay(
+        height ? `Switching to ${height}p…` : "Switching to default quality…",
+        2200,
+    );
+    try {
+        await player.loadFile(position, autoPlay, height ?? undefined);
+    } catch (error) {
+        showMessageOverlay(
+            String(error).replace(/^Error:\s*/, "").slice(0, 160),
+            3600,
+        );
+    }
 };
 
 const onRemoveFavorite = (entry: PlaylistEntry) => {
@@ -1784,6 +1876,15 @@ const sceneIndex = useSceneIndex({
     onMessage: showMessageOverlay,
 });
 
+const ytWatch = useYouTubeWatch({
+    mediaUrl: () => player.state.media.url,
+    isFileLoaded: () => player.state.media.isFileLoaded,
+    setUpNextQueue: (items) => playlistState.setYoutubeUpNext(items),
+    setSceneMarkers: (markers) => {
+        sceneIndex.markers.value = markers;
+    },
+});
+
 const isPaletteOpen = ref(false);
 
 // Shows a command's bound key in the palette, when the user has given it one.
@@ -1825,6 +1926,7 @@ const commandRegistry = useCommandRegistry({
     openAudioPanel: () => openAudioPanel(),
     openPlaylist: () => void togglePlaylist(),
     openSettings: () => openSettings(),
+    openYouTube: () => void onSideNavNavigate("youtube"),
     openMediaInfo: () => void toggleInfo(),
     openShortcutsHelp: () => {
         isShortcutsHelpOpen.value = !isShortcutsHelpOpen.value;
@@ -2104,6 +2206,9 @@ const closeTopOverlay = (): boolean => {
         closePlaylist();
         return true;
     }
+    if (ytWatch.closeDrawer()) {
+        return true;
+    }
     if (isInfoOpen.value) {
         isInfoOpen.value = false;
         return true;
@@ -2317,6 +2422,21 @@ useAppStartupBindings({
             :seek-overlay-right-pulse-token="seekOverlayRightPulseToken"
         />
 
+        <YtPlayerDrawer
+            :open="ytWatch.isDrawerOpen.value"
+            :active-tab="ytWatch.activeTab.value"
+            :related="ytWatch.related.value"
+            :chapters="ytWatch.chapters.value"
+            :is-loading="ytWatch.isLoadingContext.value"
+            :autoplay-next="ytWatch.autoplayNext.value"
+            :current-time="player.state.playback.currentTime"
+            @close="ytWatch.isDrawerOpen.value = false"
+            @set-tab="ytWatch.activeTab.value = $event"
+            @set-autoplay="ytWatch.setAutoplayNext"
+            @play="onPlayYoutube"
+            @seek="onSeek"
+        />
+
         <MainPanels
             v-show="!player.state.media.isFileLoaded"
             :is-file-loaded="player.state.media.isFileLoaded"
@@ -2350,6 +2470,8 @@ useAppStartupBindings({
             @remove-many-favorites="onRemoveManyFavorites"
             @export-favorites="onExportFavorites"
             @import-favorites="onImportFavorites"
+            @play-youtube="onPlayYoutube"
+            @youtube-notify="(message) => showMessageOverlay(message, 2600)"
         />
 
         <PlaylistDrawer
@@ -2550,6 +2672,9 @@ useAppStartupBindings({
             :is-playing="player.state.playback.isPlaying"
             :current-time="player.state.playback.currentTime"
             :duration="player.state.playback.duration"
+            :youtube-quality-label="youtubeQualityLabel"
+            @set-youtube-quality="onSetYoutubeQuality"
+            @toggle-youtube-drawer="ytWatch.toggleDrawer()"
             :media-path="player.state.media.url"
             :thumb-reload-token="thumbReloadToken"
             :ab-point-a="abRange.pointA.value"

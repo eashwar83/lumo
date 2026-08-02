@@ -1,0 +1,368 @@
+/* YouTube module — visual language from the design mock:
+   window #141417, cards #1c1c21 / borders #26262c (hover #212127/#38383f),
+   violet #8b7cf7 primary, blue #2f8ef5 progress, pink #e8556d hearts,
+   green #9fd8a4 success. Tokens live in app-theme.css as --yt-*. */
+
+.yt {
+    width: min(1320px, 100%);
+    height: 98%;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    color: var(--yt-text);
+    background: var(--yt-bg);
+    border: 1px solid var(--yt-border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    box-sizing: border-box;
+}
+
+.yt-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+/* --- Section tabs (pills) ------------------------------------------------ */
+
+.yt-tabs {
+    display: flex;
+    gap: 6px;
+}
+
+.yt-tab {
+    border: 1px solid var(--yt-border);
+    background: var(--yt-card);
+    color: var(--yt-text-dim);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition:
+        background-color 0.15s ease,
+        color 0.15s ease,
+        border-color 0.15s ease;
+}
+
+.yt-tab:hover {
+    background: var(--yt-card-hover);
+    border-color: var(--yt-border-hover);
+    color: var(--yt-text);
+}
+
+.yt-tab--active {
+    background: rgba(139, 124, 247, 0.16);
+    border-color: var(--yt-accent);
+    color: var(--yt-text);
+}
+
+/* --- Search bar ----------------------------------------------------------- */
+
+.yt-search {
+    display: flex;
+    gap: 8px;
+}
+
+.yt-search__input {
+    flex: 1;
+    background: var(--yt-card);
+    border: 1px solid var(--yt-border);
+    border-radius: 10px;
+    color: var(--yt-text);
+    padding: 9px 12px;
+    font-size: 13.5px;
+    outline: none;
+    transition: border-color 0.15s ease;
+}
+
+.yt-search__input::placeholder {
+    color: var(--yt-text-faint);
+}
+
+.yt-search__input:focus {
+    border-color: var(--yt-accent);
+}
+
+.yt-search__btn {
+    border: none;
+    background: var(--yt-accent);
+    color: #17151f;
+    font-weight: 700;
+    font-size: 13px;
+    border-radius: 10px;
+    padding: 0 18px;
+    cursor: pointer;
+    transition: filter 0.15s ease;
+}
+
+.yt-search__btn:hover {
+    filter: brightness(1.08);
+}
+
+.yt-search__btn:disabled {
+    opacity: 0.55;
+    cursor: default;
+}
+
+/* --- Filter chips ---------------------------------------------------------- */
+
+.yt-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.yt-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--yt-border);
+    background: var(--yt-card);
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 12px;
+    color: var(--yt-text-dim);
+    cursor: pointer;
+    transition:
+        background-color 0.15s ease,
+        border-color 0.15s ease,
+        color 0.15s ease;
+}
+
+.yt-chip:hover {
+    background: var(--yt-card-hover);
+    border-color: var(--yt-border-hover);
+}
+
+.yt-chip__label {
+    color: var(--yt-text-faint);
+    font-weight: 600;
+}
+
+.yt-chip__select {
+    appearance: none;
+    -webkit-appearance: none;
+    background: transparent;
+    border: none;
+    color: var(--yt-text);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    outline: none;
+    padding-right: 2px;
+}
+
+.yt-chip__select option {
+    background: var(--yt-card);
+    color: var(--yt-text);
+}
+
+.yt-chip--toggle {
+    font-weight: 700;
+    color: var(--yt-text-dim);
+}
+
+.yt-chip--on {
+    background: rgba(139, 124, 247, 0.16);
+    border-color: var(--yt-accent);
+    color: var(--yt-text);
+}
+
+/* --- Result list ----------------------------------------------------------- */
+
+.yt-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-right: 2px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--yt-border-hover) transparent;
+}
+
+.yt-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--yt-card);
+    border: 1px solid var(--yt-border);
+    border-radius: 10px;
+    padding: 8px;
+    cursor: pointer;
+    transition:
+        background-color 0.15s ease,
+        border-color 0.15s ease;
+}
+
+.yt-row:hover {
+    background: var(--yt-card-hover);
+    border-color: var(--yt-border-hover);
+}
+
+.yt-row:focus-visible {
+    outline: 2px solid var(--yt-accent);
+    outline-offset: -2px;
+}
+
+.yt-row__thumb {
+    position: relative;
+    width: 160px;
+    height: 90px;
+    flex: 0 0 auto;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #101013;
+}
+
+.yt-row__thumb--round {
+    width: 90px;
+    border-radius: 50%;
+    margin: 0 35px;
+}
+
+.yt-row__thumb-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.yt-row__thumb-fallback {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--yt-text-faint);
+}
+
+.yt-row__thumb-fallback svg {
+    width: 30px;
+    height: 30px;
+}
+
+.yt-row__badge {
+    position: absolute;
+    right: 4px;
+    bottom: 4px;
+    background: rgba(0, 0, 0, 0.82);
+    color: #fff;
+    font-size: 10.5px;
+    font-weight: 700;
+    border-radius: 4px;
+    padding: 1px 5px;
+    letter-spacing: 0.02em;
+}
+
+.yt-row__badge--live {
+    background: rgba(232, 85, 109, 0.92);
+}
+
+.yt-row__meta {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.yt-row__title {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--yt-text);
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.yt-row__sub {
+    font-size: 12px;
+    color: var(--yt-text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Row icon actions: always visible, muted → white on hover (spec §9). */
+
+.yt-row__actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex: 0 0 auto;
+}
+
+.yt-row__action {
+    border: none;
+    background: transparent;
+    color: var(--yt-text-faint);
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition:
+        color 0.15s ease,
+        background-color 0.15s ease;
+}
+
+.yt-row__action svg {
+    width: 17px;
+    height: 17px;
+}
+
+.yt-row__action:hover:not(:disabled) {
+    color: var(--yt-text);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.yt-row__action--heart:hover:not(:disabled) {
+    color: var(--yt-heart);
+}
+
+.yt-row__action:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+/* --- States ----------------------------------------------------------------- */
+
+.yt-state {
+    padding: 26px 12px;
+    text-align: center;
+    color: var(--yt-text-dim);
+    font-size: 13px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+}
+
+.yt-state__icon {
+    width: 42px;
+    height: 42px;
+    color: var(--yt-text-faint);
+}
+
+.yt-state--error {
+    color: var(--yt-heart);
+}
+
+.yt-state--more {
+    padding: 10px;
+    font-size: 12px;
+    color: var(--yt-text-faint);
+}
+
+.yt-state--placeholder {
+    flex: 1;
+    justify-content: center;
+}

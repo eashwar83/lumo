@@ -41,6 +41,10 @@ type CreatePlaylistEntryInput = {
 // Auto-Load Folder feature. It is never persisted (see toPersistedState).
 export const AUTOLOAD_PLAYLIST_ID = "pl_autoload_folder";
 
+// Reserved id for the transient YouTube "Up next" queue. Session-only,
+// never persisted; Previous/Next and auto-advance walk it like any playlist.
+export const YT_UPNEXT_PLAYLIST_ID = "pl_youtube_upnext";
+
 const isValidSortMode = (value: unknown): value is PlaylistSortMode =>
     value === "name" || value === "added";
 
@@ -747,17 +751,59 @@ export const usePlaylistState = () => {
     };
 
     const toPersistedState = () => ({
-        // The auto-loaded folder playlist is session-only; never persist it.
+        // Transient playlists (auto-loaded folder, YouTube Up next) are
+        // session-only; never persist them.
         playlists: playlists.value.filter(
-            (item) => item.id !== AUTOLOAD_PLAYLIST_ID,
+            (item) =>
+                item.id !== AUTOLOAD_PLAYLIST_ID &&
+                item.id !== YT_UPNEXT_PLAYLIST_ID,
         ),
         playlistLoopMode: loopMode.value,
         playlistSortMode: sortMode.value,
         activePlaylistId:
-            activePlaylistId.value === AUTOLOAD_PLAYLIST_ID
+            activePlaylistId.value === AUTOLOAD_PLAYLIST_ID ||
+            activePlaylistId.value === YT_UPNEXT_PLAYLIST_ID
                 ? null
                 : activePlaylistId.value,
     });
+
+    /** Replaces the transient YouTube "Up next" queue (empty list removes it). */
+    const setYoutubeUpNext = (items: CreatePlaylistEntryInput[]) => {
+        const timestamp = Date.now();
+        const entries = normalizePlaylistEntries(
+            items
+                .map((item, index) => ({
+                    path: item.path?.trim() ?? "",
+                    title: item.title?.trim() || undefined,
+                    iconUrl: item.iconUrl?.trim() || undefined,
+                    addedAt: timestamp + index,
+                }))
+                .filter((item) => !!item.path),
+        );
+        const others = playlists.value.filter(
+            (item) => item.id !== YT_UPNEXT_PLAYLIST_ID,
+        );
+        if (!entries.length) {
+            playlists.value = others;
+            if (playbackPlaylistId.value === YT_UPNEXT_PLAYLIST_ID) {
+                playbackPlaylistId.value = null;
+            }
+            if (activePlaylistId.value === YT_UPNEXT_PLAYLIST_ID) {
+                activePlaylistId.value = null;
+            }
+            return;
+        }
+        playlists.value = [
+            ...others,
+            {
+                id: YT_UPNEXT_PLAYLIST_ID,
+                name: "Up next",
+                entries,
+                createdAt: timestamp,
+            },
+        ];
+        playbackPlaylistId.value = YT_UPNEXT_PLAYLIST_ID;
+    };
 
     const addFromDrawerSelection = (paths: string[]) => {
         if (activePlaylist.value) {
@@ -1051,6 +1097,7 @@ export const usePlaylistState = () => {
         toPersistedState,
         createPlaylistWithPaths,
         createPlaylistWithEntries,
+        setYoutubeUpNext,
         getDefaultPlaylistNameForPaths,
         getDefaultPlaylistNameForEntries,
         addFromDrawerSelection,

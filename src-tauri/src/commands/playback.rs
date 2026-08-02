@@ -84,6 +84,9 @@ pub(crate) struct LoadFilePayload {
     url: String,
     resume_position: Option<f64>,
     auto_play: Option<bool>,
+    /// Per-play stream quality cap (e.g. 720/1080/2160); None = the
+    /// configured default. Only meaningful for yt-dlp-resolved URLs.
+    quality_max_height: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -91,6 +94,20 @@ pub(crate) struct LoadFilePayload {
 pub(crate) struct LoadFileResult {
     title: Option<String>,
     is_live_playback: bool,
+}
+
+fn is_youtube_page_url(url: &str) -> bool {
+    let stripped = url
+        .trim()
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .trim_start_matches("www.")
+        .trim_start_matches("m.")
+        .to_ascii_lowercase();
+    stripped.starts_with("youtube.com/watch")
+        || stripped.starts_with("youtube.com/shorts/")
+        || stripped.starts_with("youtube.com/live/")
+        || stripped.starts_with("youtu.be/")
 }
 
 fn resume_playback(mpv_guard: &crate::mpv::MpvHandle) -> Result<(), String> {
@@ -103,7 +120,10 @@ fn restart_from_beginning_after_eof(mpv_guard: &crate::mpv::MpvHandle) -> Result
 }
 
 fn escape_mpv_load_option_value(value: &str) -> String {
-    value.replace('\\', "\\\\").replace(',', "\\,")
+    // mpv's key-value list parser has no backslash escapes; commas in the
+    // value split the list and abort the whole loadfile command. Use mpv's
+    // fixed-length %n% quoting (n = byte length) so any character is safe.
+    format!("%{}%{}", value.len(), value)
 }
 
 #[tauri::command]
@@ -114,7 +134,27 @@ pub(crate) async fn load_file(
 ) -> Result<LoadFileResult, String> {
     let resume_position = payload.resume_position.unwrap_or(0.0);
     let auto_play = payload.auto_play.unwrap_or(true);
-    let resolved_media = crate::mpv::try_resolve_with_ytdlp(&app, &payload.url).await;
+    if is_youtube_page_url(&payload.url) {
+        // Make sure the PO-token server is up so the resolve gets attested
+        // stream URLs (no throttling ramp). Cheap no-op when already running.
+        let app_for_pot = app.clone();
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            crate::youtube::ensure_pot_server(&app_for_pot);
+        })
+        .await;
+    }
+    let resolved_media =
+        crate::mpv::try_resolve_with_ytdlp(&app, &payload.url, payload.quality_max_height).await;
+    // A YouTube page URL is useless to mpv — failing the resolve must fail
+    // the load loudly instead of leaving the spinner running forever on
+    // age-restricted / region-locked / unavailable videos.
+    if resolved_media.is_none() && is_youtube_page_url(&payload.url) {
+        return Err(
+            "Couldn't load this YouTube video. It may be age-restricted, region-locked, or \
+             temporarily unavailable — try again, or import browser cookies in Settings → Tools."
+                .to_string(),
+        );
+    }
     let playback_url = resolved_media
         .as_ref()
         .map(|resolved| resolved.url.as_str())

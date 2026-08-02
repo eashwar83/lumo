@@ -45,3 +45,11 @@ src-tauri/libs/mpv/MoltenVK_icd.json
 src-tauri/libs/mpv/android/**/*.so
 
 src-tauri/gen/android
+
+# Local-only large runtime binaries (see src-tauri/binaries/README.md)
+src-tauri/binaries/yt-dlp.exe
+src-tauri/binaries/bgutil-pot-server.zip
+# Local mpv runtime libraries and session-local helper files
+src-tauri/libs/
+CLAUDE-HANDOFF.md
+Capture-LumoShots.ps1

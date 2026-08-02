@@ -1,4 +1,4 @@
-use log::{info, warn};
+﻿use log::{info, warn};
 use serde_json::Value;
 use std::io::Read;
 use std::process::{Command, Stdio};
@@ -19,6 +19,17 @@ fn quiet_command(program: &str) -> Command {
     command
 }
 
+/// Builds the yt-dlp base command. When the configured path is a Python
+/// interpreter (native ARM64 install), yt-dlp runs as `python -m yt_dlp`
+/// - same CLI, ~7x faster than the emulated x64 exe.
+pub(crate) fn ytdlp_base_command(ytdl_path: &str) -> Command {
+    let mut command = quiet_command(ytdl_path);
+    if ytdl_path.to_ascii_lowercase().ends_with("python.exe") {
+        command.arg("-m").arg("yt_dlp");
+    }
+    command
+}
+
 const YTDLP_TIMEOUT: Duration = Duration::from_secs(60);
 const DIRECT_STREAM_EXTENSIONS: &[&str] = &[
     "m3u8", "mp4", "m4v", "mov", "mkv", "webm", "flv", "avi", "ts", "mp3", "m4a", "aac", "flac",
@@ -35,10 +46,55 @@ struct Candidate {
     score: i64,
 }
 
+#[derive(Clone)]
 pub(crate) struct ResolvedMedia {
     pub(crate) url: String,
     pub(crate) title: Option<String>,
     pub(crate) is_live_playback: bool,
+}
+
+// Resolved streams stay valid for hours; caching them makes replays and
+// quality switches skip the 5-19s yt-dlp extraction entirely. The proxied
+// URLs stay usable because the stream-proxy backend registry is in-memory
+// and lives for the whole app session.
+const RESOLVE_CACHE_TTL: Duration = Duration::from_secs(40 * 60);
+const RESOLVE_CACHE_MAX: usize = 40;
+
+static RESOLVE_CACHE: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, (Instant, ResolvedMedia)>>,
+> = std::sync::OnceLock::new();
+
+fn resolve_cache(
+) -> &'static std::sync::Mutex<std::collections::HashMap<String, (Instant, ResolvedMedia)>> {
+    RESOLVE_CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+fn resolve_cache_get(key: &str) -> Option<ResolvedMedia> {
+    let guard = resolve_cache().lock().ok()?;
+    let (stored_at, media) = guard.get(key)?;
+    // Live streams get fresh manifests each time.
+    (!media.is_live_playback && stored_at.elapsed() < RESOLVE_CACHE_TTL)
+        .then(|| media.clone())
+}
+
+fn resolve_cache_put(key: String, media: &ResolvedMedia) {
+    if media.is_live_playback {
+        return;
+    }
+    let Ok(mut guard) = resolve_cache().lock() else {
+        return;
+    };
+    guard.retain(|_, (stored_at, _)| stored_at.elapsed() < RESOLVE_CACHE_TTL);
+    if guard.len() >= RESOLVE_CACHE_MAX {
+        if let Some(oldest) = guard
+            .iter()
+            .min_by_key(|(_, (stored_at, _))| *stored_at)
+            .map(|(cache_key, _)| cache_key.clone())
+        {
+            guard.remove(&oldest);
+        }
+    }
+    guard.insert(key, (Instant::now(), media.clone()));
 }
 
 pub(crate) struct ResolvedPlaylistEntry {
@@ -121,7 +177,7 @@ fn run_ytdlp_playlist_command(
     cookies_from_browser: Option<&str>,
     raw_url: &str,
 ) -> Result<std::process::Output, String> {
-    let mut command = quiet_command(ytdl_path);
+    let mut command = ytdlp_base_command(ytdl_path);
     let mut log_args = vec![
         "--dump-single-json".to_string(),
         "--flat-playlist".to_string(),
@@ -244,7 +300,11 @@ fn extract_playlist_entries(value: &Value) -> Vec<ResolvedPlaylistEntry> {
         .collect()
 }
 
-pub(crate) async fn resolve(app: &AppHandle, raw_url: &str) -> Result<Option<ResolvedMedia>, String> {
+pub(crate) async fn resolve(
+    app: &AppHandle,
+    raw_url: &str,
+    max_height_override: Option<u32>,
+) -> Result<Option<ResolvedMedia>, String> {
     if !is_http_url(raw_url) {
         return Ok(None);
     }
@@ -257,9 +317,19 @@ pub(crate) async fn resolve(app: &AppHandle, raw_url: &str) -> Result<Option<Res
         return Ok(None);
     };
 
+    let effective_max_height = max_height_override.unwrap_or(settings.format.max_height);
+    let cache_key = format!("{raw_url}|{effective_max_height}");
+    if let Some(cached) = resolve_cache_get(&cache_key) {
+        info!("yt-dlp: resolve served from cache");
+        return Ok(Some(cached));
+    }
+
     let proxy_url = crate::network::proxy::current_proxy_key(app)?;
     let cookies_from_browser = settings.cookies.browser;
-    let format_selector = settings.format.selector();
+    let format_selector = super::ytdlp_settings::YtdlpFormatSettings {
+        max_height: effective_max_height,
+    }
+    .selector();
     let raw_url = raw_url.to_string();
     let cookies_clone = cookies_from_browser.clone();
     let proxy_clone = proxy_url.clone();
@@ -309,24 +379,61 @@ pub(crate) async fn resolve(app: &AppHandle, raw_url: &str) -> Result<Option<Res
 
     let value: Value = serde_json::from_slice(&output.stdout)
         .map_err(|error| format!("yt-dlp returned invalid JSON: {error}"))?;
-    let Some(candidate) = select_candidate(&value) else {
+    let Some(candidate) = select_candidate(&value, effective_max_height) else {
         return Err("yt-dlp did not return a playable URL".to_string());
     };
     log_selected_candidate("selected", &candidate);
-    let is_live_playback = is_likely_live_candidate(&candidate);
+    let is_live_playback = is_live_video(&value);
     let playback_url = proxied_candidate_url(&candidate);
     let title = extract_media_title(&value);
 
     info!("yt-dlp: resolved url through stream proxy");
-    Ok(Some(ResolvedMedia {
+    let resolved = ResolvedMedia {
         url: playback_url,
         title,
         is_live_playback,
-    }))
+    };
+    resolve_cache_put(cache_key, &resolved);
+    prewarm_stream(&resolved.url);
+    Ok(Some(resolved))
 }
 
-pub(crate) async fn try_resolve(app: &AppHandle, raw_url: &str) -> Option<ResolvedMedia> {
-    match resolve(app, raw_url).await {
+/// Kicks the stream open in the background right after resolving: the local
+/// proxy connects to googlevideo, absorbs TLS setup and any remaining
+/// availability ramp, so mpv's own open (or a later cache-hit play) starts
+/// immediately.
+fn prewarm_stream(playback_url: &str) {
+    let targets: Vec<String> = if let Some(rest) = playback_url.strip_prefix("edl://") {
+        rest.split(';')
+            .filter_map(|part| {
+                let idx = part.find("http")?;
+                Some(part[idx..].to_string())
+            })
+            .collect()
+    } else if playback_url.starts_with("http") {
+        vec![playback_url.to_string()]
+    } else {
+        return;
+    };
+    for target in targets {
+        std::thread::spawn(move || {
+            let Ok(client) = reqwest::blocking::Client::builder()
+                .timeout(Duration::from_secs(90))
+                .build()
+            else {
+                return;
+            };
+            let _ = client.get(&target).header("Range", "bytes=0-1").send();
+        });
+    }
+}
+
+pub(crate) async fn try_resolve(
+    app: &AppHandle,
+    raw_url: &str,
+    max_height_override: Option<u32>,
+) -> Option<ResolvedMedia> {
+    match resolve(app, raw_url, max_height_override).await {
         Ok(resolved) => resolved,
         Err(error) => {
             warn!("yt-dlp: resolve failed for {}: {error}", redact_url(raw_url));
@@ -342,10 +449,15 @@ fn run_ytdlp_command(
     format_selector: &str,
     raw_url: &str,
 ) -> Result<std::process::Output, String> {
-    let mut command = quiet_command(ytdl_path);
+    let mut command = ytdlp_base_command(ytdl_path);
     let mut log_args = vec![
         "--dump-single-json".to_string(),
         "--no-playlist".to_string(),
+        // Lets yt-dlp solve JS challenges with the system Node (deno is its
+        // only default), unlocking token-attested formats; a warning-level
+        // no-op when Node is absent.
+        "--js-runtimes".to_string(),
+        "node".to_string(),
         "-f".to_string(),
         format_selector.to_string(),
         redact_url(raw_url),
@@ -353,6 +465,8 @@ fn run_ytdlp_command(
     command
         .arg("--dump-single-json")
         .arg("--no-playlist")
+        .arg("--js-runtimes")
+        .arg("node")
         .arg("-f")
         .arg(format_selector)
         .arg(raw_url)
@@ -458,8 +572,19 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-fn select_candidate(value: &Value) -> Option<Candidate> {
+fn select_candidate(value: &Value, max_height: u32) -> Option<Candidate> {
     let top_headers = parse_headers(value.get("http_headers"));
+
+    // YouTube "ramps" fresh anonymous DASH URLs: the first byte is withheld
+    // until `available_at`. When the wait would be noticeable, prefer a
+    // PO-token-attested HLS format (immune to the ramp) if one exists.
+    let ramp = requested_ramp_seconds(value);
+    if ramp > 3 {
+        if let Some(candidate) = select_potted_hls(value, max_height, &top_headers) {
+            info!("yt-dlp: DASH ramp {ramp}s pending; using token-attested HLS instead");
+            return Some(candidate);
+        }
+    }
 
     if let Some(candidate) = select_requested_formats(value, &top_headers) {
         return Some(candidate);
@@ -577,10 +702,68 @@ fn log_selected_candidate(label: &str, candidate: &Candidate) {
     );
 }
 
-fn is_likely_live_candidate(candidate: &Candidate) -> bool {
-    let protocol = candidate.protocol.as_deref().unwrap_or("").to_ascii_lowercase();
-    let url = candidate.url.to_ascii_lowercase();
-    protocol.contains("m3u8") || url.contains(".m3u8")
+/// Liveness from yt-dlp's own metadata - protocol is no longer a proxy for
+/// it now that VOD playback may legitimately use HLS.
+fn is_live_video(value: &Value) -> bool {
+    value.get("is_live").and_then(Value::as_bool).unwrap_or(false)
+        || value
+            .get("live_status")
+            .and_then(Value::as_str)
+            .is_some_and(|status| status == "is_live" || status == "post_live")
+}
+
+fn now_unix() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// Longest remaining `available_at` wait across the formats yt-dlp picked.
+fn requested_ramp_seconds(value: &Value) -> i64 {
+    let now = now_unix();
+    value
+        .get("requested_formats")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|format| format.get("available_at").and_then(Value::as_i64))
+        .map(|available_at| available_at - now)
+        .max()
+        .unwrap_or(0)
+}
+
+fn has_pot_param(url: &str) -> bool {
+    url.contains("pot=") || url.contains("/pot/")
+}
+
+/// Best muxed HLS format carrying a PO token, capped at `max_height`.
+fn select_potted_hls(
+    value: &Value,
+    max_height: u32,
+    top_headers: &[(String, String)],
+) -> Option<Candidate> {
+    value
+        .get("formats")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|format| {
+            format
+                .get("protocol")
+                .and_then(Value::as_str)
+                .is_some_and(|protocol| protocol.contains("m3u8"))
+                && format
+                    .get("url")
+                    .and_then(Value::as_str)
+                    .is_some_and(has_pot_param)
+                && format
+                    .get("height")
+                    .and_then(Value::as_u64)
+                    .is_some_and(|height| height <= u64::from(max_height))
+        })
+        .filter_map(|format| format_candidate(format, top_headers))
+        .max_by_key(|candidate| candidate.score)
 }
 
 fn extract_media_title(value: &Value) -> Option<String> {
@@ -783,3 +966,4 @@ fn redact_url(raw: &str) -> String {
     url.set_fragment(None);
     url.to_string()
 }
+

@@ -52,6 +52,9 @@
     ],
     "resources": {
       "libs/mpv/*.dll": "",
+      "binaries/yt-dlp.exe": "binaries/yt-dlp.exe",
+      "binaries/yt-dlp-plugins/bgutil-ytdlp-pot-provider/yt_dlp_plugins/extractor/*.py": "binaries/yt-dlp-plugins/bgutil-ytdlp-pot-provider/yt_dlp_plugins/extractor/",
+      "binaries/bgutil-pot-server.zip": "binaries/bgutil-pot-server.zip",
       "resources/shaders/anime/*.glsl": "shaders/anime/",
       "resources/shaders/live/*.glsl": "shaders/live/"
     },

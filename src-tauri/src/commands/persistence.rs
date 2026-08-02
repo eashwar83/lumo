@@ -200,15 +200,16 @@ fn resolve_current_ytdl_path(
     app: &tauri::AppHandle,
     configured_path: Option<String>,
 ) -> Option<String> {
-    match configured_path {
+    let explicit = match configured_path {
         Some(value) => configured_ytdl_path(Some(value)),
-        None => {
-            if let Some(value) = persisted_ytdl_path(app) {
-                return configured_ytdl_path(Some(value));
-            }
-            configured_ytdl_path(std::env::var("SOIA_YTDL_PATH").ok()).or_else(default_ytdl_path)
-        }
-    }
+        None => persisted_ytdl_path(app)
+            .and_then(|value| configured_ytdl_path(Some(value)))
+            .or_else(|| configured_ytdl_path(std::env::var("SOIA_YTDL_PATH").ok())),
+    };
+    explicit
+        .or_else(crate::app_bootstrap::native_python_ytdlp_path)
+        .or_else(|| crate::app_bootstrap::bundled_ytdl_path(app))
+        .or_else(default_ytdl_path)
 }
 
 fn resolve_current_ytdl_cookies_from_browser(

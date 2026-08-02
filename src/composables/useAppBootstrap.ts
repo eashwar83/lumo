@@ -19,6 +19,7 @@ export type SideActionId =
     | "home"
     | "history"
     | "favorites"
+    | "youtube"
     | "network"
     | "settings";
 export type ClearConfirmTarget = "playlist" | "history" | null;
@@ -136,6 +137,7 @@ export const useAppBootstrap = () => {
         // it (that would leave the main area blank). Fall back to home.
         if (panel === "history") return "history";
         if (panel === "favorites") return "favorites";
+        if (panel === "youtube") return "youtube";
         if (panel === "network") return "network";
         return "home";
     };

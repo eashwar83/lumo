@@ -319,6 +319,13 @@
     top: var(--menu-bar-height);
 }
 
+/* The home/history/favorites/network panels sit below the header band; when
+   the menu bar pushes the header down, push the panels down with it so the
+   URL row doesn't overlap the panel titles. */
+.soia-container.has-menu-bar .main-panels {
+    top: calc(var(--menu-bar-height) + var(--top-bar-height));
+}
+
 /* The panels reserve top padding for the window controls; with the menu bar
    above them that allowance is already covered. */
 .soia-container.has-menu-bar .curves,
