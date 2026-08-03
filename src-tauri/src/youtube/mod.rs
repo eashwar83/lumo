@@ -5,6 +5,7 @@
 //! matching the rest of the app. Subprocess spawns go through quiet commands
 //! so no console window flashes over the player.
 
+mod browse;
 mod data;
 mod downloads;
 mod innertube;
@@ -14,6 +15,10 @@ mod thumbs;
 mod watch;
 mod ytdlp;
 
+pub(crate) use browse::{
+    __cmd__youtube_channel, __cmd__youtube_playlist, __cmd__youtube_trending,
+    youtube_channel, youtube_playlist, youtube_trending,
+};
 pub(crate) use downloads::{
     __cmd__youtube_download_add, __cmd__youtube_download_cancel,
     __cmd__youtube_download_clear_done, __cmd__youtube_download_list,
@@ -101,6 +106,20 @@ pub(crate) struct YoutubeSearchPayload {
 
 pub(crate) fn watch_url(id: &str) -> String {
     format!("https://www.youtube.com/watch?v={id}")
+}
+
+/// 2_200_000_000 -> "2.2B views" (YouTube's own shorthand).
+pub(crate) fn format_view_count(count: u64) -> String {
+    let formatted = if count >= 1_000_000_000 {
+        format!("{:.1}B", count as f64 / 1_000_000_000.0)
+    } else if count >= 1_000_000 {
+        format!("{:.1}M", count as f64 / 1_000_000.0)
+    } else if count >= 1_000 {
+        format!("{:.1}K", count as f64 / 1_000.0)
+    } else {
+        return format!("{count} views");
+    };
+    format!("{} views", formatted.replace(".0", ""))
 }
 
 pub(crate) fn format_duration(seconds: f64) -> String {

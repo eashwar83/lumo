@@ -81,9 +81,13 @@ fn parse_related(value: &Value) -> Vec<YoutubeItem> {
         .collect()
 }
 
-fn parse_lockup(lockup: &Value) -> Option<YoutubeItem> {
-    if lockup.get("contentType").and_then(Value::as_str) != Some("LOCKUP_CONTENT_TYPE_VIDEO") {
-        return None;
+/// Parses YouTube's `lockupViewModel` (used by related videos, channel
+/// grids and other modern surfaces) into a `YoutubeItem`.
+pub(super) fn parse_lockup(lockup: &Value) -> Option<YoutubeItem> {
+    match lockup.get("contentType").and_then(Value::as_str) {
+        Some("LOCKUP_CONTENT_TYPE_VIDEO") => {}
+        Some("LOCKUP_CONTENT_TYPE_PLAYLIST") => return parse_playlist_lockup(lockup),
+        _ => return None,
     }
     let id = lockup.get("contentId").and_then(Value::as_str)?.to_string();
     let metadata = lockup.pointer("/metadata/lockupMetadataViewModel")?;
@@ -164,6 +168,78 @@ fn parse_lockup(lockup: &Value) -> Option<YoutubeItem> {
         thumbnail_url: Some(format!("https://i.ytimg.com/vi/{id}/mqdefault.jpg")),
         video_count_text: None,
         badge: is_live.then(|| "LIVE".to_string()),
+        id,
+    })
+}
+
+/// Playlist lockups: the thumbnail lives under a collection wrapper and the
+/// metadata rows carry the owner plus a "N videos"-style label.
+fn parse_playlist_lockup(lockup: &Value) -> Option<YoutubeItem> {
+    let id = lockup.get("contentId").and_then(Value::as_str)?.to_string();
+    let metadata = lockup.pointer("/metadata/lockupMetadataViewModel")?;
+    let title = metadata
+        .pointer("/title/content")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|title| !title.is_empty())?
+        .to_string();
+
+    let texts: Vec<String> = metadata
+        .pointer("/metadata/contentMetadataViewModel/metadataRows")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .flat_map(|row| {
+                    row.get("metadataParts")
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .unwrap_or_default()
+                })
+                .filter_map(|part| {
+                    part.pointer("/text/content")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let channel = texts
+        .iter()
+        .find(|text| {
+            !text.eq_ignore_ascii_case("playlist")
+                && !text.contains(" · ")
+                && !text.contains("View full")
+                && !text.contains("video")
+        })
+        .cloned();
+    let video_count_text = texts
+        .iter()
+        .find(|text| text.contains("video"))
+        .cloned()
+        .or_else(|| Some("Playlist".to_string()));
+
+    let thumbnail_url = lockup
+        .pointer("/contentImage/collectionThumbnailViewModel/primaryThumbnail/thumbnailViewModel/image/sources")
+        .or_else(|| lockup.pointer("/contentImage/thumbnailViewModel/image/sources"))
+        .and_then(Value::as_array)
+        .and_then(|sources| sources.last())
+        .and_then(|source| source.get("url"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+
+    Some(YoutubeItem {
+        kind: "playlist".to_string(),
+        url: format!("https://www.youtube.com/playlist?list={id}"),
+        title,
+        channel,
+        channel_url: None,
+        duration_seconds: None,
+        duration_text: None,
+        view_count_text: None,
+        published_text: None,
+        thumbnail_url,
+        video_count_text,
+        badge: None,
         id,
     })
 }

@@ -555,7 +555,10 @@ pub fn run() {
             youtube::youtube_download_cancel,
             youtube::youtube_download_remove,
             youtube::youtube_download_clear_done,
-            youtube::youtube_download_open_folder
+            youtube::youtube_download_open_folder,
+            youtube::youtube_channel,
+            youtube::youtube_playlist,
+            youtube::youtube_trending
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

@@ -82,9 +82,70 @@ const onPlay = (item: YoutubeItem) => {
 };
 
 const onOpen = (item: YoutubeItem) => {
-    const label = item.kind === "channel" ? "Channel" : "Playlist";
-    emit("notify", `${label} view arrives in a later milestone`);
+    if (item.kind === "channel") {
+        yt.openChannel(item.channelUrl || item.url);
+    } else if (item.kind === "playlist") {
+        yt.openPlaylist(item.url);
+    }
 };
+
+const onOpenChannel = (item: YoutubeItem) => {
+    if (item.channelUrl) yt.openChannel(item.channelUrl);
+};
+
+const playAll = (items: YoutubeItem[], shuffle = false) => {
+    const videos = items.filter((item) => item.kind === "video");
+    if (!videos.length) return;
+    const first = shuffle
+        ? videos[Math.floor(Math.random() * videos.length)]
+        : videos[0];
+    emit("play-youtube", { url: first.url, title: first.title });
+};
+
+const downloadAll = async (items: YoutubeItem[]) => {
+    const videos = items.filter((item) => item.kind === "video").slice(0, 24);
+    if (!videos.length) return;
+    for (const video of videos) {
+        await downloads.add(
+            { url: video.url, title: video.title },
+            {
+                qualityMaxHeight: 1080,
+                container: "mp4",
+                audioOnly: false,
+                audioFormat: "mp3",
+                embedSubs: false,
+                subLangs: "en.*,-live_chat",
+                embedThumbnail: true,
+                embedChapters: true,
+                front: false,
+            },
+        );
+    }
+    emit("notify", `Queued ${videos.length} downloads`);
+    yt.activeTab.value = "downloads";
+};
+
+const onBrowseScroll = (event: Event) => {
+    const list = event.target as HTMLElement;
+    if (list.scrollTop + list.clientHeight >= list.scrollHeight * 0.8) {
+        yt.loadMoreBrowse();
+    }
+};
+
+const TRENDING_CATEGORIES = [
+    { id: "now" as const, label: "Now" },
+    { id: "music" as const, label: "Music" },
+    { id: "top100" as const, label: "Top 100" },
+];
+
+watch(
+    () => yt.activeTab.value,
+    (tab) => {
+        if (tab === "trending" && !yt.trendingPage.value) {
+            void yt.loadTrending();
+        }
+    },
+);
 
 const onListScroll = () => {
     const list = listRef.value;
@@ -166,7 +227,206 @@ const statusLabel = (item: { status: string; error?: string | null }) => {
             </div>
         </div>
 
-        <template v-if="yt.activeTab.value === 'search'">
+        <!-- Drill-in: channel or playlist opened from a row -->
+        <template v-if="yt.browseView.value">
+            <div class="yt-browse-head">
+                <button
+                    class="yt-chip"
+                    type="button"
+                    @click="yt.closeBrowse()"
+                >
+                    ‹ Back to results
+                </button>
+                <div class="yt-browse-title">
+                    <img
+                        v-if="yt.browsePage.value?.avatarUrl"
+                        class="yt-browse-avatar"
+                        :src="yt.browsePage.value.avatarUrl"
+                        alt=""
+                        referrerpolicy="no-referrer"
+                    />
+                    <div>
+                        <div class="yt-browse-name">
+                            {{ yt.browsePage.value?.title || "Loading…" }}
+                        </div>
+                        <div class="yt-browse-sub">
+                            {{ yt.browsePage.value?.subtitle || "" }}
+                        </div>
+                    </div>
+                </div>
+
+                <form
+                    class="yt-browse-search"
+                    @submit.prevent="yt.submitBrowseQuery()"
+                >
+                    <input
+                        v-model="yt.browseQuery.value"
+                        class="yt-browse-search__input"
+                        type="text"
+                        :placeholder="
+                            yt.browseView.value.kind === 'channel'
+                                ? 'Search this channel'
+                                : 'Filter this playlist'
+                        "
+                        spellcheck="false"
+                        autocomplete="off"
+                    />
+                    <button
+                        v-if="yt.browseQuery.value"
+                        class="yt-browse-search__clear"
+                        type="button"
+                        title="Clear"
+                        @click="yt.clearBrowseQuery()"
+                    >
+                        ✕
+                    </button>
+                </form>
+            </div>
+
+            <div class="yt-chips">
+                <template v-if="yt.appliedChannelQuery.value">
+                    <span class="yt-chip yt-chip--on">
+                        Results for “{{ yt.appliedChannelQuery.value }}”
+                    </span>
+                    <button
+                        class="yt-chip"
+                        type="button"
+                        @click="yt.clearBrowseQuery()"
+                    >
+                        Clear search
+                    </button>
+                </template>
+                <template v-else-if="yt.browseView.value.kind === 'channel'">
+                    <button
+                        class="yt-chip"
+                        :class="{
+                            'yt-chip--on': yt.browseView.value.tab === 'videos',
+                        }"
+                        type="button"
+                        @click="yt.setChannelTab('videos')"
+                    >
+                        Videos
+                    </button>
+                    <button
+                        class="yt-chip"
+                        :class="{
+                            'yt-chip--on':
+                                yt.browseView.value.tab === 'playlists',
+                        }"
+                        type="button"
+                        @click="yt.setChannelTab('playlists')"
+                    >
+                        Playlists
+                    </button>
+                    <span
+                        v-if="yt.browsePage.value?.sortOptions.length"
+                        class="yt-chips__divider"
+                    ></span>
+                    <button
+                        v-for="option in yt.browsePage.value?.sortOptions || []"
+                        :key="option.token"
+                        class="yt-chip"
+                        :class="{ 'yt-chip--on': option.selected }"
+                        type="button"
+                        @click="yt.setBrowseSort(option)"
+                    >
+                        {{ option.label }}
+                    </button>
+                </template>
+                <template v-else>
+                    <button
+                        class="yt-chip"
+                        type="button"
+                        @click="playAll(yt.browsePage.value?.items || [])"
+                    >
+                        ▶ Play all
+                    </button>
+                    <button
+                        class="yt-chip"
+                        type="button"
+                        @click="playAll(yt.browsePage.value?.items || [], true)"
+                    >
+                        ⤨ Shuffle
+                    </button>
+                    <button
+                        class="yt-chip"
+                        type="button"
+                        @click="downloadAll(yt.browsePage.value?.items || [])"
+                    >
+                        ⤓ Download all
+                    </button>
+                    <span class="yt-chips__divider"></span>
+                    <label class="yt-chip">
+                        <span class="yt-chip__label">Sort</span>
+                        <select
+                            v-model="yt.playlistSort.value"
+                            class="yt-chip__select"
+                        >
+                            <option value="order">Playlist order</option>
+                            <option value="views">Most viewed</option>
+                            <option value="longest">Longest</option>
+                            <option value="shortest">Shortest</option>
+                        </select>
+                    </label>
+                    <label class="yt-chip">
+                        <span class="yt-chip__label">Duration</span>
+                        <select
+                            v-model="yt.playlistDuration.value"
+                            class="yt-chip__select"
+                        >
+                            <option value="">Any</option>
+                            <option value="short">Under 4 min</option>
+                            <option value="medium">4–20 min</option>
+                            <option value="long">Over 20 min</option>
+                        </select>
+                    </label>
+                </template>
+            </div>
+
+            <div class="yt-list" @scroll.passive="onBrowseScroll">
+                <div v-if="yt.browseError.value" class="yt-state yt-state--error">
+                    {{ yt.browseError.value }}
+                </div>
+                <div v-else-if="yt.isBrowseLoading.value" class="yt-state">
+                    Loading…
+                </div>
+                <template v-else-if="yt.visibleBrowseItems.value.length">
+                    <YtResultRow
+                        v-for="item in yt.visibleBrowseItems.value"
+                        :key="`${item.kind}:${item.id}`"
+                        :item="item"
+                        :is-favorite="props.favoritePaths.has(item.url)"
+                        @play="onPlay"
+                        @open="onOpen"
+                        @toggle-heart="
+                            emit('toggle-youtube-favorite', {
+                                url: $event.url,
+                                title: $event.title,
+                                thumbnailUrl: $event.thumbnailUrl,
+                            })
+                        "
+                        @download="onDownloadRequest"
+                        @open-channel="onOpenChannel"
+                    />
+                    <button
+                        v-if="yt.browsePage.value?.nextCursor"
+                        class="yt-loadmore"
+                        type="button"
+                        :disabled="yt.isBrowseLoadingMore.value"
+                        @click="yt.loadMoreBrowse()"
+                    >
+                        {{
+                            yt.isBrowseLoadingMore.value
+                                ? "Loading…"
+                                : "Load more"
+                        }}
+                    </button>
+                </template>
+                <div v-else class="yt-state">Nothing to show here</div>
+            </div>
+        </template>
+
+        <template v-else-if="yt.activeTab.value === 'search'">
             <form class="yt-search" @submit.prevent="yt.search()">
                 <input
                     ref="searchInputRef"
@@ -286,6 +546,7 @@ const statusLabel = (item: { status: string; error?: string | null }) => {
                             })
                         "
                         @download="onDownloadRequest"
+                        @open-channel="onOpenChannel"
                     />
                     <div
                         v-if="yt.isLoadingMore.value"
@@ -380,6 +641,55 @@ const statusLabel = (item: { status: string; error?: string | null }) => {
                 </div>
             </div>
         </div>
+
+        <template v-else-if="yt.activeTab.value === 'trending'">
+            <div class="yt-chips">
+                <button
+                    v-for="category in TRENDING_CATEGORIES"
+                    :key="category.id"
+                    class="yt-chip"
+                    :class="{
+                        'yt-chip--on':
+                            yt.trendingCategory.value === category.id,
+                    }"
+                    type="button"
+                    @click="yt.setTrendingCategory(category.id)"
+                >
+                    {{ category.label }}
+                </button>
+            </div>
+            <div class="yt-list">
+                <div
+                    v-if="yt.trendingError.value"
+                    class="yt-state yt-state--error"
+                >
+                    {{ yt.trendingError.value }}
+                </div>
+                <div v-else-if="yt.isTrendingLoading.value" class="yt-state">
+                    Loading charts…
+                </div>
+                <template v-else-if="yt.trendingPage.value?.items.length">
+                    <YtResultRow
+                        v-for="item in yt.trendingPage.value.items"
+                        :key="`${item.kind}:${item.id}`"
+                        :item="item"
+                        :is-favorite="props.favoritePaths.has(item.url)"
+                        @play="onPlay"
+                        @open="onOpen"
+                        @toggle-heart="
+                            emit('toggle-youtube-favorite', {
+                                url: $event.url,
+                                title: $event.title,
+                                thumbnailUrl: $event.thumbnailUrl,
+                            })
+                        "
+                        @download="onDownloadRequest"
+                        @open-channel="onOpenChannel"
+                    />
+                </template>
+                <div v-else class="yt-state">No chart data right now</div>
+            </div>
+        </template>
 
         <template v-else-if="yt.activeTab.value === 'downloads'">
             <div class="yt-dl-toolbar">
@@ -487,9 +797,6 @@ const statusLabel = (item: { status: string; error?: string | null }) => {
             </div>
         </template>
 
-        <div v-else class="yt-state yt-state--placeholder">
-            Trending arrives in a later milestone
-        </div>
 
         <YtDownloadDialog
             :open="isDownloadDialogOpen"

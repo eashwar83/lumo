@@ -1,4 +1,4 @@
-import { reactive, ref } from "vue";
+import { computed, reactive, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 
 export type YoutubeItem = {
@@ -24,6 +24,32 @@ type YoutubeSearchPage = {
 };
 
 export type YoutubeTab = "search" | "trending" | "history" | "downloads";
+
+export type SortOption = {
+    label: string;
+    token: string;
+    selected: boolean;
+    kind: "continuation" | "params";
+};
+
+export type BrowsePage = {
+    title: string;
+    subtitle: string;
+    avatarUrl?: string | null;
+    items: YoutubeItem[];
+    nextCursor: string | null;
+    sortOptions: SortOption[];
+};
+
+/** Client-side ordering for playlist contents (YouTube offers none). */
+export type PlaylistSort = "order" | "views" | "longest" | "shortest";
+
+/** Drill-in view opened from a result row (channel or playlist). */
+export type BrowseView = {
+    kind: "channel" | "playlist";
+    target: string;
+    tab: "videos" | "playlists";
+} | null;
 
 export type YoutubeFilters = {
     sort: "relevance" | "date" | "views" | "rating";
@@ -190,6 +216,231 @@ export const useYouTubeModule = () => {
         await runSearch(null);
     };
 
+    // --- drill-in views (channel / playlist) and trending -------------------
+    const browseView = ref<BrowseView>(null);
+    const browsePage = ref<BrowsePage | null>(null);
+    const isBrowseLoading = ref(false);
+    const browseError = ref("");
+    const trendingCategory = ref<"now" | "music" | "top100">("now");
+    let browseToken = 0;
+
+    const activeSort = ref<SortOption | null>(null);
+    // Query typed into the in-view search box: scopes a channel to its own
+    // Search tab; filters a playlist's loaded items by title.
+    const browseQuery = ref("");
+    const appliedChannelQuery = ref("");
+
+    const loadBrowse = async (
+        cursor: string | null = null,
+        sort: SortOption | null = null,
+    ) => {
+        const view = browseView.value;
+        if (!view) return;
+        const token = ++browseToken;
+        // A sort reload keeps the current page on screen (its header and
+        // chips are the only copy we have — sorted responses omit them).
+        const previous = browsePage.value;
+        isBrowseLoading.value = !cursor;
+        if (!cursor) {
+            browseError.value = "";
+            if (!sort) browsePage.value = null;
+        }
+        try {
+            const page = await invoke<BrowsePage>(
+                view.kind === "channel" ? "youtube_channel" : "youtube_playlist",
+                {
+                    payload:
+                        view.kind === "channel"
+                            ? {
+                                  target: view.target,
+                                  tab: view.tab,
+                                  cursor,
+                                  sortToken: sort?.token ?? null,
+                                  sortKind: sort?.kind ?? null,
+                                  query: appliedChannelQuery.value || null,
+                              }
+                            : { target: view.target, cursor },
+                },
+            );
+            if (token !== browseToken) return;
+            if (cursor && previous) {
+                // Continuation responses carry no header or sort bar — keep
+                // the first page's title/subtitle/avatar/options.
+                browsePage.value = {
+                    title: previous.title,
+                    subtitle: previous.subtitle,
+                    avatarUrl: previous.avatarUrl,
+                    sortOptions: previous.sortOptions,
+                    items: [...previous.items, ...page.items],
+                    nextCursor: page.nextCursor,
+                };
+            } else if (sort && previous) {
+                // A sort reload keeps the header and the (unchanged) chips,
+                // marking the chosen one active.
+                browsePage.value = {
+                    ...page,
+                    title: previous.title,
+                    subtitle: previous.subtitle,
+                    avatarUrl: previous.avatarUrl,
+                    sortOptions: page.sortOptions.length
+                        ? page.sortOptions
+                        : previous.sortOptions.map((option) => ({
+                              ...option,
+                              selected: option.token === sort.token,
+                          })),
+                };
+            } else {
+                browsePage.value = page;
+            }
+        } catch (err) {
+            if (token !== browseToken) return;
+            browseError.value = String(err)
+                .replace(/^Error:\s*/, "")
+                .slice(0, 200);
+        } finally {
+            if (token === browseToken) isBrowseLoading.value = false;
+        }
+    };
+
+    // Playlist-side ordering and duration filter (client-side by design).
+    const playlistSort = ref<PlaylistSort>("order");
+    const playlistDuration = ref<"" | "short" | "medium" | "long">("");
+
+    const visibleBrowseItems = computed(() => {
+        const page = browsePage.value;
+        if (!page) return [];
+        if (browseView.value?.kind !== "playlist") return page.items;
+        let items = [...page.items];
+        const needle = browseQuery.value.trim().toLowerCase();
+        if (needle) {
+            items = items.filter((item) =>
+                item.title.toLowerCase().includes(needle),
+            );
+        }
+        if (playlistDuration.value) {
+            items = items.filter((item) => {
+                const seconds = item.durationSeconds ?? 0;
+                if (!seconds) return false;
+                if (playlistDuration.value === "short") return seconds < 240;
+                if (playlistDuration.value === "medium")
+                    return seconds >= 240 && seconds <= 1200;
+                return seconds > 1200;
+            });
+        }
+        if (playlistSort.value === "views") {
+            items.sort(
+                (a, b) =>
+                    parseViewCount(b.viewCountText) -
+                    parseViewCount(a.viewCountText),
+            );
+        } else if (playlistSort.value === "longest") {
+            items.sort(
+                (a, b) => (b.durationSeconds ?? 0) - (a.durationSeconds ?? 0),
+            );
+        } else if (playlistSort.value === "shortest") {
+            items.sort(
+                (a, b) => (a.durationSeconds ?? 0) - (b.durationSeconds ?? 0),
+            );
+        }
+        return items;
+    });
+
+    const openChannel = (target: string) => {
+        browseView.value = { kind: "channel", target, tab: "videos" };
+        activeSort.value = null;
+        browseQuery.value = "";
+        appliedChannelQuery.value = "";
+        void loadBrowse(null);
+    };
+
+    const openPlaylist = (target: string) => {
+        browseView.value = { kind: "playlist", target, tab: "videos" };
+        activeSort.value = null;
+        browseQuery.value = "";
+        appliedChannelQuery.value = "";
+        playlistSort.value = "order";
+        playlistDuration.value = "";
+        void loadBrowse(null);
+    };
+
+    const setChannelTab = (tab: "videos" | "playlists") => {
+        if (!browseView.value || browseView.value.tab === tab) return;
+        browseView.value = { ...browseView.value, tab };
+        activeSort.value = null;
+        browseQuery.value = "";
+        appliedChannelQuery.value = "";
+        void loadBrowse(null);
+    };
+
+    /** Runs the channel's own search (playlists filter live instead). */
+    const submitBrowseQuery = () => {
+        if (browseView.value?.kind !== "channel") return;
+        appliedChannelQuery.value = browseQuery.value.trim();
+        activeSort.value = null;
+        void loadBrowse(null);
+    };
+
+    const clearBrowseQuery = () => {
+        browseQuery.value = "";
+        if (browseView.value?.kind === "channel" && appliedChannelQuery.value) {
+            appliedChannelQuery.value = "";
+            void loadBrowse(null);
+        }
+    };
+
+    /** Applies one of YouTube's own sort options (channel surfaces). */
+    const setBrowseSort = (option: SortOption) => {
+        if (!browseView.value) return;
+        activeSort.value = option;
+        void loadBrowse(null, option);
+    };
+
+    const closeBrowse = (): boolean => {
+        if (!browseView.value) return false;
+        browseView.value = null;
+        browsePage.value = null;
+        return true;
+    };
+
+    const isBrowseLoadingMore = ref(false);
+
+    const loadMoreBrowse = async () => {
+        const cursor = browsePage.value?.nextCursor;
+        if (!cursor || isBrowseLoading.value || isBrowseLoadingMore.value) return;
+        isBrowseLoadingMore.value = true;
+        try {
+            await loadBrowse(cursor, activeSort.value);
+        } finally {
+            isBrowseLoadingMore.value = false;
+        }
+    };
+
+    const trendingPage = ref<BrowsePage | null>(null);
+    const isTrendingLoading = ref(false);
+    const trendingError = ref("");
+
+    const loadTrending = async () => {
+        isTrendingLoading.value = true;
+        trendingError.value = "";
+        try {
+            trendingPage.value = await invoke<BrowsePage>("youtube_trending", {
+                category: trendingCategory.value,
+            });
+        } catch (err) {
+            trendingError.value = String(err)
+                .replace(/^Error:\s*/, "")
+                .slice(0, 200);
+            trendingPage.value = null;
+        } finally {
+            isTrendingLoading.value = false;
+        }
+    };
+
+    const setTrendingCategory = (category: "now" | "music" | "top100") => {
+        trendingCategory.value = category;
+        void loadTrending();
+    };
+
     return {
         activeTab,
         query,
@@ -204,5 +455,29 @@ export const useYouTubeModule = () => {
         search,
         loadMore,
         applyFilters,
+        browseView,
+        browsePage,
+        isBrowseLoading,
+        browseError,
+        openChannel,
+        openPlaylist,
+        setChannelTab,
+        closeBrowse,
+        loadMoreBrowse,
+        isBrowseLoadingMore,
+        setBrowseSort,
+        browseQuery,
+        appliedChannelQuery,
+        submitBrowseQuery,
+        clearBrowseQuery,
+        visibleBrowseItems,
+        playlistSort,
+        playlistDuration,
+        trendingPage,
+        trendingCategory,
+        isTrendingLoading,
+        trendingError,
+        loadTrending,
+        setTrendingCategory,
     };
 };

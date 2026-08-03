@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
+
 import type { YoutubeItem } from "../../composables/useYouTubeModule";
 
 const props = defineProps<{
@@ -31,16 +32,22 @@ const emit = defineEmits<{
     (e: "open", item: YoutubeItem): void;
     (e: "toggle-heart", item: YoutubeItem): void;
     (e: "download", item: YoutubeItem): void;
+    (e: "open-channel", item: YoutubeItem): void;
 }>();
 
-const metaLine = () => {
+// The channel is rendered separately so it can be a link; everything else
+// stays a single muted line.
+const canOpenChannel = computed(
+    () => props.item.kind === "video" && !!props.item.channelUrl,
+);
+
+const metaRest = computed(() => {
     const parts: string[] = [];
-    if (props.item.channel) parts.push(props.item.channel);
     if (props.item.viewCountText) parts.push(props.item.viewCountText);
     if (props.item.publishedText) parts.push(props.item.publishedText);
     if (props.item.videoCountText) parts.push(props.item.videoCountText);
     return parts.join(" · ");
-};
+});
 
 const onActivate = () => {
     if (props.item.kind === "video") {
@@ -107,7 +114,22 @@ const onActivate = () => {
             <div class="yt-row__title" :title="props.item.title">
                 {{ props.item.title }}
             </div>
-            <div class="yt-row__sub">{{ metaLine() }}</div>
+            <div class="yt-row__sub">
+                <button
+                    v-if="canOpenChannel"
+                    class="yt-row__channel"
+                    type="button"
+                    :title="`Go to ${props.item.channel}`"
+                    @click.stop="emit('open-channel', props.item)"
+                >
+                    {{ props.item.channel }}
+                </button>
+                <span v-else-if="props.item.channel">{{
+                    props.item.channel
+                }}</span>
+                <span v-if="props.item.channel && metaRest"> · </span>
+                <span>{{ metaRest }}</span>
+            </div>
         </div>
 
         <div class="yt-row__actions" @click.stop>

@@ -55,6 +55,14 @@ pub(super) fn run_version(ytdl_path: &str) -> Result<(), String> {
 /// Runs `yt-dlp --dump-single-json --flat-playlist <extra_args…> <target>`
 /// with the user's cookie/proxy settings applied, returning the parsed JSON.
 pub(super) fn run_flat_json(app: &AppHandle, target: &str) -> Result<Value, String> {
+    run_flat_json_with(app, target, &[])
+}
+
+pub(super) fn run_flat_json_with(
+    app: &AppHandle,
+    target: &str,
+    extra_args: &[String],
+) -> Result<Value, String> {
     let settings = crate::mpv::resolve_ytdlp_settings(app);
     let Some(ytdl_path) = settings.binary.path else {
         return Err("yt-dlp is not available".to_string());
@@ -72,6 +80,9 @@ pub(super) fn run_flat_json(app: &AppHandle, target: &str) -> Result<Value, Stri
     }
     if let Some(browser) = settings.cookies.browser.as_deref() {
         command.arg("--cookies-from-browser").arg(browser);
+    }
+    for arg in extra_args {
+        command.arg(arg);
     }
     command.arg(target);
 

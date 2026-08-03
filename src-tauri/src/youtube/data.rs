@@ -11,8 +11,8 @@ use std::time::{Duration, Instant};
 use tauri::AppHandle;
 
 use super::{
-    format_duration, innertube, watch_url, ytdlp, YoutubeItem, YoutubeSearchFilters,
-    YoutubeSearchPage, YoutubeSearchPayload,
+    format_duration, format_view_count, innertube, watch_url, ytdlp, YoutubeItem,
+    YoutubeSearchFilters, YoutubeSearchPage, YoutubeSearchPayload,
 };
 
 const CACHE_TTL: Duration = Duration::from_secs(15 * 60);
@@ -304,15 +304,3 @@ fn passes_post_filters(item: &YoutubeItem, filters: &YoutubeSearchFilters) -> bo
     true
 }
 
-fn format_view_count(count: u64) -> String {
-    let formatted = if count >= 1_000_000_000 {
-        format!("{:.1}B", count as f64 / 1_000_000_000.0)
-    } else if count >= 1_000_000 {
-        format!("{:.1}M", count as f64 / 1_000_000.0)
-    } else if count >= 1_000 {
-        format!("{:.1}K", count as f64 / 1_000.0)
-    } else {
-        return format!("{count} views");
-    };
-    format!("{} views", formatted.replace(".0", ""))
-}

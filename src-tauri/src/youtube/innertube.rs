@@ -131,7 +131,7 @@ fn collect_sections(sections: &[Value]) -> (Vec<YoutubeItem>, Option<String>) {
     (items, continuation)
 }
 
-fn parse_item(item: &Value) -> Option<YoutubeItem> {
+pub(super) fn parse_item(item: &Value) -> Option<YoutubeItem> {
     if let Some(video) = item.get("videoRenderer") {
         return parse_video(video);
     }
@@ -140,6 +140,10 @@ fn parse_item(item: &Value) -> Option<YoutubeItem> {
     }
     if let Some(playlist) = item.get("playlistRenderer") {
         return parse_playlist(playlist);
+    }
+    // Playlists (and increasingly other surfaces) ship as lockupViewModel.
+    if let Some(lockup) = item.get("lockupViewModel") {
+        return super::watch::parse_lockup(lockup);
     }
     None
 }

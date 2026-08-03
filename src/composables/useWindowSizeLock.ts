@@ -15,6 +15,19 @@ import { createDebouncedUiStateSaver, loadUiState } from "./useUiStateStore";
 
 type LockedSize = { width: number; height: number };
 
+// A window being minimized/destroyed reports a degenerate inner size (as
+// small as 144x17 during an installer-driven shutdown). Capturing that as
+// the lock would open every later video in a sliver of a window, so sizes
+// below this floor are never stored, restored or applied.
+const MIN_LOCK_WIDTH = 320;
+const MIN_LOCK_HEIGHT = 180;
+
+const isSaneLock = (width: number, height: number) =>
+    Number.isFinite(width) &&
+    Number.isFinite(height) &&
+    width >= MIN_LOCK_WIDTH &&
+    height >= MIN_LOCK_HEIGHT;
+
 type WindowSizeLockOptions = {
     // Called when a genuine user resize (drag/step) updates the locked size, so
     // the caller can clear any per-file "fit" flag the user just overrode.
@@ -66,7 +79,7 @@ export const useWindowSizeLock = (options: WindowSizeLockOptions = {}) => {
     };
 
     const setLocked = (width: number, height: number) => {
-        if (width > 0 && height > 0) {
+        if (isSaneLock(width, height)) {
             lockedSize = { width: Math.round(width), height: Math.round(height) };
             persist();
         }
@@ -83,6 +96,7 @@ export const useWindowSizeLock = (options: WindowSizeLockOptions = {}) => {
         const win = getCurrentWindow();
         if (await win.isFullscreen().catch(() => false)) return;
         if (await win.isMaximized().catch(() => false)) return;
+        if (await win.isMinimized().catch(() => false)) return;
         const scale = await win.scaleFactor().catch(() => 1);
         const inner = await win.innerSize().catch(() => null);
         if (!inner) return;
@@ -109,6 +123,7 @@ export const useWindowSizeLock = (options: WindowSizeLockOptions = {}) => {
     const applyLocked = async (): Promise<boolean> => {
         if (!enabled) return false;
         if (!lockedSize) return false;
+        if (!isSaneLock(lockedSize.width, lockedSize.height)) return false;
         const win = getCurrentWindow();
         if (await win.isFullscreen().catch(() => false)) return true;
         await runProgrammatic(async () => {
@@ -136,8 +151,7 @@ export const useWindowSizeLock = (options: WindowSizeLockOptions = {}) => {
             size &&
             typeof size.width === "number" &&
             typeof size.height === "number" &&
-            size.width > 0 &&
-            size.height > 0
+            isSaneLock(size.width, size.height)
         ) {
             lockedSize = {
                 width: Math.round(size.width),
