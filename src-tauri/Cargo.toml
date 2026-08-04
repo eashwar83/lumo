@@ -40,6 +40,10 @@ env_logger = "0.11"
 chrono = "0.4"
 uuid = { version = "1", features = ["v7"] }
 base64 = "0.22"
+# YouTube signs authenticated Innertube calls with SAPISIDHASH (a SHA-1 of
+# timestamp + cookie + origin). Already in the tree via tauri/reqwest, so
+# naming it here pulls in nothing new.
+sha1 = "0.10"
 # JPEG decode for Auto Enhance / contact sheets, GIF encode for clip export.
 # Both are pure Rust, so nothing is added to the shipped binary set.
 image = { version = "0.25", default-features = false, features = ["jpeg", "gif", "png", "webp", "bmp"] }

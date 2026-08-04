@@ -15,6 +15,8 @@ const NEXT_URL: &str = "https://www.youtube.com/youtubei/v1/next?prettyPrint=fal
 const CLIENT_VERSION: &str = "2.20250801.01.00";
 /// Keeps one request's worth of translation work sane.
 const TRANSLATE_BATCH: usize = 20;
+/// Marks a continuation token that was minted under a signed-in session.
+const AUTHED_CURSOR_PREFIX: &str = "auth\u{1}";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,11 +53,14 @@ fn client_context() -> Value {
     json!({ "client": { "clientName": "WEB", "clientVersion": CLIENT_VERSION, "hl": "en" } })
 }
 
-fn post_next(app: &AppHandle, body: Value) -> Result<Value, String> {
+fn post_next(
+    app: &AppHandle,
+    body: Value,
+    auth: Option<&super::auth::SessionAuth>,
+) -> Result<Value, String> {
     let client = innertube::blocking_client(app)?;
-    let response = client
-        .post(NEXT_URL)
-        .json(&body)
+    let request = super::auth::apply(client.post(NEXT_URL).json(&body), auth);
+    let response = request
         .send()
         .map_err(|error| format!("Comments request failed: {error}"))?;
     if !response.status().is_success() {
@@ -79,29 +84,62 @@ pub(crate) async fn youtube_comments(
 fn fetch_comments(app: &AppHandle, payload: &CommentsPayload) -> Result<YoutubeCommentPage, String> {
     // Page one needs the watch response first: it holds the token that opens
     // the comments section.
+    let mut auth = None;
     let token = match payload.cursor.clone() {
-        Some(cursor) => cursor,
+        // A cursor minted under a session only works under that session;
+        // the marker keeps anonymous videos anonymous on "load more".
+        Some(cursor) => match cursor.strip_prefix(AUTHED_CURSOR_PREFIX) {
+            Some(inner) => {
+                auth = super::auth::session_auth(app);
+                inner.to_string()
+            }
+            None => cursor,
+        },
         None => {
-            let watch = post_next(
-                app,
-                json!({ "context": client_context(), "videoId": payload.video_id }),
-            )?;
-            let Some(token) = comments_token(&watch) else {
-                return Ok(YoutubeCommentPage {
-                    comments: Vec::new(),
-                    next_cursor: None,
-                    total_text: Some("Comments are turned off".to_string()),
-                });
-            };
-            token
+            let body = json!({ "context": client_context(), "videoId": payload.video_id });
+            let watch = post_next(app, body.clone(), None)?;
+            match comments_token(&watch) {
+                Some(token) => token,
+                None => {
+                    // YouTube hides an age-restricted video's comments from
+                    // signed-out clients and reports them as turned off.
+                    // Retry signed before believing it.
+                    auth = super::auth::session_auth(app);
+                    let signed = auth
+                        .as_ref()
+                        .map(|auth| post_next(app, body, Some(auth)))
+                        .transpose()?;
+                    let Some(token) = signed.as_ref().and_then(comments_token) else {
+                        return Ok(YoutubeCommentPage {
+                            comments: Vec::new(),
+                            next_cursor: None,
+                            total_text: Some(if auth.is_some() {
+                                "Comments are turned off".to_string()
+                            } else {
+                                "Comments are hidden for signed-out viewers — set a cookies \
+                                 file in Settings → YouTube"
+                                    .to_string()
+                            }),
+                        });
+                    };
+                    token
+                }
+            }
         }
     };
 
     let value = post_next(
         app,
         json!({ "context": client_context(), "continuation": token }),
+        auth.as_ref(),
     )?;
-    Ok(parse_comment_page(&value))
+    let mut page = parse_comment_page(&value);
+    if auth.is_some() {
+        page.next_cursor = page
+            .next_cursor
+            .map(|cursor| format!("{AUTHED_CURSOR_PREFIX}{cursor}"));
+    }
+    Ok(page)
 }
 
 fn comments_token(watch: &Value) -> Option<String> {

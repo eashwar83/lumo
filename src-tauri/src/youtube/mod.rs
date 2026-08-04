@@ -5,6 +5,7 @@
 //! matching the rest of the app. Subprocess spawns go through quiet commands
 //! so no console window flashes over the player.
 
+mod auth;
 mod browse;
 mod captions;
 mod comments;
