@@ -31,7 +31,50 @@ pub(crate) fn ytdlp_base_command(ytdl_path: &str) -> Command {
     // non-ASCII character in titles and file paths (yt-dlp rewrites "|" as
     // the full-width "｜") into "?" - breaking the paths we read back.
     command.env("PYTHONIOENCODING", "utf-8").env("PYTHONUTF8", "1");
+    // YouTube's `n` parameter is guarded by a JS challenge that a plain JS
+    // runtime cannot solve; yt-dlp needs its own solver script, which it
+    // only fetches when asked. Signed-in requests (a cookies file) always
+    // hit this path, and without the solver YouTube returns nothing but
+    // storyboard images — "Requested format is not available" for every
+    // video. yt-dlp caches the script, so this costs one download.
+    if supports_remote_components(ytdl_path) {
+        command.arg("--remote-components").arg("ejs:github");
+    }
     command
+}
+
+/// Whether this yt-dlp knows `--remote-components` (added mid-2026). An
+/// older binary would abort on the unknown option, taking every call with
+/// it, so probe once per path rather than assume.
+fn supports_remote_components(ytdl_path: &str) -> bool {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, bool>>> =
+        std::sync::OnceLock::new();
+    let cache = CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    if let Ok(guard) = cache.lock() {
+        if let Some(supported) = guard.get(ytdl_path) {
+            return *supported;
+        }
+    }
+
+    let mut probe = quiet_command(ytdl_path);
+    if ytdl_path.to_ascii_lowercase().ends_with("python.exe") {
+        probe.arg("-m").arg("yt_dlp");
+    }
+    let supported = probe
+        .arg("--help")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .map(|output| {
+            String::from_utf8_lossy(&output.stdout).contains("--remote-components")
+        })
+        .unwrap_or(false);
+
+    info!("yt-dlp: --remote-components supported = {supported}");
+    if let Ok(mut guard) = cache.lock() {
+        guard.insert(ytdl_path.to_string(), supported);
+    }
+    supported
 }
 
 const YTDLP_TIMEOUT: Duration = Duration::from_secs(60);
