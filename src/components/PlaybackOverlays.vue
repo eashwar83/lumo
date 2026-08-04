@@ -94,8 +94,11 @@ const seekOverlayRightDisplay = computed(() =>
                 v-if="messageOverlayText"
                 class="message-overlay__text"
                 :class="{
+                    // Long text must wrap; ellipsising an error message
+                    // hides the part that explains what to do about it.
                     'message-overlay__text--multiline':
-                        messageOverlayText.includes('\n'),
+                        messageOverlayText.includes('\n') ||
+                        messageOverlayText.length > 70,
                 }"
             >
                 {{ messageOverlayText }}

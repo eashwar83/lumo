@@ -414,11 +414,24 @@ pub(crate) async fn try_resolve(
     raw_url: &str,
     max_height_override: Option<u32>,
 ) -> Option<ResolvedMedia> {
+    try_resolve_reporting(app, raw_url, max_height_override)
+        .await
+        .0
+}
+
+/// Like [`try_resolve`] but keeps the failure text. Callers that surface an
+/// error to the user need it: env_logger writes to stderr, which a windowed
+/// build discards, so a swallowed cause is a cause nobody can ever read.
+pub(crate) async fn try_resolve_reporting(
+    app: &AppHandle,
+    raw_url: &str,
+    max_height_override: Option<u32>,
+) -> (Option<ResolvedMedia>, Option<String>) {
     match resolve(app, raw_url, max_height_override).await {
-        Ok(resolved) => resolved,
+        Ok(resolved) => (resolved, None),
         Err(error) => {
             warn!("yt-dlp: resolve failed for {}: {error}", redact_url(raw_url));
-            None
+            (None, Some(error))
         }
     }
 }

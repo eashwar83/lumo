@@ -116,6 +116,49 @@ fn youtube_default_quality(app: &tauri::AppHandle) -> Option<u32> {
         .filter(|height| *height > 0)
 }
 
+/// Turns a resolve failure into something the user can act on. yt-dlp's own
+/// stderr is the only thing that says *why*, so it is always included —
+/// guessing "age-restricted" for every failure sent us chasing the wrong
+/// cause once already.
+fn youtube_load_error(cause: Option<&str>) -> String {
+    let detail = cause
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(|text| {
+            // yt-dlp repeats the same warning per player client; the last
+            // line carries the actual error.
+            let last = text
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .next_back()
+                .unwrap_or(text);
+            let last: String = last.chars().take(300).collect();
+            format!("\n\n{last}")
+        })
+        .unwrap_or_default();
+
+    let hint = match cause {
+        Some(text)
+            if text.contains("Sign in to confirm")
+                || text.contains("age-restricted")
+                || text.contains("members-only") =>
+        {
+            "This video needs a signed-in account. Export a cookies.txt from a private browser \
+             window and set it in Settings → YouTube → Cookies file."
+        }
+        Some(text) if text.contains("cookies") => {
+            "The configured cookies could not be used. Check Settings → YouTube → Cookies file \
+             (a Netscape-format cookies.txt) or set Browser Cookies to Off."
+        }
+        _ => {
+            "Couldn't load this YouTube video. Try again — if it keeps failing, the video may be \
+             region-locked or need a signed-in account (Settings → YouTube → Cookies file)."
+        }
+    };
+    format!("{hint}{detail}")
+}
+
 fn is_youtube_page_url(url: &str) -> bool {
     let stripped = url
         .trim()
@@ -173,19 +216,13 @@ pub(crate) async fn load_file(
     if payload.force_refresh.unwrap_or(false) {
         crate::mpv::forget_resolution(&payload.url);
     }
-    let resolved_media =
-        crate::mpv::try_resolve_with_ytdlp(&app, &payload.url, quality_max_height).await;
+    let (resolved_media, resolve_error) =
+        crate::mpv::try_resolve_with_ytdlp_reporting(&app, &payload.url, quality_max_height).await;
     // A YouTube page URL is useless to mpv — failing the resolve must fail
     // the load loudly instead of leaving the spinner running forever on
     // age-restricted / region-locked / unavailable videos.
     if resolved_media.is_none() && is_youtube_page_url(&payload.url) {
-        return Err(
-            "Couldn't load this YouTube video. Age-restricted and members-only videos need a \
-             signed-in account: export a cookies.txt from a private browser window and set it \
-             in Settings → YouTube → Cookies file. (Browser Cookies often stops working because \
-             YouTube rotates a live session's cookies.)"
-                .to_string(),
-        );
+        return Err(youtube_load_error(resolve_error.as_deref()));
     }
     let playback_url = resolved_media
         .as_ref()

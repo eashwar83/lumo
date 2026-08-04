@@ -551,6 +551,21 @@ const onToggleYoutubeFavorite = (payload: {
     );
 };
 
+/** A pasted URL fails the same way a YouTube result does — report it. */
+const onPlayNetworkSafely = async (
+    payload: Parameters<typeof onPlayNetwork>[0],
+) => {
+    try {
+        await onPlayNetwork(payload);
+    } catch (error) {
+        isLoading.value = false;
+        showMessageOverlay(
+            String(error).replace(/^Error:\s*/, "").slice(0, 400),
+            9000,
+        );
+    }
+};
+
 const onPlayYoutube = async (payload: { url: string; title?: string }) => {
     clearNavSelectionDuringLoad.value = false;
     try {
@@ -559,9 +574,11 @@ const onPlayYoutube = async (payload: { url: string; title?: string }) => {
         // Unresolvable video (age/region-locked, removed…): stop the
         // spinner and say why instead of loading forever.
         isLoading.value = false;
+        // The backend appends yt-dlp's own stderr after a blank line; keep
+        // it — that tail is the only thing that says what actually failed.
         showMessageOverlay(
-            String(error).replace(/^Error:\s*/, "").slice(0, 200),
-            4200,
+            String(error).replace(/^Error:\s*/, "").slice(0, 400),
+            9000,
         );
     }
 };
@@ -2668,7 +2685,7 @@ useAppStartupBindings({
             @update:hover="ui.hoverFilePicker.value = $event"
             @open-file-picker="requestOpenFilePicker"
             @play-history="onPlayHistory"
-            @play-network="onPlayNetwork"
+            @play-network="onPlayNetworkSafely"
             @clear-history="onClearHistory"
             @remove-history="onRemoveHistory"
             @toggle-pin-history="onTogglePinHistory"
