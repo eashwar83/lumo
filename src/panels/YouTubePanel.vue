@@ -14,6 +14,7 @@ import {
     describeFilters,
     useYouTubeSearchStore,
 } from "../composables/useYouTubeSearchStore";
+import { useYouTubeSettings } from "../composables/useYouTubeSettings";
 import {
     useYouTubeModule,
     type YoutubeItem,
@@ -139,7 +140,7 @@ const downloadAll = async (items: YoutubeItem[]) => {
         await downloads.add(
             { url: video.url, title: video.title },
             {
-                qualityMaxHeight: 1080,
+                qualityMaxHeight: youtubeSettings.qualityMaxHeight,
                 container: "mp4",
                 audioOnly: false,
                 audioFormat: "mp3",
@@ -232,6 +233,7 @@ const errorBanner = computed(() => {
 });
 
 const downloads = useYouTubeDownloads();
+const { settings: youtubeSettings } = useYouTubeSettings();
 const downloadTarget = ref<YoutubeItem | null>(null);
 const isDownloadDialogOpen = ref(false);
 

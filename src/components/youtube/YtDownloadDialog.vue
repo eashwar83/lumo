@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
 import type { YoutubeItem } from "../../composables/useYouTubeModule";
+import {
+    DEFAULT_SUBTITLE_LANGUAGE,
+    YOUTUBE_SUBTITLE_LANGUAGES,
+} from "../../constants/youtubeSubtitleLanguages";
+import { useYouTubeSettings } from "../../composables/useYouTubeSettings";
 
 const props = defineProps<{
     open: boolean;
@@ -29,20 +34,28 @@ const emit = defineEmits<{
 const QUALITIES: { height: number | null; label: string; note: string }[] = [
     { height: 2160, label: "2160p", note: "4K · large" },
     { height: 1440, label: "1440p", note: "QHD" },
-    { height: 1080, label: "1080p", note: "Default" },
+    { height: 1080, label: "1080p", note: "Full HD" },
     { height: 720, label: "720p", note: "Smaller" },
     { height: 480, label: "480p", note: "Smallest" },
     { height: null, label: "Best available", note: "No cap" },
 ];
 
-const quality = ref<number | null>(1080);
+// Downloads start from the same default as playback (Settings → YouTube).
+const { settings: youtubeSettings } = useYouTubeSettings();
+
+const qualityNote = (option: (typeof QUALITIES)[number]) =>
+    option.height === youtubeSettings.qualityMaxHeight
+        ? "Default"
+        : option.note;
+
+const quality = ref<number | null>(youtubeSettings.qualityMaxHeight);
 const container = ref("mp4");
 const audioOnly = ref(false);
 const audioFormat = ref("mp3");
 const embedSubs = ref(false);
-// One language keeps a single embedded track; "en.*" would pull en, en-orig,
-// en-US… and embed each of them.
-const subLangs = ref("en");
+// One language keeps a single track; a pattern like "en.*" would pull en,
+// en-orig, en-US… and save each of them.
+const subLangs = ref(DEFAULT_SUBTITLE_LANGUAGE);
 const embedThumbnail = ref(true);
 const embedChapters = ref(true);
 
@@ -51,10 +64,11 @@ watch(
     (open) => {
         if (!open) return;
         // Fresh defaults each time the dialog opens.
-        quality.value = 1080;
+        quality.value = youtubeSettings.qualityMaxHeight;
         container.value = "mp4";
         audioOnly.value = false;
         embedSubs.value = false;
+        subLangs.value = DEFAULT_SUBTITLE_LANGUAGE;
         embedThumbnail.value = true;
         embedChapters.value = true;
     },
@@ -116,7 +130,7 @@ const confirm = (front: boolean) => {
                                 option.label
                             }}</span>
                             <span class="ytdl__radio-note">{{
-                                option.note
+                                qualityNote(option)
                             }}</span>
                         </label>
                     </div>
@@ -160,13 +174,25 @@ const confirm = (front: boolean) => {
                         </label>
                         <label class="ytdl__check">
                             <input v-model="embedSubs" type="checkbox" />
-                            <span>Embed subtitles</span>
-                            <input
+                            <span>Subtitles</span>
+                            <select
                                 v-model="subLangs"
-                                class="ytdl__input"
-                                type="text"
+                                class="ytdl__select ytdl__select--lang"
                                 :disabled="!embedSubs"
-                            />
+                                :title="
+                                    embedSubs
+                                        ? 'Auto-translated when the video has no track in this language'
+                                        : ''
+                                "
+                            >
+                                <option
+                                    v-for="language in YOUTUBE_SUBTITLE_LANGUAGES"
+                                    :key="language.code"
+                                    :value="language.code"
+                                >
+                                    {{ language.name }}
+                                </option>
+                            </select>
                         </label>
                         <label class="ytdl__check">
                             <input v-model="embedThumbnail" type="checkbox" />
@@ -369,6 +395,10 @@ const confirm = (front: boolean) => {
 
 .ytdl__input {
     width: 150px;
+}
+
+.ytdl__select--lang {
+    max-width: 190px;
 }
 
 .ytdl__select:disabled,
