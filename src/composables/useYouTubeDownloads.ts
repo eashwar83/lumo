@@ -21,6 +21,8 @@ export type DownloadItem = {
     error?: string | null;
     retries: number;
     addedAt: number;
+    /** Non-fatal note from the subtitle pass. */
+    subtitleNote?: string | null;
 };
 
 export type DownloadOptions = {
@@ -35,9 +37,13 @@ export type DownloadOptions = {
     front: boolean;
 };
 
+// Shared across the panel and the player controls: one queue view, one
+// event listener, regardless of how many components ask for it.
+const items = ref<DownloadItem[]>([]);
+let unlisten: UnlistenFn | null = null;
+let subscribers = 0;
+
 export const useYouTubeDownloads = () => {
-    const items = ref<DownloadItem[]>([]);
-    let unlisten: UnlistenFn | null = null;
 
     const activeCount = computed(
         () =>
@@ -58,7 +64,9 @@ export const useYouTubeDownloads = () => {
     };
 
     onMounted(async () => {
+        subscribers += 1;
         await refresh();
+        if (unlisten) return;
         try {
             unlisten = await listen<DownloadItem>(
                 "youtube_download_update",
@@ -80,8 +88,11 @@ export const useYouTubeDownloads = () => {
     });
 
     onUnmounted(() => {
-        unlisten?.();
-        unlisten = null;
+        subscribers = Math.max(0, subscribers - 1);
+        if (subscribers === 0) {
+            unlisten?.();
+            unlisten = null;
+        }
     });
 
     const add = async (

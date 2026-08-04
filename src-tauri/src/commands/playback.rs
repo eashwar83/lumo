@@ -96,6 +96,23 @@ pub(crate) struct LoadFileResult {
     is_live_playback: bool,
 }
 
+/// Settings -> YouTube -> Default Playback Quality ("1080p", "Auto (best)").
+fn youtube_default_quality(app: &tauri::AppHandle) -> Option<u32> {
+    let value = crate::store::ui_state_store::load_setting_value(app, "YOUTUBE_QUALITY")
+        .ok()
+        .flatten()?;
+    if value.starts_with("Auto") {
+        // No cap: let the resolver pick the best available.
+        return Some(4320);
+    }
+    value
+        .trim_end_matches('p')
+        .trim()
+        .parse::<u32>()
+        .ok()
+        .filter(|height| *height > 0)
+}
+
 fn is_youtube_page_url(url: &str) -> bool {
     let stripped = url
         .trim()
@@ -143,8 +160,15 @@ pub(crate) async fn load_file(
         })
         .await;
     }
+    // Per-play override wins; otherwise YouTube URLs follow the module's
+    // own default quality (Settings -> YouTube).
+    let quality_max_height = payload.quality_max_height.or_else(|| {
+        is_youtube_page_url(&payload.url)
+            .then(|| youtube_default_quality(&app))
+            .flatten()
+    });
     let resolved_media =
-        crate::mpv::try_resolve_with_ytdlp(&app, &payload.url, payload.quality_max_height).await;
+        crate::mpv::try_resolve_with_ytdlp(&app, &payload.url, quality_max_height).await;
     // A YouTube page URL is useless to mpv — failing the resolve must fail
     // the load loudly instead of leaving the spinner running forever on
     // age-restricted / region-locked / unavailable videos.

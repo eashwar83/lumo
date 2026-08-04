@@ -206,12 +206,14 @@
 
 .panel__custom-select-menu {
     position: fixed;
-    z-index: 1200;
+    z-index: 1400;
     box-sizing: border-box;
     padding: 6px;
     border-radius: 12px;
-    border: 1px solid var(--panel-select-menu-border);
-    background: var(--panel-select-menu-bg);
+    /* Teleported to <body>, so the panel's theme vars may not resolve —
+       the fallbacks keep the menu opaque instead of see-through. */
+    border: 1px solid var(--panel-select-menu-border, rgba(185, 202, 225, 0.16));
+    background: var(--panel-select-menu-bg, rgba(42, 54, 71, 0.99));
     box-shadow:
         0 12px 24px rgba(0, 0, 0, 0.24),
         inset 0 1px 0 rgba(255, 255, 255, 0.08);
@@ -2205,4 +2207,21 @@
         rgba(255, 255, 255, 0.14) 37%,
         rgba(255, 255, 255, 0.06) 63%
     );
+}
+
+/* yt-dlp status row: long paths/messages must not run under the button. */
+.panel__card-text--clamped {
+    min-width: 0;
+    flex: 1;
+}
+
+.panel__card-sub--ellipsis {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.panel__action--fixed {
+    flex: none;
+    white-space: nowrap;
 }

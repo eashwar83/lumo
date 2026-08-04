@@ -13,7 +13,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
-const MAX_CONCURRENT: usize = 2;
+const DEFAULT_CONCURRENT: usize = 2;
 const MAX_RETRIES: u32 = 5;
 const RETRY_BACKOFF: Duration = Duration::from_secs(20);
 const QUEUE_FILE_NAME: &str = "youtube_downloads.json";
@@ -44,6 +44,9 @@ pub(crate) struct DownloadItem {
     pub(crate) sub_langs: String,
     pub(crate) embed_thumbnail: bool,
     pub(crate) embed_chapters: bool,
+    /// Non-fatal outcome of the subtitle pass ("Saved subtitles", or why
+    /// not) — the video is already complete either way.
+    pub(crate) subtitle_note: Option<String>,
 }
 
 impl Default for DownloadItem {
@@ -66,9 +69,10 @@ impl Default for DownloadItem {
             audio_only: false,
             audio_format: "mp3".to_string(),
             embed_subs: false,
-            sub_langs: "en.*,-live_chat".to_string(),
+            sub_langs: "en".to_string(),
             embed_thumbnail: true,
             embed_chapters: true,
+            subtitle_note: None,
         }
     }
 }
@@ -169,7 +173,19 @@ fn update_item<F: FnOnce(&mut DownloadItem)>(
     Some(snapshot)
 }
 
+fn setting(app: &AppHandle, label: &str) -> Option<String> {
+    crate::store::ui_state_store::load_setting_value(app, label)
+        .ok()
+        .flatten()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+/// Settings → YouTube → Download Folder, falling back to Videos\YouTube.
 fn default_dest_dir(app: &AppHandle) -> String {
+    if let Some(configured) = setting(app, "YOUTUBE_DOWNLOAD_DIR") {
+        return configured;
+    }
     app.path()
         .video_dir()
         .map(|dir| dir.join("YouTube"))
@@ -177,10 +193,26 @@ fn default_dest_dir(app: &AppHandle) -> String {
         .unwrap_or_else(|_| "YouTube".to_string())
 }
 
+fn max_concurrent(app: &AppHandle) -> usize {
+    setting(app, "YOUTUBE_DOWNLOAD_CONCURRENCY")
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| (1..=4).contains(value))
+        .unwrap_or(DEFAULT_CONCURRENT)
+}
+
+/// 0 (or unset) means unlimited; otherwise MB/s for yt-dlp's --limit-rate.
+fn rate_limit(app: &AppHandle) -> Option<String> {
+    setting(app, "YOUTUBE_DOWNLOAD_RATE_LIMIT")
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| *value > 0.0)
+        .map(|value| format!("{value}M"))
+}
+
 // --- worker -----------------------------------------------------------------
 
 /// Starts workers until the concurrency cap is reached.
 fn pump(app: &AppHandle) {
+    let limit = max_concurrent(app);
     loop {
         let next_id = {
             let Ok(mut guard) = queue().lock() else { return };
@@ -188,7 +220,7 @@ fn pump(app: &AppHandle) {
                 .iter()
                 .filter(|item| item.status == "downloading")
                 .count();
-            if active >= MAX_CONCURRENT {
+            if active >= limit {
                 return;
             }
             let Some(item) = guard.iter_mut().find(|item| item.status == "queued") else {
@@ -234,6 +266,12 @@ fn run_download(app: &AppHandle, id: &str) {
         .arg("--newline")
         .arg("--progress-template")
         .arg("%(progress)j")
+        // Progress lines name the fragment being fetched (video/audio are
+        // separate streams); this prints the real file once merged/remuxed.
+        .arg("--print")
+        .arg("after_move:filepath")
+        // --print implies quiet, which would also silence progress.
+        .arg("--progress")
         .arg("--continue")
         .arg("--retries")
         .arg("5")
@@ -260,12 +298,9 @@ fn run_download(app: &AppHandle, id: &str) {
         command.arg("-f").arg(selector);
         command.arg("--remux-video").arg(&item.container);
     }
-    if item.embed_subs {
-        command
-            .arg("--embed-subs")
-            .arg("--sub-langs")
-            .arg(&item.sub_langs);
-    }
+    // Subtitles are fetched in a separate pass (see fetch_subtitles): doing
+    // them here would let a rate-limited caption endpoint fail the video,
+    // and --ignore-errors would hide real download errors.
     if item.embed_thumbnail {
         command.arg("--embed-thumbnail");
     }
@@ -274,6 +309,9 @@ fn run_download(app: &AppHandle, id: &str) {
     }
     if let Some(browser) = settings.cookies.browser.as_deref() {
         command.arg("--cookies-from-browser").arg(browser);
+    }
+    if let Some(limit) = rate_limit(app) {
+        command.arg("--limit-rate").arg(limit);
     }
     if let Ok(Some(proxy)) = crate::network::proxy::current_proxy_key(app) {
         command.arg("--proxy").arg(proxy);
@@ -304,23 +342,42 @@ fn run_download(app: &AppHandle, id: &str) {
     // Progress lines arrive on stdout as JSON (one per --newline tick).
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
+    // Keep the last real ERROR; warnings (impersonation, container hints)
+    // are noise and must never be shown as the failure reason.
     let stderr_reader = std::thread::spawn(move || {
-        let mut tail = String::new();
+        let mut error_line = String::new();
+        let mut fallback = String::new();
         if let Some(stderr) = stderr {
             for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                if line.contains("ERROR") || tail.is_empty() {
-                    tail = line;
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                if trimmed.starts_with("ERROR") || trimmed.contains("ERROR:") {
+                    error_line = trimmed.to_string();
+                } else if !trimmed.starts_with("WARNING") {
+                    fallback = trimmed.to_string();
                 }
             }
         }
-        tail
+        if error_line.is_empty() {
+            fallback
+        } else {
+            error_line
+        }
     });
 
     let mut last_emit = Instant::now() - Duration::from_secs(1);
     let mut last_filename: Option<String> = None;
+    let mut final_path: Option<String> = None;
     if let Some(stdout) = stdout {
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
             let Ok(progress) = serde_json::from_str::<Value>(&line) else {
+                // Not progress JSON: the --print line with the final path.
+                let trimmed = line.trim();
+                if trimmed.len() > 3 && std::path::Path::new(trimmed).is_absolute() {
+                    final_path = Some(trimmed.to_string());
+                }
                 continue;
             };
             if let Some(filename) = progress.get("filename").and_then(Value::as_str) {
@@ -366,22 +423,64 @@ fn run_download(app: &AppHandle, id: &str) {
         return;
     }
 
+    // Try every way of naming the finished file and keep the first that
+    // actually exists — a reported path may be stale or mis-encoded, and
+    // the id lookup also covers "already downloaded" runs that print
+    // nothing at all.
+    let resolved = [
+        final_path.clone(),
+        last_filename.clone().and_then(|name| resolve_final_file(&name)),
+        find_by_video_id(&item.dest_dir, &item.url),
+    ]
+    .into_iter()
+    .flatten()
+    .find(|path| std::path::Path::new(path).is_file());
+    // The finished file on disk is the only real proof of success: a
+    // non-zero exit often just means an optional extra (usually subtitles,
+    // rate-limited) failed.
+    let succeeded = resolved.is_some();
+
     match status {
-        Ok(exit) if exit.success() => {
+        _ if succeeded => {
+            if item.embed_subs {
+                if let Some(path) = resolved.clone() {
+                    // Off the worker slot: caption endpoints rate-limit hard
+                    // and the retries can take a while.
+                    let app_subs = app.clone();
+                    let item_subs = item.clone();
+                    std::thread::spawn(move || {
+                        fetch_subtitles_with_retries(&app_subs, &item_subs, &path);
+                    });
+                }
+            }
             update_item(app, id, |item| {
                 item.status = "done".to_string();
                 item.progress_percent = 100.0;
                 item.speed_bps = 0.0;
                 item.eta_seconds = 0.0;
-                item.file_path = last_filename.clone();
+                item.file_path = resolved.clone();
             });
-            register_in_library(app, id, last_filename);
+            register_in_library(app, id, resolved);
         }
         _ => {
-            let message = if stderr_tail.is_empty() {
-                "yt-dlp exited with an error".to_string()
-            } else {
+            warn!(
+                "youtube dl: {} failed (exit {:?}); stderr tail: {}",
+                item.id,
+                status.as_ref().map(|exit| exit.code()).unwrap_or(None),
+                if stderr_tail.is_empty() {
+                    "<empty>"
+                } else {
+                    stderr_tail.as_str()
+                }
+            );
+            let message = if !stderr_tail.is_empty() {
                 stderr_tail.chars().take(300).collect()
+            } else if matches!(&status, Ok(exit) if exit.success()) {
+                // Clean exit but nothing on disk to point at.
+                "Finished without producing a file — check the download folder"
+                    .to_string()
+            } else {
+                "yt-dlp exited with an error".to_string()
             };
             let snapshot = item_snapshot(id);
             let retries = snapshot.map(|item| item.retries).unwrap_or(MAX_RETRIES);
@@ -420,6 +519,158 @@ fn run_download(app: &AppHandle, id: &str) {
     }
     persist(app);
     pump(app);
+}
+
+/// The output template ends with "[<video id>].<ext>", so a finished file
+/// can always be found by id even when yt-dlp reported nothing.
+fn find_by_video_id(dest_dir: &str, url: &str) -> Option<String> {
+    let id = url
+        .split(|c| c == '?' || c == '&')
+        .find_map(|part| part.strip_prefix("v="))
+        .or_else(|| url.rsplit('/').next())?
+        .trim();
+    if id.is_empty() {
+        return None;
+    }
+    let marker = format!("[{id}]");
+    let entries = std::fs::read_dir(dest_dir).ok()?;
+    entries
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.path().is_file())
+        .find(|entry| {
+            let name = entry.file_name().to_string_lossy().to_string();
+            name.contains(&marker)
+                && !name.ends_with(".part")
+                && !name.ends_with(".ytdl")
+                && !name.ends_with(".srt")
+                && !name.ends_with(".vtt")
+                // Stream fragments carry a ".fNNN." marker.
+                && !name.contains("].f")
+        })
+        .map(|entry| entry.path().to_string_lossy().into_owned())
+}
+
+/// Second pass that saves captions as a sidecar `.srt` beside the finished
+/// video (Lumo loads sidecars automatically). Runs only after the video is
+/// safely on disk and never affects the download's outcome — caption
+/// endpoints rate-limit far more aggressively than media ones.
+/// YouTube throttles caption requests far more aggressively than media, so
+/// a 429 is common and usually temporary — retry with growing gaps, then
+/// record the outcome on the item.
+fn fetch_subtitles_with_retries(app: &AppHandle, item: &DownloadItem, video_path: &str) {
+    const BACKOFFS: [u64; 3] = [0, 30, 120];
+    for (attempt, wait) in BACKOFFS.iter().enumerate() {
+        if *wait > 0 {
+            std::thread::sleep(Duration::from_secs(*wait));
+        }
+        if subtitles_exist(video_path) {
+            break;
+        }
+        fetch_subtitles(app, item, video_path);
+        if subtitles_exist(video_path) {
+            update_item(app, &item.id, |entry| {
+                entry.subtitle_note = Some("subtitles saved".to_string());
+            });
+            persist(app);
+            info!("youtube dl: subtitles saved for {}", item.id);
+            return;
+        }
+        warn!(
+            "youtube dl: subtitle attempt {} failed for {}",
+            attempt + 1,
+            item.id
+        );
+    }
+    update_item(app, &item.id, |entry| {
+        entry.subtitle_note =
+            Some("subtitles unavailable (YouTube rate limit)".to_string());
+    });
+    persist(app);
+}
+
+/// True once any sidecar subtitle sits next to the video.
+fn subtitles_exist(video_path: &str) -> bool {
+    let path = std::path::Path::new(video_path);
+    let (Some(parent), Some(stem)) = (path.parent(), path.file_stem()) else {
+        return false;
+    };
+    let stem = stem.to_string_lossy().to_string();
+    std::fs::read_dir(parent)
+        .map(|entries| {
+            entries.filter_map(|entry| entry.ok()).any(|entry| {
+                let name = entry.file_name().to_string_lossy().to_string();
+                name.starts_with(&stem) && (name.ends_with(".srt") || name.ends_with(".vtt"))
+            })
+        })
+        .unwrap_or(false)
+}
+
+fn fetch_subtitles(app: &AppHandle, item: &DownloadItem, video_path: &str) {
+    let settings = crate::mpv::resolve_ytdlp_settings(app);
+    let Some(ytdl_path) = settings.binary.path else {
+        return;
+    };
+    let path = std::path::Path::new(video_path);
+    let Some(stem) = path.file_stem().map(|stem| stem.to_string_lossy()) else {
+        return;
+    };
+    let Some(parent) = path.parent() else { return };
+    let output = parent.join(format!("{stem}.%(ext)s"));
+
+    let mut command = crate::mpv::ytdlp_base_command(&ytdl_path);
+    command
+        .arg("--no-playlist")
+        .arg("--skip-download")
+        .arg("--write-subs")
+        .arg("--write-auto-subs")
+        .arg("--sub-langs")
+        .arg(&item.sub_langs)
+        .arg("--convert-subs")
+        .arg("srt")
+        .arg("--sleep-subtitles")
+        .arg("2")
+        .arg("--retries")
+        .arg("5")
+        .arg("--retry-sleep")
+        .arg("5")
+        .arg("--js-runtimes")
+        .arg("node")
+        .arg("-o")
+        .arg(output)
+        .arg(&item.url)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    if let Some(browser) = settings.cookies.browser.as_deref() {
+        command.arg("--cookies-from-browser").arg(browser);
+    }
+    let _ = command.status();
+}
+
+/// Fallback when `--print` gave nothing: progress reports per-stream files
+/// like "video [id].f251.webm"; the merged result drops the `.fNNN` part and
+/// may carry a different extension.
+fn resolve_final_file(fragment: &str) -> Option<String> {
+    let path = std::path::Path::new(fragment);
+    if path.is_file() {
+        let name = path.file_name()?.to_string_lossy();
+        if !name.contains(".f") {
+            return Some(fragment.to_string());
+        }
+    }
+    let parent = path.parent()?;
+    let name = path.file_name()?.to_string_lossy().to_string();
+    // Strip the ".fNNN" stream marker plus the extension.
+    let stem = name
+        .rfind(".f")
+        .map(|index| name[..index].to_string())
+        .unwrap_or_else(|| name.clone());
+    for extension in ["mp4", "mkv", "webm", "m4a", "mp3", "opus"] {
+        let candidate = parent.join(format!("{stem}.{extension}"));
+        if candidate.is_file() {
+            return Some(candidate.to_string_lossy().into_owned());
+        }
+    }
+    path.is_file().then(|| fragment.to_string())
 }
 
 fn finish_failed(app: &AppHandle, id: &str, message: String) {
@@ -519,7 +770,7 @@ pub(crate) fn youtube_download_add(
         embed_subs: payload.embed_subs,
         sub_langs: payload
             .sub_langs
-            .unwrap_or_else(|| "en.*,-live_chat".to_string()),
+            .unwrap_or_else(|| "en".to_string()),
         embed_thumbnail: payload.embed_thumbnail,
         embed_chapters: payload.embed_chapters,
         dest_dir: payload

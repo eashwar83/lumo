@@ -23,6 +23,93 @@ fn quiet_command(program: &str) -> Command {
     command
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct YtdlpStatus {
+    pub(crate) version: String,
+    pub(crate) path: String,
+    /// True when running from a native Python module rather than the
+    /// bundled x64 executable.
+    pub(crate) native: bool,
+}
+
+/// Reports which yt-dlp is in use and its version (shown in Settings).
+#[tauri::command]
+pub(crate) async fn youtube_ytdlp_status(app: AppHandle) -> Result<YtdlpStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let settings = crate::mpv::resolve_ytdlp_settings(&app);
+        let path = settings
+            .binary
+            .path
+            .ok_or_else(|| "yt-dlp is not available".to_string())?;
+        let output = crate::mpv::ytdlp_base_command(&path)
+            .arg("--version")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output()
+            .map_err(|error| format!("yt-dlp failed to start: {error}"))?;
+        Ok(YtdlpStatus {
+            version: String::from_utf8_lossy(&output.stdout).trim().to_string(),
+            native: path.to_ascii_lowercase().ends_with("python.exe"),
+            path,
+        })
+    })
+    .await
+    .map_err(|error| format!("yt-dlp status worker failed: {error}"))?
+}
+
+/// Updates yt-dlp in place: `pip install -U` for a native Python install,
+/// `yt-dlp -U` for the bundled executable.
+#[tauri::command]
+pub(crate) async fn youtube_ytdlp_update(app: AppHandle) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let settings = crate::mpv::resolve_ytdlp_settings(&app);
+        let path = settings
+            .binary
+            .path
+            .ok_or_else(|| "yt-dlp is not available".to_string())?;
+        let native = path.to_ascii_lowercase().ends_with("python.exe");
+        let mut command = quiet_command(&path);
+        if native {
+            command
+                .arg("-m")
+                .arg("pip")
+                .arg("install")
+                .arg("-U")
+                .arg("yt-dlp");
+        } else {
+            command.arg("-U");
+        }
+        let output = command
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .map_err(|error| format!("Update failed to start: {error}"))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(stderr.trim().chars().take(200).collect());
+        }
+        // pip/yt-dlp are chatty; report a short outcome rather than the log.
+        let stdout = String::from_utf8_lossy(&output.stdout).to_lowercase();
+        let message = if stdout.contains("already satisfied")
+            || stdout.contains("is up to date")
+            || stdout.contains("up-to-date")
+        {
+            "Already up to date"
+        } else if stdout.contains("successfully installed")
+            || stdout.contains("updated to")
+            || stdout.contains("downloading")
+        {
+            "Updated to the latest version"
+        } else {
+            "Update check finished"
+        };
+        Ok(message.to_string())
+    })
+    .await
+    .map_err(|error| format!("yt-dlp update worker failed: {error}"))?
+}
+
 /// Runs `yt-dlp --version` and waits for it. The very first yt-dlp spawn on
 /// a machine pays antivirus scanning + x64-emulation warm-up (tens of
 /// seconds); the warm-up command runs this off the critical path so a later

@@ -133,6 +133,29 @@ export const YTDL_MAX_RESOLUTION_OPTIONS = [
 export const NETWORK_PARALLEL_DOWNLOAD_SETTING_LABEL =
     "NETWORK_PARALLEL_DOWNLOAD";
 export const ONLINE_SUBTITLES_SETTING_GROUP_TITLE = "Online Subtitles";
+
+// --- YouTube module ---------------------------------------------------------
+export const YOUTUBE_SETTING_GROUP_TITLE = "YouTube";
+export const YOUTUBE_QUALITY_SETTING_LABEL = "YOUTUBE_QUALITY";
+export const YOUTUBE_QUALITY_OPTIONS = [
+    "Auto (best)",
+    "2160p",
+    "1440p",
+    "1080p",
+    "720p",
+    "480p",
+] as const;
+export const YOUTUBE_AUTOPLAY_SETTING_LABEL = "YOUTUBE_AUTOPLAY_NEXT";
+export const YOUTUBE_DOWNLOAD_DIR_SETTING_LABEL = "YOUTUBE_DOWNLOAD_DIR";
+export const YOUTUBE_DOWNLOAD_CONCURRENCY_SETTING_LABEL =
+    "YOUTUBE_DOWNLOAD_CONCURRENCY";
+export const YOUTUBE_DOWNLOAD_RATE_LIMIT_SETTING_LABEL =
+    "YOUTUBE_DOWNLOAD_RATE_LIMIT";
+export const YOUTUBE_SPONSORBLOCK_SETTING_LABEL = "YOUTUBE_SPONSORBLOCK";
+export const YOUTUBE_SPONSORBLOCK_CATEGORIES_SETTING_LABEL =
+    "YOUTUBE_SPONSORBLOCK_CATEGORIES";
+export const YOUTUBE_CHAPTERS_TO_SCENES_SETTING_LABEL =
+    "YOUTUBE_CHAPTERS_TO_SCENES";
 export const SETTINGS_UPDATED_EVENT = "soia:settings-updated";
 
 export type PlaybackTitleMode = "Show" | "Editable" | "Hidden";
@@ -437,6 +460,78 @@ export const defaultSettingGroups: SettingGroup[] = [
     //         },
     //     ],
     // },
+    {
+        title: YOUTUBE_SETTING_GROUP_TITLE,
+        items: [
+            {
+                label: YOUTUBE_QUALITY_SETTING_LABEL,
+                displayLabel: "Default Playback Quality",
+                value: "1080p",
+                type: "select",
+                options: [...YOUTUBE_QUALITY_OPTIONS],
+            },
+            {
+                label: YOUTUBE_AUTOPLAY_SETTING_LABEL,
+                displayLabel: "Autoplay Next (Up Next)",
+                value: "On",
+                type: "toggle",
+                onValue: "On",
+                offValue: "Off",
+            },
+            {
+                label: YOUTUBE_CHAPTERS_TO_SCENES_SETTING_LABEL,
+                displayLabel: "Chapters Become Scenes",
+                value: "On",
+                type: "toggle",
+                onValue: "On",
+                offValue: "Off",
+            },
+            {
+                label: YOUTUBE_SPONSORBLOCK_SETTING_LABEL,
+                displayLabel: "Skip Sponsor Segments (SponsorBlock)",
+                value: "On",
+                type: "toggle",
+                onValue: "On",
+                offValue: "Off",
+            },
+            {
+                label: YOUTUBE_SPONSORBLOCK_CATEGORIES_SETTING_LABEL,
+                displayLabel: "SponsorBlock Categories",
+                value: "sponsor,intro,selfpromo",
+                type: "text",
+                placeholder: "sponsor,intro,selfpromo,outro,interaction",
+            },
+            {
+                label: YOUTUBE_DOWNLOAD_DIR_SETTING_LABEL,
+                displayLabel: "Download Folder",
+                value: "",
+                type: "path",
+                directory: true,
+                placeholder: "Videos\\YouTube (default)",
+                browseTitle: "Choose the YouTube download folder",
+            },
+            {
+                label: YOUTUBE_DOWNLOAD_CONCURRENCY_SETTING_LABEL,
+                displayLabel: "Simultaneous Downloads",
+                value: "2",
+                type: "slider",
+                min: 1,
+                max: 4,
+                step: 1,
+                unit: "",
+            },
+            {
+                label: YOUTUBE_DOWNLOAD_RATE_LIMIT_SETTING_LABEL,
+                displayLabel: "Download Speed Limit",
+                value: "0",
+                type: "slider",
+                min: 0,
+                max: 50,
+                step: 1,
+                unit: " MB/s",
+            },
+        ],
+    },
     {
         title: "Tools",
         items: [

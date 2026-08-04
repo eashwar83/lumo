@@ -40,7 +40,9 @@ const container = ref("mp4");
 const audioOnly = ref(false);
 const audioFormat = ref("mp3");
 const embedSubs = ref(false);
-const subLangs = ref("en.*,-live_chat");
+// One language keeps a single embedded track; "en.*" would pull en, en-orig,
+// en-US… and embed each of them.
+const subLangs = ref("en");
 const embedThumbnail = ref(true);
 const embedChapters = ref(true);
 

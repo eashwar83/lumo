@@ -27,6 +27,10 @@ pub(crate) fn ytdlp_base_command(ytdl_path: &str) -> Command {
     if ytdl_path.to_ascii_lowercase().ends_with("python.exe") {
         command.arg("-m").arg("yt_dlp");
     }
+    // Windows pipes default to the legacy code page, which mangles every
+    // non-ASCII character in titles and file paths (yt-dlp rewrites "|" as
+    // the full-width "｜") into "?" - breaking the paths we read back.
+    command.env("PYTHONIOENCODING", "utf-8").env("PYTHONUTF8", "1");
     command
 }
 

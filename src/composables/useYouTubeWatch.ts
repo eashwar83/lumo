@@ -25,6 +25,13 @@ type UseYouTubeWatchOptions = {
     /** Pushes chapter marks onto the seek bar / scene navigation. */
     setSceneMarkers: (markers: { start: number; label: string }[]) => void;
     seekTo: (seconds: number) => void;
+    /** Live values from Settings → YouTube. */
+    settings: {
+        autoplayNext: boolean;
+        chaptersToScenes: boolean;
+        sponsorBlockEnabled: boolean;
+        sponsorCategories: string[];
+    };
 };
 
 const AUTOPLAY_STORAGE_KEY = "lumo.youtubeAutoplayNext";
@@ -55,10 +62,15 @@ export const useYouTubeWatch = (options: UseYouTubeWatchOptions) => {
     let suppressedSegments = new Set<number>();
     const sponsorToast = ref<{ from: number; to: number } | null>(null);
     let sponsorToastTimer: number | null = null;
+    // Settings provide the default; the drawer toggle overrides per session.
+    const storedAutoplay =
+        typeof localStorage === "undefined"
+            ? null
+            : localStorage.getItem(AUTOPLAY_STORAGE_KEY);
     const autoplayNext = ref(
-        (typeof localStorage === "undefined"
-            ? "1"
-            : localStorage.getItem(AUTOPLAY_STORAGE_KEY) ?? "1") !== "0",
+        storedAutoplay === null
+            ? options.settings.autoplayNext
+            : storedAutoplay !== "0",
     );
 
     const currentVideoId = computed(() =>
@@ -111,13 +123,18 @@ export const useYouTubeWatch = (options: UseYouTubeWatchOptions) => {
                 options.setUpNextQueue([]);
                 return;
             }
-            invoke<SponsorSegment[]>("youtube_sponsorblock", { videoId })
-                .then((segments) => {
-                    if (token === contextToken) {
-                        sponsorSegments.value = segments;
-                    }
+            if (options.settings.sponsorBlockEnabled) {
+                invoke<SponsorSegment[]>("youtube_sponsorblock", {
+                    videoId,
+                    categories: options.settings.sponsorCategories,
                 })
-                .catch(() => {});
+                    .then((segments) => {
+                        if (token === contextToken) {
+                            sponsorSegments.value = segments;
+                        }
+                    })
+                    .catch(() => {});
+            }
             isLoadingContext.value = true;
             try {
                 const context = await invoke<YoutubeVideoContext>(
@@ -128,7 +145,7 @@ export const useYouTubeWatch = (options: UseYouTubeWatchOptions) => {
                 related.value = context.related;
                 chapters.value = context.chapters;
                 applyUpNextQueue();
-                if (context.chapters.length > 1) {
+                if (context.chapters.length > 1 && options.settings.chaptersToScenes) {
                     options.setSceneMarkers(
                         context.chapters.map((chapter) => ({
                             start: chapter.startSeconds,

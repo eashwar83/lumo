@@ -367,6 +367,25 @@
     background: var(--yt-progress);
 }
 
+/* Actionable error banner (restricted / throttled / offline). */
+.yt-banner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 10px 0;
+    padding: 10px 12px;
+    border: 1px solid rgba(232, 85, 109, 0.45);
+    border-radius: 10px;
+    background: rgba(232, 85, 109, 0.1);
+    color: var(--yt-text);
+    font-size: 12.5px;
+}
+
+.yt-banner__text {
+    flex: 1;
+    min-width: 0;
+}
+
 .yt-chips__divider {
     width: 1px;
     align-self: stretch;
@@ -555,4 +574,124 @@
 .yt-state--placeholder {
     flex: 1;
     justify-content: center;
+}
+
+/* --- Saved / recent searches -------------------------------------------------- */
+
+.yt-search__save {
+    border: 1px solid var(--yt-border);
+    background: var(--yt-card);
+    color: var(--yt-text-faint);
+    border-radius: 10px;
+    width: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition:
+        color 0.15s ease,
+        border-color 0.15s ease;
+}
+
+.yt-search__save svg {
+    width: 17px;
+    height: 17px;
+}
+
+.yt-search__save:hover:not(:disabled) {
+    color: var(--yt-accent);
+    border-color: var(--yt-border-hover);
+}
+
+.yt-search__save--on {
+    color: var(--yt-accent);
+    border-color: var(--yt-accent);
+}
+
+.yt-search__save:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.yt-searchlist {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 12px;
+}
+
+.yt-searchlist__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 2px 2px 4px;
+}
+
+.yt-searchlist__title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--yt-text-faint);
+}
+
+.yt-searchlist__row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 10px;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    cursor: pointer;
+    transition:
+        background-color 0.13s ease,
+        border-color 0.13s ease;
+}
+
+.yt-searchlist__row:hover {
+    background: var(--yt-card-hover);
+    border-color: var(--yt-border);
+}
+
+.yt-searchlist__icon {
+    width: 15px;
+    height: 15px;
+    flex: none;
+    color: var(--yt-text-faint);
+}
+
+.yt-searchlist__icon--saved {
+    color: var(--yt-accent);
+}
+
+.yt-searchlist__query {
+    font-size: 13px;
+    color: var(--yt-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.yt-searchlist__filters {
+    margin-left: auto;
+    font-size: 11.5px;
+    color: var(--yt-text-faint);
+    white-space: nowrap;
+}
+
+.yt-searchlist__remove {
+    border: none;
+    background: transparent;
+    color: var(--yt-text-faint);
+    font-size: 11px;
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    cursor: pointer;
+    flex: none;
+}
+
+.yt-searchlist__remove:hover {
+    color: var(--yt-text);
+    background: rgba(255, 255, 255, 0.08);
 }

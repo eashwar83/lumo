@@ -30,6 +30,10 @@ pub(crate) use downloads::{
 };
 pub(crate) use pot::{ensure_pot_server, shutdown_pot_server};
 pub(crate) use sponsorblock::{__cmd__youtube_sponsorblock, youtube_sponsorblock};
+pub(crate) use ytdlp::{
+    __cmd__youtube_ytdlp_status, __cmd__youtube_ytdlp_update, youtube_ytdlp_status,
+    youtube_ytdlp_update,
+};
 
 use serde::{Deserialize, Serialize};
 

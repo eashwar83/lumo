@@ -108,6 +108,7 @@ const emit = defineEmits<{
     (e: "update:showSubtitleAdvancedSettings", value: boolean): void;
     (e: "set-youtube-quality", height: number | null): void;
     (e: "toggle-youtube-drawer"): void;
+    (e: "download-youtube"): void;
 }>();
 
 const YT_QUALITY_OPTIONS: { height: number | null; label: string }[] = [
@@ -485,6 +486,28 @@ watch(
                 </div>
             </transition>
         </div>
+
+        <button
+            v-if="props.youtubeQualityLabel !== null"
+            class="icon-button icon-button--player"
+            type="button"
+            title="Download this video"
+            aria-label="Download this video"
+            @click.stop="emit('download-youtube')"
+        >
+            <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+            >
+                <path d="M12 3v12" />
+                <path d="m7 11 5 5 5-5" />
+                <path d="M5 20h14" />
+            </svg>
+        </button>
 
         <button
             v-if="props.youtubeQualityLabel !== null"

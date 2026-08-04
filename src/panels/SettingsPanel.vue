@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { invoke } from "@tauri-apps/api/core";
 import { useSettingsPanel } from "../composables/useSettingsPanel";
 import { getPathDisplayName } from "../utils/getPathDisplayName";
 import ShortcutSettings from "../components/ShortcutSettings.vue";
@@ -24,6 +25,10 @@ import {
     SUBSOURCE_ENABLED_SETTING_LABEL,
     SUBSOURCE_LANGUAGES_SETTING_LABEL,
     WALLPAPER_MODE_SETTING_LABEL,
+    YOUTUBE_SETTING_GROUP_TITLE,
+    YTDL_COOKIES_FROM_BROWSER_SETTING_LABEL,
+    YTDL_MAX_RESOLUTION_SETTING_LABEL,
+    YTDL_PATH_SETTING_LABEL,
     type SettingGroup,
     type SettingItem,
 } from "../mock/settings";
@@ -104,6 +109,7 @@ type CategoryId =
     | "subtitles"
     | "shortcuts"
     | "network"
+    | "youtube"
     | "advanced"
     | "about";
 
@@ -153,6 +159,14 @@ const CATEGORIES: { id: CategoryId; label: string; paths: string[] }[] = [
             "M3 12h18",
             "M12 3c3 3.5 3 14.5 0 18",
             "M12 3c-3 3.5-3 14.5 0 18",
+        ],
+    },
+    {
+        id: "youtube",
+        label: "YouTube",
+        paths: [
+            "M2.5 17a24.12 24.12 0 0 1 0-10 2 2 0 0 1 1.4-1.4 49.56 49.56 0 0 1 16.2 0A2 2 0 0 1 21.5 7a24.12 24.12 0 0 1 0 10 2 2 0 0 1-1.4 1.4 49.55 49.55 0 0 1-16.2 0A2 2 0 0 1 2.5 17",
+            "m10 15 5-3-5-3z",
         ],
     },
     {
@@ -239,7 +253,60 @@ type Block =
     | { kind: "shortcuts"; key: string; group: SettingGroup }
     | { kind: "ai"; key: string; title: string }
     | { kind: "subtitleAi"; key: string; title: string }
-    | { kind: "about"; key: string };
+    | { kind: "about"; key: string }
+    | { kind: "ytdlpStatus"; key: string };
+
+// --- yt-dlp status row (YouTube category) -----------------------------------
+const ytdlpStatus = ref<{
+    version: string;
+    path: string;
+    native: boolean;
+} | null>(null);
+const ytdlpUpdating = ref(false);
+const ytdlpUpdateResult = ref("");
+
+const ytdlpStatusText = computed(() => {
+    const status = ytdlpStatus.value;
+    const base = status
+        ? `Version ${status.version} · ${status.native ? "native (fast)" : "bundled"}`
+        : "Checking…";
+    return ytdlpUpdateResult.value
+        ? `${base} — ${ytdlpUpdateResult.value}`
+        : base;
+});
+
+const refreshYtdlpStatus = async () => {
+    try {
+        ytdlpStatus.value = await invoke("youtube_ytdlp_status");
+    } catch {
+        ytdlpStatus.value = null;
+    }
+};
+
+const onUpdateYtdlp = async () => {
+    if (ytdlpUpdating.value) return;
+    ytdlpUpdating.value = true;
+    ytdlpUpdateResult.value = "";
+    try {
+        ytdlpUpdateResult.value = await invoke<string>("youtube_ytdlp_update");
+        await refreshYtdlpStatus();
+    } catch (error) {
+        ytdlpUpdateResult.value = String(error)
+            .replace(/^Error:\s*/, "")
+            .slice(0, 160);
+    } finally {
+        ytdlpUpdating.value = false;
+    }
+};
+
+watch(
+    () => activeCategory.value,
+    (category) => {
+        if (category === "youtube" && !ytdlpStatus.value) {
+            void refreshYtdlpStatus();
+        }
+    },
+);
 
 const activeBlocks = computed<Block[]>(() => {
     switch (activeCategory.value) {
@@ -288,6 +355,27 @@ const activeBlocks = computed<Block[]>(() => {
                     key: "network",
                     items: visibleOfTitle(NETWORK_GROUP_TITLE),
                 },
+            ];
+        case "youtube":
+            return [
+                {
+                    kind: "items",
+                    key: "youtube",
+                    items: visibleOfTitle(YOUTUBE_SETTING_GROUP_TITLE),
+                },
+                {
+                    kind: "items",
+                    key: "youtube-tools",
+                    title: "yt-dlp & Cookies",
+                    items: visibleOfTitle(TOOLS_GROUP_TITLE).filter((item) =>
+                        [
+                            YTDL_PATH_SETTING_LABEL,
+                            YTDL_COOKIES_FROM_BROWSER_SETTING_LABEL,
+                            YTDL_MAX_RESOLUTION_SETTING_LABEL,
+                        ].includes(item.label),
+                    ),
+                },
+                { kind: "ytdlpStatus", key: "youtube-ytdlp-status" },
             ];
         case "advanced": {
             const blocks: Block[] = [];
@@ -480,6 +568,12 @@ const updateOpenSelectMenuPosition = () => {
             .getPropertyValue("--panel-select-menu-selected-border")
             .trim(),
     };
+
+    // An empty custom property would override the CSS fallback with an
+    // invalid value, leaving the menu transparent.
+    for (const [name, value] of Object.entries(menuThemeVars)) {
+        if (!value) delete menuThemeVars[name];
+    }
 
     selectMenuStyle.value = shouldOpenTop
         ? {
@@ -1531,6 +1625,43 @@ onBeforeUnmount(() => {
                                 </template>
 
                                 <!-- About -->
+                                <template
+                                    v-else-if="block.kind === 'ytdlpStatus'"
+                                >
+                                    <div class="panel__table panel__table--card">
+                                        <div
+                                            class="panel__row panel__row--card"
+                                            data-window-no-drag
+                                        >
+                                            <div
+                                                class="panel__card-text panel__card-text--clamped"
+                                            >
+                                                <div class="panel__card-title">
+                                                    yt-dlp
+                                                </div>
+                                                <div
+                                                    class="panel__card-sub panel__card-sub--ellipsis"
+                                                    :title="ytdlpStatusText"
+                                                >
+                                                    {{ ytdlpStatusText }}
+                                                </div>
+                                            </div>
+                                            <button
+                                                class="panel__action panel__action--fixed"
+                                                type="button"
+                                                :disabled="ytdlpUpdating"
+                                                @click="onUpdateYtdlp"
+                                            >
+                                                {{
+                                                    ytdlpUpdating
+                                                        ? "Updating…"
+                                                        : "Check for updates"
+                                                }}
+                                            </button>
+                                        </div>
+                                    </div>
+                                </template>
+
                                 <template v-else-if="block.kind === 'about'">
                                     <div class="panel__table panel__table--card">
                                         <div

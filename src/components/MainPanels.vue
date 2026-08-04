@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import type { HistoryEntry } from "../types/history";
 import type { NetworkPlayRequest } from "../types/network";
 import type { FavoriteFolder, PlaylistEntry } from "../types/playlist";
@@ -50,11 +50,22 @@ const emit = defineEmits<{
         e: "toggle-youtube-favorite",
         payload: { url: string; title: string; thumbnailUrl?: string | null },
     ): void;
+    (e: "open-youtube-settings"): void;
 }>();
 
 const youtubeFavoritePaths = computed(
     () => new Set(props.favorites.map((entry) => entry.path)),
 );
+
+const youtubePanelRef = ref<{ closeBrowseView: () => boolean } | null>(null);
+
+defineExpose({
+    /** Esc backs out of a channel/playlist drill-in first. */
+    closeYoutubeBrowseView: () =>
+        props.mode === "youtube" &&
+        !props.isFileLoaded &&
+        (youtubePanelRef.value?.closeBrowseView() ?? false),
+});
 
 const showPanels = () => !props.isFileLoaded;
 </script>
@@ -118,6 +129,7 @@ const showPanels = () => !props.isFileLoaded;
             />
 
             <YouTubePanel
+                ref="youtubePanelRef"
                 v-show="showPanels() && props.mode === 'youtube'"
                 :is-visible="showPanels() && props.mode === 'youtube'"
                 :favorite-paths="youtubeFavoritePaths"
@@ -127,6 +139,7 @@ const showPanels = () => !props.isFileLoaded;
                 @toggle-youtube-favorite="
                     emit('toggle-youtube-favorite', $event)
                 "
+                @open-youtube-settings="emit('open-youtube-settings')"
             />
 
             <NetworkPanel

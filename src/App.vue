@@ -19,6 +19,11 @@ import SideActionsNav from "./components/SideActionsNav.vue";
 import PlaybackOverlays from "./components/PlaybackOverlays.vue";
 import YtPlayerDrawer from "./components/youtube/YtPlayerDrawer.vue";
 import YtSponsorToast from "./components/youtube/YtSponsorToast.vue";
+import YtDownloadDialog from "./components/youtube/YtDownloadDialog.vue";
+import {
+    useYouTubeDownloads,
+    type DownloadOptions,
+} from "./composables/useYouTubeDownloads";
 import PlaylistPeekButton from "./components/PlaylistPeekButton.vue";
 import PlaylistDrawer from "./components/PlaylistDrawer.vue";
 import PlaylistCreationDialog from "./components/PlaylistCreationDialog.vue";
@@ -51,6 +56,7 @@ import { useEnhancementHistory } from "./composables/useEnhancementHistory";
 import { useSubtitleSyncByEar } from "./composables/useSubtitleSyncByEar";
 import { useSceneIndex } from "./composables/useSceneIndex";
 import { useYouTubeWatch } from "./composables/useYouTubeWatch";
+import { useYouTubeSettings } from "./composables/useYouTubeSettings";
 import {
     createDebouncedUiStateSaver,
     loadUiState,
@@ -556,6 +562,9 @@ const onPlayYoutube = async (payload: { url: string; title?: string }) => {
 };
 
 // --- YouTube per-video quality override ----------------------------------
+const mainPanelsRef = ref<{ closeYoutubeBrowseView: () => boolean } | null>(
+    null,
+);
 const ytQualityOverride = ref<number | null>(null);
 const isYoutubePlayback = computed(() =>
     /(^|\.)((youtube\.com)|(youtu\.be))\//i.test(
@@ -566,7 +575,11 @@ const youtubeQualityLabel = computed(() => {
     if (!isYoutubePlayback.value || !player.state.media.isFileLoaded) {
         return null;
     }
-    return ytQualityOverride.value ? `${ytQualityOverride.value}p` : "Auto";
+    if (ytQualityOverride.value) return `${ytQualityOverride.value}p`;
+    // No per-video override: show the configured default.
+    return youtubeSettings.qualityMaxHeight
+        ? `${youtubeSettings.qualityMaxHeight}p`
+        : "Auto";
 });
 watch(
     () => player.state.media.url,
@@ -603,6 +616,53 @@ watch(
         );
     },
 );
+
+// --- download the video that's playing ------------------------------------
+const youtubeDownloads = useYouTubeDownloads();
+const playerDownloadItem = ref<{
+    kind: "video";
+    id: string;
+    url: string;
+    title: string;
+    channel?: string | null;
+    durationText?: string | null;
+} | null>(null);
+const isPlayerDownloadDialogOpen = ref(false);
+
+const onDownloadCurrentYoutube = () => {
+    const url = player.state.media.url;
+    if (!url || !isYoutubePlayback.value) return;
+    playerDownloadItem.value = {
+        kind: "video",
+        id: url,
+        url,
+        title: player.state.media.title?.trim() || "YouTube video",
+        channel: null,
+        durationText: player.formatTime(player.state.playback.duration),
+    };
+    isPlayerDownloadDialogOpen.value = true;
+};
+
+const onPlayerDownloadConfirm = async (options: DownloadOptions) => {
+    const target = playerDownloadItem.value;
+    isPlayerDownloadDialogOpen.value = false;
+    if (!target) return;
+    try {
+        await youtubeDownloads.add(
+            { url: target.url, title: target.title },
+            options,
+        );
+        showMessageOverlay(
+            options.front ? "Downloading…" : "Added to download queue",
+            2600,
+        );
+    } catch (error) {
+        showMessageOverlay(
+            String(error).replace(/^Error:\s*/, "").slice(0, 160),
+            3600,
+        );
+    }
+};
 
 const onSetYoutubeQuality = async (height: number | null) => {
     if (!isYoutubePlayback.value) return;
@@ -1893,6 +1953,8 @@ const sceneIndex = useSceneIndex({
     onMessage: showMessageOverlay,
 });
 
+const { settings: youtubeSettings } = useYouTubeSettings();
+
 const ytWatch = useYouTubeWatch({
     mediaUrl: () => player.state.media.url,
     isFileLoaded: () => player.state.media.isFileLoaded,
@@ -1901,6 +1963,7 @@ const ytWatch = useYouTubeWatch({
         sceneIndex.markers.value = markers;
     },
     seekTo: (seconds) => onSeek(seconds),
+    settings: youtubeSettings,
 });
 
 watch(
@@ -2235,6 +2298,9 @@ const closeTopOverlay = (): boolean => {
     if (ytWatch.closeDrawer()) {
         return true;
     }
+    if (mainPanelsRef.value?.closeYoutubeBrowseView()) {
+        return true;
+    }
     if (isInfoOpen.value) {
         isInfoOpen.value = false;
         return true;
@@ -2448,6 +2514,14 @@ useAppStartupBindings({
             :seek-overlay-right-pulse-token="seekOverlayRightPulseToken"
         />
 
+        <YtDownloadDialog
+            :open="isPlayerDownloadDialogOpen"
+            :item="playerDownloadItem"
+            :queue-ahead="youtubeDownloads.activeCount.value"
+            @close="isPlayerDownloadDialogOpen = false"
+            @confirm="onPlayerDownloadConfirm"
+        />
+
         <YtSponsorToast
             :toast="ytWatch.sponsorToast.value"
             @undo="ytWatch.undoSponsorSkip()"
@@ -2470,6 +2544,7 @@ useAppStartupBindings({
         />
 
         <MainPanels
+            ref="mainPanelsRef"
             v-show="!player.state.media.isFileLoaded"
             :is-file-loaded="player.state.media.isFileLoaded"
             :hover="ui.hoverFilePicker.value"
@@ -2505,6 +2580,7 @@ useAppStartupBindings({
             @play-youtube="onPlayYoutube"
             @youtube-notify="(message) => showMessageOverlay(message, 2600)"
             @toggle-youtube-favorite="onToggleYoutubeFavorite"
+            @open-youtube-settings="openSettings"
         />
 
         <PlaylistDrawer
@@ -2708,6 +2784,7 @@ useAppStartupBindings({
             :youtube-quality-label="youtubeQualityLabel"
             @set-youtube-quality="onSetYoutubeQuality"
             @toggle-youtube-drawer="ytWatch.toggleDrawer()"
+            @download-youtube="onDownloadCurrentYoutube"
             :media-path="player.state.media.url"
             :thumb-reload-token="thumbReloadToken"
             :ab-point-a="abRange.pointA.value"

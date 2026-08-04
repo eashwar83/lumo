@@ -11,6 +11,10 @@ import {
     type DownloadOptions,
 } from "../composables/useYouTubeDownloads";
 import {
+    describeFilters,
+    useYouTubeSearchStore,
+} from "../composables/useYouTubeSearchStore";
+import {
     useYouTubeModule,
     type YoutubeItem,
     type YoutubeTab,
@@ -45,9 +49,35 @@ const emit = defineEmits<{
         e: "toggle-youtube-favorite",
         payload: { url: string; title: string; thumbnailUrl?: string | null },
     ): void;
+    (e: "open-youtube-settings"): void;
 }>();
 
-const yt = useYouTubeModule();
+defineExpose({
+    /** Lets Esc back out of a drill-in before closing the panel. */
+    closeBrowseView: () => yt.closeBrowse(),
+});
+
+const searchStore = useYouTubeSearchStore();
+const yt = useYouTubeModule((query, filters) =>
+    searchStore.recordSearch(query, filters),
+);
+
+const isCurrentSearchSaved = computed(() =>
+    searchStore.isSaved(yt.query.value, yt.filters),
+);
+
+const onToggleSaveSearch = () => {
+    if (!yt.query.value.trim()) return;
+    const nowSaved = searchStore.toggleSaved(yt.query.value, yt.filters);
+    emit("notify", nowSaved ? "Search saved" : "Search removed");
+};
+
+const onRunStoredSearch = (entry: {
+    query: string;
+    filters: typeof yt.filters;
+}) => {
+    void yt.applyStoredSearch(entry.query, entry.filters);
+};
 const searchInputRef = ref<HTMLInputElement | null>(null);
 const listRef = ref<HTMLDivElement | null>(null);
 
@@ -114,7 +144,7 @@ const downloadAll = async (items: YoutubeItem[]) => {
                 audioOnly: false,
                 audioFormat: "mp3",
                 embedSubs: false,
-                subLangs: "en.*,-live_chat",
+                subLangs: "en",
                 embedThumbnail: true,
                 embedChapters: true,
                 front: false,
@@ -159,6 +189,48 @@ const onFilterChange = () => {
     void yt.applyFilters();
 };
 
+// Turns raw backend errors into an actionable banner.
+const errorBanner = computed(() => {
+    const message = yt.error.value;
+    if (!message) return null;
+    const lower = message.toLowerCase();
+    if (
+        lower.includes("sign in") ||
+        lower.includes("age") ||
+        lower.includes("private") ||
+        lower.includes("not available in your country")
+    ) {
+        return {
+            text: "Sign-in required — import browser cookies in Settings → YouTube to unlock age- or region-restricted videos.",
+            action: "settings" as const,
+        };
+    }
+    if (
+        lower.includes("403") ||
+        lower.includes("429") ||
+        lower.includes("throttl") ||
+        lower.includes("too many requests")
+    ) {
+        return {
+            text: "YouTube is rate-limiting or blocking these requests. Updating yt-dlp usually fixes it (Settings → YouTube).",
+            action: "settings" as const,
+        };
+    }
+    if (
+        lower.includes("dns") ||
+        lower.includes("offline") ||
+        lower.includes("network") ||
+        lower.includes("connect") ||
+        lower.includes("timed out")
+    ) {
+        return {
+            text: "Can't reach YouTube — you appear to be offline. Cached results are still available.",
+            action: "retry" as const,
+        };
+    }
+    return { text: message, action: "retry" as const };
+});
+
 const downloads = useYouTubeDownloads();
 const downloadTarget = ref<YoutubeItem | null>(null);
 const isDownloadDialogOpen = ref(false);
@@ -184,7 +256,11 @@ const onDownloadConfirm = async (options: DownloadOptions) => {
     }
 };
 
-const statusLabel = (item: { status: string; error?: string | null }) => {
+const statusLabel = (item: {
+    status: string;
+    error?: string | null;
+    subtitleNote?: string | null;
+}) => {
     if (item.error) return item.error;
     switch (item.status) {
         case "queued":
@@ -194,7 +270,9 @@ const statusLabel = (item: { status: string; error?: string | null }) => {
         case "paused":
             return "Paused";
         case "done":
-            return "In Library ✓";
+            return item.subtitleNote
+                ? `In Library ✓ · ${item.subtitleNote}`
+                : "In Library ✓";
         case "cancelled":
             return "Cancelled";
         default:
@@ -438,6 +516,28 @@ const statusLabel = (item: { status: string; error?: string | null }) => {
                     autocomplete="off"
                 />
                 <button
+                    class="yt-search__save"
+                    :class="{ 'yt-search__save--on': isCurrentSearchSaved }"
+                    type="button"
+                    :title="
+                        isCurrentSearchSaved
+                            ? 'Remove saved search'
+                            : 'Save this search (with filters)'
+                    "
+                    :disabled="!yt.query.value.trim()"
+                    @click="onToggleSaveSearch"
+                >
+                    <svg
+                        viewBox="0 0 24 24"
+                        :fill="isCurrentSearchSaved ? 'currentColor' : 'none'"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linejoin="round"
+                    >
+                        <path d="m12 3 2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.8 6.2 20.9l1.1-6.5L2.6 9.8l6.5-.9z" />
+                    </svg>
+                </button>
+                <button
                     class="yt-search__btn"
                     type="submit"
                     :disabled="yt.isLoading.value"
@@ -521,8 +621,24 @@ const statusLabel = (item: { status: string; error?: string | null }) => {
                 class="yt-list"
                 @scroll.passive="onListScroll"
             >
-                <div v-if="yt.error.value" class="yt-state yt-state--error">
-                    {{ yt.error.value }}
+                <div v-if="errorBanner" class="yt-banner">
+                    <span class="yt-banner__text">{{ errorBanner.text }}</span>
+                    <button
+                        v-if="errorBanner.action === 'settings'"
+                        class="yt-chip"
+                        type="button"
+                        @click="emit('open-youtube-settings')"
+                    >
+                        Open settings
+                    </button>
+                    <button
+                        v-else
+                        class="yt-chip"
+                        type="button"
+                        @click="yt.search()"
+                    >
+                        Try again
+                    </button>
                 </div>
                 <div
                     v-else-if="yt.isLoading.value"
@@ -567,22 +683,126 @@ const statusLabel = (item: { status: string; error?: string | null }) => {
                 >
                     No results for “{{ yt.submittedQuery.value }}”
                 </div>
-                <div v-else class="yt-state yt-state--hint">
-                    <svg
-                        class="yt-state__icon"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1.5"
-                        aria-hidden="true"
+                <template v-else>
+                    <div
+                        v-if="searchStore.saved.value.length"
+                        class="yt-searchlist"
                     >
-                        <path
-                            d="M2.5 17a24.12 24.12 0 0 1 0-10 2 2 0 0 1 1.4-1.4 49.56 49.56 0 0 1 16.2 0A2 2 0 0 1 21.5 7a24.12 24.12 0 0 1 0 10 2 2 0 0 1-1.4 1.4 49.55 49.55 0 0 1-16.2 0A2 2 0 0 1 2.5 17"
-                        />
-                        <path d="m10 15 5-3-5-3z" />
-                    </svg>
-                    Search YouTube — results play right in Lumo
-                </div>
+                        <div class="yt-searchlist__head">
+                            <span class="yt-searchlist__title">
+                                Saved searches
+                            </span>
+                        </div>
+                        <div
+                            v-for="entry in searchStore.saved.value"
+                            :key="`saved-${entry.at}`"
+                            class="yt-searchlist__row"
+                            role="button"
+                            tabindex="0"
+                            @click="onRunStoredSearch(entry)"
+                            @keydown.enter="onRunStoredSearch(entry)"
+                        >
+                            <svg
+                                class="yt-searchlist__icon yt-searchlist__icon--saved"
+                                viewBox="0 0 24 24"
+                                fill="currentColor"
+                                aria-hidden="true"
+                            >
+                                <path d="m12 3 2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.8 6.2 20.9l1.1-6.5L2.6 9.8l6.5-.9z" />
+                            </svg>
+                            <span class="yt-searchlist__query">{{
+                                entry.query
+                            }}</span>
+                            <span class="yt-searchlist__filters">{{
+                                describeFilters(entry.filters)
+                            }}</span>
+                            <button
+                                class="yt-searchlist__remove"
+                                type="button"
+                                title="Remove saved search"
+                                @click.stop="searchStore.removeSaved(entry)"
+                            >
+                                ✕
+                            </button>
+                        </div>
+                    </div>
+
+                    <div
+                        v-if="searchStore.recent.value.length"
+                        class="yt-searchlist"
+                    >
+                        <div class="yt-searchlist__head">
+                            <span class="yt-searchlist__title">
+                                Recent searches
+                            </span>
+                            <button
+                                class="yt-chip"
+                                type="button"
+                                @click="searchStore.clearRecent()"
+                            >
+                                Clear all
+                            </button>
+                        </div>
+                        <div
+                            v-for="entry in searchStore.recent.value"
+                            :key="`recent-${entry.at}`"
+                            class="yt-searchlist__row"
+                            role="button"
+                            tabindex="0"
+                            @click="onRunStoredSearch(entry)"
+                            @keydown.enter="onRunStoredSearch(entry)"
+                        >
+                            <svg
+                                class="yt-searchlist__icon"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                aria-hidden="true"
+                            >
+                                <circle cx="12" cy="12" r="9" />
+                                <path d="M12 7v6l4 2" />
+                            </svg>
+                            <span class="yt-searchlist__query">{{
+                                entry.query
+                            }}</span>
+                            <span class="yt-searchlist__filters">{{
+                                describeFilters(entry.filters)
+                            }}</span>
+                            <button
+                                class="yt-searchlist__remove"
+                                type="button"
+                                title="Remove from history"
+                                @click.stop="searchStore.removeRecent(entry)"
+                            >
+                                ✕
+                            </button>
+                        </div>
+                    </div>
+
+                    <div
+                        v-if="
+                            !searchStore.saved.value.length &&
+                            !searchStore.recent.value.length
+                        "
+                        class="yt-state yt-state--hint"
+                    >
+                        <svg
+                            class="yt-state__icon"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="1.5"
+                            aria-hidden="true"
+                        >
+                            <path
+                                d="M2.5 17a24.12 24.12 0 0 1 0-10 2 2 0 0 1 1.4-1.4 49.56 49.56 0 0 1 16.2 0A2 2 0 0 1 21.5 7a24.12 24.12 0 0 1 0 10 2 2 0 0 1-1.4 1.4 49.55 49.55 0 0 1-16.2 0A2 2 0 0 1 2.5 17"
+                            />
+                            <path d="m10 15 5-3-5-3z" />
+                        </svg>
+                        Search YouTube — results play right in Lumo
+                    </div>
+                </template>
             </div>
         </template>
 

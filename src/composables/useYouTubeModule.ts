@@ -123,7 +123,9 @@ const sortItemsForDisplay = (
     return list;
 };
 
-export const useYouTubeModule = () => {
+export const useYouTubeModule = (
+    onSearchSubmitted?: (query: string, filters: YoutubeFilters) => void,
+) => {
     const activeTab = ref<YoutubeTab>("search");
     const query = ref("");
     const submittedQuery = ref("");
@@ -202,7 +204,18 @@ export const useYouTubeModule = () => {
         if (!trimmed) return;
         submittedQuery.value = trimmed;
         hasSearched.value = true;
+        onSearchSubmitted?.(trimmed, { ...filters });
         await runSearch(null);
+    };
+
+    /** Restores a stored search (query + filters) and runs it. */
+    const applyStoredSearch = async (
+        storedQuery: string,
+        storedFilters: YoutubeFilters,
+    ) => {
+        query.value = storedQuery;
+        Object.assign(filters, storedFilters);
+        await search();
     };
 
     const loadMore = async () => {
@@ -453,6 +466,7 @@ export const useYouTubeModule = () => {
         error,
         hasSearched,
         search,
+        applyStoredSearch,
         loadMore,
         applyFilters,
         browseView,

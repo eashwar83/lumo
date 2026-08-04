@@ -32,26 +32,36 @@ fn cache() -> &'static Mutex<HashMap<String, (Instant, Vec<SponsorSegment>)>> {
 pub(crate) async fn youtube_sponsorblock(
     app: AppHandle,
     video_id: String,
+    categories: Option<Vec<String>>,
 ) -> Result<Vec<SponsorSegment>, String> {
     let video_id = video_id.trim().to_string();
     if video_id.is_empty() {
         return Ok(Vec::new());
     }
-    tauri::async_runtime::spawn_blocking(move || Ok(fetch_segments(&app, &video_id)))
-        .await
-        .map_err(|error| format!("SponsorBlock worker failed: {error}"))?
+    let categories = categories
+        .filter(|list| !list.is_empty())
+        .map(|list| {
+            serde_json::to_string(&list).unwrap_or_else(|_| DEFAULT_CATEGORIES.to_string())
+        })
+        .unwrap_or_else(|| DEFAULT_CATEGORIES.to_string());
+    tauri::async_runtime::spawn_blocking(move || {
+        Ok(fetch_segments(&app, &video_id, &categories))
+    })
+    .await
+    .map_err(|error| format!("SponsorBlock worker failed: {error}"))?
 }
 
-fn fetch_segments(app: &AppHandle, video_id: &str) -> Vec<SponsorSegment> {
+fn fetch_segments(app: &AppHandle, video_id: &str, categories: &str) -> Vec<SponsorSegment> {
+    let cache_key = format!("{video_id}|{categories}");
     if let Ok(guard) = cache().lock() {
-        if let Some((stored_at, segments)) = guard.get(video_id) {
+        if let Some((stored_at, segments)) = guard.get(&cache_key) {
             if stored_at.elapsed() < CACHE_TTL {
                 return segments.clone();
             }
         }
     }
 
-    let segments = request_segments(app, video_id).unwrap_or_default();
+    let segments = request_segments(app, video_id, categories).unwrap_or_default();
 
     if let Ok(mut guard) = cache().lock() {
         guard.retain(|_, (stored_at, _)| stored_at.elapsed() < CACHE_TTL);
@@ -64,16 +74,20 @@ fn fetch_segments(app: &AppHandle, video_id: &str) -> Vec<SponsorSegment> {
                 guard.remove(&oldest);
             }
         }
-        guard.insert(video_id.to_string(), (Instant::now(), segments.clone()));
+        guard.insert(cache_key, (Instant::now(), segments.clone()));
     }
     segments
 }
 
-fn request_segments(app: &AppHandle, video_id: &str) -> Option<Vec<SponsorSegment>> {
+fn request_segments(
+    app: &AppHandle,
+    video_id: &str,
+    categories: &str,
+) -> Option<Vec<SponsorSegment>> {
     let client = super::innertube::blocking_client(app).ok()?;
     let response = client
         .get(API_URL)
-        .query(&[("videoID", video_id), ("categories", DEFAULT_CATEGORIES)])
+        .query(&[("videoID", video_id), ("categories", categories)])
         .send()
         .ok()?;
     if !response.status().is_success() {

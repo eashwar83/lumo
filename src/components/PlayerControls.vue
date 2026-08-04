@@ -73,6 +73,7 @@ const emit = defineEmits<{
     (e: "prev-track"): void;
     (e: "set-youtube-quality", height: number | null): void;
     (e: "toggle-youtube-drawer"): void;
+    (e: "download-youtube"): void;
     (e: "seek", position: number): void;
     (e: "toggle-play-pause"): void;
     (e: "stop-playback"): void;
@@ -323,6 +324,7 @@ onUnmounted(() => {
                         :youtube-quality-label="youtubeQualityLabel"
                         @set-youtube-quality="emit('set-youtube-quality', $event)"
                         @toggle-youtube-drawer="emit('toggle-youtube-drawer')"
+                        @download-youtube="emit('download-youtube')"
                         @toggle-menu="emit('toggle-menu', $event)"
                         @toggle-loop-one="emit('toggle-loop-one')"
                         @set-speed="emit('set-speed', $event)"
