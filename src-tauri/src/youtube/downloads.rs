@@ -307,9 +307,7 @@ fn run_download(app: &AppHandle, id: &str) {
     if item.embed_chapters {
         command.arg("--embed-chapters");
     }
-    if let Some(browser) = settings.cookies.browser.as_deref() {
-        command.arg("--cookies-from-browser").arg(browser);
-    }
+    settings.cookies.apply(&mut command);
     if let Some(limit) = rate_limit(app) {
         command.arg("--limit-rate").arg(limit);
     }
@@ -640,9 +638,7 @@ fn fetch_subtitles(app: &AppHandle, item: &DownloadItem, video_path: &str) {
         .arg(&item.url)
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    if let Some(browser) = settings.cookies.browser.as_deref() {
-        command.arg("--cookies-from-browser").arg(browser);
-    }
+    settings.cookies.apply(&mut command);
     let _ = command.status();
 }
 

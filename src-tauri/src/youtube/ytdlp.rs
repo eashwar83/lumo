@@ -142,13 +142,32 @@ pub(super) fn run_version(ytdl_path: &str) -> Result<(), String> {
 /// Runs `yt-dlp --dump-single-json --flat-playlist <extra_args…> <target>`
 /// with the user's cookie/proxy settings applied, returning the parsed JSON.
 pub(super) fn run_flat_json(app: &AppHandle, target: &str) -> Result<Value, String> {
-    run_flat_json_with(app, target, &[])
+    run_json(app, target, &[], true)
 }
 
 pub(super) fn run_flat_json_with(
     app: &AppHandle,
     target: &str,
     extra_args: &[String],
+) -> Result<Value, String> {
+    run_json(app, target, extra_args, true)
+}
+
+/// Full (non-flat) metadata for a single video — used where the flat form
+/// omits what we need, e.g. the caption maps.
+pub(super) fn run_json_with(
+    app: &AppHandle,
+    target: &str,
+    extra_args: &[String],
+) -> Result<Value, String> {
+    run_json(app, target, extra_args, false)
+}
+
+fn run_json(
+    app: &AppHandle,
+    target: &str,
+    extra_args: &[String],
+    flat: bool,
 ) -> Result<Value, String> {
     let settings = crate::mpv::resolve_ytdlp_settings(app);
     let Some(ytdl_path) = settings.binary.path else {
@@ -157,17 +176,17 @@ pub(super) fn run_flat_json_with(
     let proxy_url = crate::network::proxy::current_proxy_key(app)?;
 
     let mut command = crate::mpv::ytdlp_base_command(&ytdl_path);
-    command
-        .arg("--dump-single-json")
-        .arg("--flat-playlist")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    command.arg("--dump-single-json");
+    if flat {
+        command.arg("--flat-playlist");
+    } else {
+        command.arg("--no-playlist");
+    }
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
     if let Some(proxy_url) = proxy_url.as_deref() {
         command.arg("--proxy").arg(proxy_url);
     }
-    if let Some(browser) = settings.cookies.browser.as_deref() {
-        command.arg("--cookies-from-browser").arg(browser);
-    }
+    settings.cookies.apply(&mut command);
     for arg in extra_args {
         command.arg(arg);
     }

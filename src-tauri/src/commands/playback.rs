@@ -180,8 +180,10 @@ pub(crate) async fn load_file(
     // age-restricted / region-locked / unavailable videos.
     if resolved_media.is_none() && is_youtube_page_url(&payload.url) {
         return Err(
-            "Couldn't load this YouTube video. It may be age-restricted, region-locked, or \
-             temporarily unavailable — try again, or import browser cookies in Settings → Tools."
+            "Couldn't load this YouTube video. Age-restricted and members-only videos need a \
+             signed-in account: export a cookies.txt from a private browser window and set it \
+             in Settings → YouTube → Cookies file. (Browser Cookies often stops working because \
+             YouTube rotates a live session's cookies.)"
                 .to_string(),
         );
     }

@@ -6,6 +6,8 @@
 //! so no console window flashes over the player.
 
 mod browse;
+mod captions;
+mod comments;
 mod data;
 mod downloads;
 mod innertube;
@@ -18,6 +20,14 @@ mod ytdlp;
 pub(crate) use browse::{
     __cmd__youtube_channel, __cmd__youtube_playlist, __cmd__youtube_trending,
     youtube_channel, youtube_playlist, youtube_trending,
+};
+pub(crate) use captions::{
+    __cmd__youtube_caption_file, __cmd__youtube_caption_tracks, youtube_caption_file,
+    youtube_caption_tracks,
+};
+pub(crate) use comments::{
+    __cmd__youtube_comments, __cmd__youtube_translate_comments, youtube_comments,
+    youtube_translate_comments,
 };
 pub(crate) use downloads::{
     __cmd__youtube_download_add, __cmd__youtube_download_cancel,

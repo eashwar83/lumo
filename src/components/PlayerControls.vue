@@ -67,6 +67,11 @@ const props = defineProps<{
     hasSubTracks: boolean;
     isFullscreen: boolean;
     youtubeQualityLabel: string | null;
+    youtubeCaptionTracks: { code: string; name: string; auto: boolean }[];
+    isLoadingYoutubeCaptions: boolean;
+    loadingYoutubeCaptionCode: string;
+    loadedYoutubeCaptionCodes: string[];
+    youtubeCaptionStatus: string;
 }>();
 
 const emit = defineEmits<{
@@ -74,6 +79,11 @@ const emit = defineEmits<{
     (e: "set-youtube-quality", height: number | null): void;
     (e: "toggle-youtube-drawer"): void;
     (e: "download-youtube"): void;
+    (e: "open-youtube-captions"): void;
+    (
+        e: "use-youtube-caption",
+        track: { code: string; name: string; auto: boolean },
+    ): void;
     (e: "seek", position: number): void;
     (e: "toggle-play-pause"): void;
     (e: "stop-playback"): void;
@@ -322,9 +332,16 @@ onUnmounted(() => {
                         :has-sub-tracks="hasSubTracks"
                         :is-fullscreen="isFullscreen"
                         :youtube-quality-label="youtubeQualityLabel"
+                        :youtube-caption-tracks="youtubeCaptionTracks"
+                        :is-loading-youtube-captions="isLoadingYoutubeCaptions"
+                        :loading-youtube-caption-code="loadingYoutubeCaptionCode"
+                        :loaded-youtube-caption-codes="loadedYoutubeCaptionCodes"
+                        :youtube-caption-status="youtubeCaptionStatus"
                         @set-youtube-quality="emit('set-youtube-quality', $event)"
                         @toggle-youtube-drawer="emit('toggle-youtube-drawer')"
                         @download-youtube="emit('download-youtube')"
+                        @open-youtube-captions="emit('open-youtube-captions')"
+                        @use-youtube-caption="emit('use-youtube-caption', $event)"
                         @toggle-menu="emit('toggle-menu', $event)"
                         @toggle-loop-one="emit('toggle-loop-one')"
                         @set-speed="emit('set-speed', $event)"

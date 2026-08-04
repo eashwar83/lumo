@@ -560,7 +560,11 @@ pub fn run() {
             youtube::youtube_playlist,
             youtube::youtube_trending,
             youtube::youtube_ytdlp_status,
-            youtube::youtube_ytdlp_update
+            youtube::youtube_ytdlp_update,
+            youtube::youtube_caption_tracks,
+            youtube::youtube_caption_file,
+            youtube::youtube_comments,
+            youtube::youtube_translate_comments
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

@@ -50,6 +50,7 @@ type UseAppUiActionsOptions = {
     playPath: (path: string, preferredTitle?: string) => Promise<void>;
     playPreviousTrack: () => Promise<void>;
     playNextTrack: () => Promise<void>;
+    closeYoutubeDrawer?: () => void;
 };
 
 export const useAppUiActions = ({
@@ -70,6 +71,7 @@ export const useAppUiActions = ({
     playPath,
     playPreviousTrack,
     playNextTrack,
+    closeYoutubeDrawer,
 }: UseAppUiActionsOptions) => {
     const isClearConfirmOpen = computed(() => clearConfirmTarget.value !== null);
     const clearConfirmTitle = computed(() => {
@@ -120,6 +122,8 @@ export const useAppUiActions = ({
         isPlaylistOpen.value = !isPlaylistOpen.value;
         if (isPlaylistOpen.value) {
             isInfoOpen.value = false;
+            // The YouTube drawer shares this edge of the screen.
+            closeYoutubeDrawer?.();
         }
         hideAllMenus();
         schedulePointerRefresh();

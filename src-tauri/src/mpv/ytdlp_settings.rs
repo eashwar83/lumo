@@ -18,6 +18,38 @@ pub(crate) struct YtdlpBinarySettings {
 #[derive(Clone)]
 pub(crate) struct YtdlpCookieSettings {
     pub(crate) browser: Option<String>,
+    /// A cookies.txt export. Preferred over the browser: YouTube rotates
+    /// the cookies of a live browser session, which invalidates them for
+    /// yt-dlp, while an exported private-window file keeps working.
+    pub(crate) file: Option<String>,
+}
+
+impl YtdlpCookieSettings {
+    /// Appends whichever cookie source is configured, if any.
+    pub(crate) fn apply(&self, command: &mut std::process::Command) {
+        if let Some(file) = self
+            .file
+            .as_deref()
+            .map(str::trim)
+            .filter(|path| !path.is_empty() && std::path::Path::new(path).is_file())
+        {
+            command.arg("--cookies").arg(file);
+            return;
+        }
+        if let Some(browser) = self.browser.as_deref() {
+            command.arg("--cookies-from-browser").arg(browser);
+        }
+    }
+
+    /// The same arguments as [`apply`], for the command log.
+    pub(crate) fn log_args(&self) -> Vec<String> {
+        let mut command = std::process::Command::new("yt-dlp");
+        self.apply(&mut command);
+        command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect()
+    }
 }
 
 #[derive(Clone)]
@@ -35,6 +67,7 @@ impl YtdlpSettings {
             binary: YtdlpBinarySettings { path: binary_path },
             cookies: YtdlpCookieSettings {
                 browser: cookies_from_browser,
+                file: None,
             },
             format,
         }
@@ -87,12 +120,20 @@ pub(crate) fn store_runtime_settings(settings: YtdlpSettings) {
 }
 
 pub(crate) fn resolve(app: &AppHandle) -> YtdlpSettings {
-    load_runtime_settings().unwrap_or_else(|| {
+    let mut settings = load_runtime_settings().unwrap_or_else(|| {
         let max_height = crate::store::ui_state_store::load_ytdl_max_height(app);
         YtdlpSettings::new(
             crate::app_bootstrap::resolve_ytdl_path(app),
             crate::store::ui_state_store::load_ytdl_cookies_from_browser(app),
             YtdlpFormatSettings { max_height },
         )
-    })
+    });
+    // Read straight from settings: the runtime cache predates this option.
+    settings.cookies.file =
+        crate::store::ui_state_store::load_setting_value(app, "SOIA_YTDL_COOKIES_FILE")
+            .ok()
+            .flatten()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+    settings
 }

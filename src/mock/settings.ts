@@ -80,6 +80,7 @@ export type SettingGroup = { title: string; items: SettingItem[] };
 export const YTDL_PATH_SETTING_LABEL = "SOIA_YTDL_PATH";
 export const YTDL_COOKIES_FROM_BROWSER_SETTING_LABEL =
     "SOIA_YTDL_COOKIES_FROM_BROWSER";
+export const YTDL_COOKIES_FILE_SETTING_LABEL = "SOIA_YTDL_COOKIES_FILE";
 export const YTDL_COOKIES_FROM_BROWSER_OPTIONS = [
     "Off",
     "chrome",
@@ -549,6 +550,15 @@ export const defaultSettingGroups: SettingGroup[] = [
                 value: "Off",
                 type: "select",
                 options: [...YTDL_COOKIES_FROM_BROWSER_OPTIONS],
+            },
+            {
+                label: YTDL_COOKIES_FILE_SETTING_LABEL,
+                displayLabel: "Cookies File",
+                value: "",
+                type: "path",
+                placeholder:
+                    "cookies.txt export (overrides Browser Cookies)",
+                browseTitle: "Select cookies.txt",
             },
             {
                 label: YTDL_MAX_RESOLUTION_SETTING_LABEL,

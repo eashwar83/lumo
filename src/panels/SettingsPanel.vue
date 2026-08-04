@@ -26,6 +26,7 @@ import {
     SUBSOURCE_LANGUAGES_SETTING_LABEL,
     WALLPAPER_MODE_SETTING_LABEL,
     YOUTUBE_SETTING_GROUP_TITLE,
+    YTDL_COOKIES_FILE_SETTING_LABEL,
     YTDL_COOKIES_FROM_BROWSER_SETTING_LABEL,
     YTDL_MAX_RESOLUTION_SETTING_LABEL,
     YTDL_PATH_SETTING_LABEL,
@@ -371,6 +372,7 @@ const activeBlocks = computed<Block[]>(() => {
                         [
                             YTDL_PATH_SETTING_LABEL,
                             YTDL_COOKIES_FROM_BROWSER_SETTING_LABEL,
+                            YTDL_COOKIES_FILE_SETTING_LABEL,
                             YTDL_MAX_RESOLUTION_SETTING_LABEL,
                         ].includes(item.label),
                     ),

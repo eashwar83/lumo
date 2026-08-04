@@ -130,20 +130,20 @@ pub(crate) async fn resolve_playlist(
     };
 
     let proxy_url = crate::network::proxy::current_proxy_key(app)?;
-    let cookies_from_browser = settings.cookies.browser;
+    let cookies = settings.cookies;
     let raw_url = raw_url.to_string();
-    let cookies_clone = cookies_from_browser.clone();
+    let had_cookies = cookies.file.is_some() || cookies.browser.is_some();
     let proxy_clone = proxy_url.clone();
     let url_clone = raw_url.clone();
     let ytdl_clone = ytdl_path.clone();
     let output = tauri::async_runtime::spawn_blocking(move || {
-        run_ytdlp_playlist_command(&ytdl_path, proxy_url.as_deref(), cookies_from_browser.as_deref(), &raw_url)
+        run_ytdlp_playlist_command(&ytdl_path, proxy_url.as_deref(), Some(&cookies), &raw_url)
     })
     .await
     .map_err(|error| format!("yt-dlp worker failed: {error}"))??;
 
     let output = if !output.status.success()
-        && cookies_clone.is_some()
+        && had_cookies
         && is_cookie_permission_error(&output.stderr)
     {
         warn!(
@@ -187,7 +187,7 @@ pub(crate) async fn resolve_playlist(
 fn run_ytdlp_playlist_command(
     ytdl_path: &str,
     proxy_url: Option<&str>,
-    cookies_from_browser: Option<&str>,
+    cookies: Option<&super::ytdlp_settings::YtdlpCookieSettings>,
     raw_url: &str,
 ) -> Result<std::process::Output, String> {
     let mut command = ytdlp_base_command(ytdl_path);
@@ -209,10 +209,9 @@ fn run_ytdlp_playlist_command(
         log_args.push(redact_url(proxy_url));
     }
 
-    if let Some(browser) = cookies_from_browser {
-        command.arg("--cookies-from-browser").arg(browser);
-        log_args.push("--cookies-from-browser".to_string());
-        log_args.push(browser.to_string());
+    if let Some(cookies) = cookies {
+        cookies.apply(&mut command);
+        log_args.extend(cookies.log_args());
     }
 
     info!(
@@ -338,13 +337,13 @@ pub(crate) async fn resolve(
     }
 
     let proxy_url = crate::network::proxy::current_proxy_key(app)?;
-    let cookies_from_browser = settings.cookies.browser;
+    let cookies = settings.cookies;
     let format_selector = super::ytdlp_settings::YtdlpFormatSettings {
         max_height: effective_max_height,
     }
     .selector();
     let raw_url = raw_url.to_string();
-    let cookies_clone = cookies_from_browser.clone();
+    let had_cookies = cookies.file.is_some() || cookies.browser.is_some();
     let proxy_clone = proxy_url.clone();
     let format_clone = format_selector.clone();
     let url_clone = raw_url.clone();
@@ -353,7 +352,7 @@ pub(crate) async fn resolve(
         run_ytdlp_command(
             &ytdl_path,
             proxy_url.as_deref(),
-            cookies_from_browser.as_deref(),
+            Some(&cookies),
             &format_selector,
             &raw_url,
         )
@@ -361,7 +360,7 @@ pub(crate) async fn resolve(
     .await
     .map_err(|error| format!("yt-dlp worker failed: {error}"))??;
     let output = if !output.status.success()
-        && cookies_clone.is_some()
+        && had_cookies
         && is_cookie_permission_error(&output.stderr)
     {
         warn!(
@@ -427,7 +426,7 @@ pub(crate) async fn try_resolve(
 fn run_ytdlp_command(
     ytdl_path: &str,
     proxy_url: Option<&str>,
-    cookies_from_browser: Option<&str>,
+    cookies: Option<&super::ytdlp_settings::YtdlpCookieSettings>,
     format_selector: &str,
     raw_url: &str,
 ) -> Result<std::process::Output, String> {
@@ -461,10 +460,9 @@ fn run_ytdlp_command(
         log_args.push(redact_url(proxy_url));
     }
 
-    if let Some(browser) = cookies_from_browser {
-        command.arg("--cookies-from-browser").arg(browser);
-        log_args.push("--cookies-from-browser".to_string());
-        log_args.push(browser.to_string());
+    if let Some(cookies) = cookies {
+        cookies.apply(&mut command);
+        log_args.extend(cookies.log_args());
     }
 
     info!(

@@ -580,7 +580,7 @@ fences, no commentary."
 
 /// Translate a batch of lines via the chat API. Returns the translated lines, or
 /// the originals if the model's reply can't be parsed 1:1.
-fn translate_batch(
+pub(crate) fn translate_batch(
     client: &reqwest::blocking::Client,
     url: &str,
     api_key: &str,

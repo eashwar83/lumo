@@ -1,5 +1,6 @@
 import { computed, ref, watch, type Ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type { YoutubeItem } from "./useYouTubeModule";
 
 export type YoutubeChapter = { title: string; startSeconds: number };
@@ -15,6 +16,28 @@ export type SponsorSegment = {
     endSeconds: number;
 };
 
+export type CaptionTrack = { code: string; name: string; auto: boolean };
+
+export type YoutubeComment = {
+    id: string;
+    author: string;
+    authorThumbnail?: string | null;
+    text: string;
+    publishedText?: string | null;
+    likeCountText?: string | null;
+    replyCountText?: string | null;
+    isPinned: boolean;
+    isHearted: boolean;
+    /** Filled in by the AI translation pass. */
+    translated?: string;
+};
+
+type CommentPage = {
+    comments: YoutubeComment[];
+    nextCursor: string | null;
+    totalText: string | null;
+};
+
 type UseYouTubeWatchOptions = {
     mediaUrl: () => string;
     isFileLoaded: () => boolean;
@@ -25,6 +48,11 @@ type UseYouTubeWatchOptions = {
     /** Pushes chapter marks onto the seek bar / scene navigation. */
     setSceneMarkers: (markers: { start: number; label: string }[]) => void;
     seekTo: (seconds: number) => void;
+    /** Loads a downloaded caption file into the player. */
+    addSubtitleFile: (path: string, title: string) => Promise<boolean>;
+    notify: (message: string) => void;
+    /** Closes panels that would overlap this drawer. */
+    closeOtherDrawers?: () => void;
     /** Live values from Settings → YouTube. */
     settings: {
         autoplayNext: boolean;
@@ -52,7 +80,8 @@ export const extractYoutubeVideoId = (url: string): string | null => {
 
 export const useYouTubeWatch = (options: UseYouTubeWatchOptions) => {
     const isDrawerOpen = ref(false);
-    const activeTab: Ref<"upnext" | "chapters"> = ref("upnext");
+    const activeTab: Ref<"upnext" | "chapters" | "captions" | "comments"> =
+        ref("upnext");
     const related = ref<YoutubeItem[]>([]);
     const chapters = ref<YoutubeChapter[]>([]);
     const sponsorSegments = ref<SponsorSegment[]>([]);
@@ -115,6 +144,15 @@ export const useYouTubeWatch = (options: UseYouTubeWatchOptions) => {
             const token = ++contextToken;
             related.value = [];
             chapters.value = [];
+            captionTracks.value = [];
+            loadedCaptionCodes.value = [];
+            comments.value = [];
+            commentsCursor.value = null;
+            commentsTotal.value = "";
+            commentsError.value = "";
+            showTranslated.value = false;
+            selectedCommentIds.value = [];
+            captionStatus.value = "";
             sponsorSegments.value = [];
             suppressedSegments = new Set();
             sponsorToast.value = null;
@@ -162,6 +200,170 @@ export const useYouTubeWatch = (options: UseYouTubeWatchOptions) => {
         { immediate: true },
     );
 
+    // --- captions --------------------------------------------------------
+    const captionTracks = ref<CaptionTrack[]>([]);
+    const isLoadingCaptions = ref(false);
+    const loadingCaptionCode = ref("");
+    const loadedCaptionCodes = ref<string[]>([]);
+    /** Backend chatter while a fetch waits out a YouTube rate limit. */
+    const captionStatus = ref("");
+
+    void listen<{ videoId: string; language: string; message: string }>(
+        "youtube://caption-progress",
+        (event) => {
+            if (event.payload.videoId !== currentVideoId.value) return;
+            captionStatus.value = event.payload.message;
+        },
+    );
+
+    const loadCaptionTracks = async () => {
+        const videoId = currentVideoId.value;
+        if (!videoId || captionTracks.value.length || isLoadingCaptions.value) {
+            return;
+        }
+        isLoadingCaptions.value = true;
+        try {
+            captionTracks.value = await invoke<CaptionTrack[]>(
+                "youtube_caption_tracks",
+                { videoId },
+            );
+        } catch {
+            captionTracks.value = [];
+        } finally {
+            isLoadingCaptions.value = false;
+        }
+    };
+
+    /** Downloads a caption track and hands it to the player. */
+    const useCaption = async (track: CaptionTrack) => {
+        const videoId = currentVideoId.value;
+        if (!videoId || loadingCaptionCode.value) return;
+        loadingCaptionCode.value = track.code;
+        captionStatus.value = "";
+        try {
+            const path = await invoke<string>("youtube_caption_file", {
+                videoId,
+                language: track.code,
+            });
+            const label = track.auto ? `${track.name} (auto)` : track.name;
+            const added = await options.addSubtitleFile(path, label);
+            if (added) {
+                if (!loadedCaptionCodes.value.includes(track.code)) {
+                    loadedCaptionCodes.value = [
+                        ...loadedCaptionCodes.value,
+                        track.code,
+                    ];
+                }
+                options.notify(`${label} subtitles on`);
+            } else {
+                options.notify("Couldn't load that caption track");
+            }
+        } catch (error) {
+            options.notify(
+                String(error).replace(/^Error:\s*/, "").slice(0, 160),
+            );
+        } finally {
+            loadingCaptionCode.value = "";
+            captionStatus.value = "";
+        }
+    };
+
+    // --- comments --------------------------------------------------------
+    const comments = ref<YoutubeComment[]>([]);
+    const commentsCursor = ref<string | null>(null);
+    const commentsTotal = ref("");
+    const isLoadingComments = ref(false);
+    const commentsError = ref("");
+
+    const loadComments = async (more = false) => {
+        const videoId = currentVideoId.value;
+        if (!videoId || isLoadingComments.value) return;
+        if (more && !commentsCursor.value) return;
+        isLoadingComments.value = true;
+        if (!more) commentsError.value = "";
+        try {
+            const page = await invoke<CommentPage>("youtube_comments", {
+                payload: {
+                    videoId,
+                    cursor: more ? commentsCursor.value : null,
+                },
+            });
+            comments.value = more
+                ? [...comments.value, ...page.comments]
+                : page.comments;
+            commentsCursor.value = page.nextCursor;
+            if (page.totalText) commentsTotal.value = page.totalText;
+        } catch (error) {
+            commentsError.value = String(error)
+                .replace(/^Error:\s*/, "")
+                .slice(0, 160);
+        } finally {
+            isLoadingComments.value = false;
+        }
+    };
+
+    const isTranslating = ref(false);
+    const showTranslated = ref(false);
+    const selectedCommentIds = ref<string[]>([]);
+
+    const toggleCommentSelection = (id: string) => {
+        selectedCommentIds.value = selectedCommentIds.value.includes(id)
+            ? selectedCommentIds.value.filter((entry) => entry !== id)
+            : [...selectedCommentIds.value, id];
+    };
+
+    const clearCommentSelection = () => {
+        selectedCommentIds.value = [];
+    };
+
+    /**
+     * Translates the loaded comments — or only the ticked ones — and keeps
+     * showing translations afterwards.
+     */
+    const translateComments = async (
+        targetLanguage: string,
+        credentials: { base: string; key: string; model: string },
+        onlySelected = false,
+    ) => {
+        if (isTranslating.value || !comments.value.length) return;
+        const scope =
+            onlySelected && selectedCommentIds.value.length
+                ? comments.value.filter((comment) =>
+                      selectedCommentIds.value.includes(comment.id),
+                  )
+                : comments.value;
+        const pending = scope.filter((comment) => !comment.translated);
+        if (!pending.length) {
+            showTranslated.value = true;
+            return;
+        }
+        isTranslating.value = true;
+        try {
+            const translations = await invoke<string[]>(
+                "youtube_translate_comments",
+                {
+                    payload: {
+                        texts: pending.map((comment) => comment.text),
+                        targetLanguage,
+                        chatBase: credentials.base,
+                        chatKey: credentials.key,
+                        chatModel: credentials.model,
+                    },
+                },
+            );
+            pending.forEach((comment, index) => {
+                comment.translated = translations[index] ?? comment.text;
+            });
+            showTranslated.value = true;
+        } catch (error) {
+            options.notify(
+                String(error).replace(/^Error:\s*/, "").slice(0, 160),
+            );
+        } finally {
+            isTranslating.value = false;
+        }
+    };
+
     const hideSponsorToast = () => {
         sponsorToast.value = null;
         if (sponsorToastTimer !== null) {
@@ -202,6 +404,8 @@ export const useYouTubeWatch = (options: UseYouTubeWatchOptions) => {
 
     const toggleDrawer = () => {
         isDrawerOpen.value = !isDrawerOpen.value;
+        // Both drawers hug the right edge; never show them stacked.
+        if (isDrawerOpen.value) options.closeOtherDrawers?.();
     };
 
     const closeDrawer = (): boolean => {
@@ -215,6 +419,25 @@ export const useYouTubeWatch = (options: UseYouTubeWatchOptions) => {
         activeTab,
         related,
         chapters,
+        captionTracks,
+        isLoadingCaptions,
+        loadingCaptionCode,
+        loadedCaptionCodes,
+        captionStatus,
+        loadCaptionTracks,
+        useCaption,
+        comments,
+        commentsCursor,
+        commentsTotal,
+        isLoadingComments,
+        commentsError,
+        loadComments,
+        translateComments,
+        isTranslating,
+        showTranslated,
+        selectedCommentIds,
+        toggleCommentSelection,
+        clearCommentSelection,
         sponsorSegments,
         sponsorToast,
         isLoadingContext,

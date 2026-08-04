@@ -71,6 +71,12 @@ const props = defineProps<{
     isFullscreen: boolean;
     /** Label for the YouTube quality chip; null hides it (non-YouTube media). */
     youtubeQualityLabel: string | null;
+    youtubeCaptionTracks: { code: string; name: string; auto: boolean }[];
+    isLoadingYoutubeCaptions: boolean;
+    loadingYoutubeCaptionCode: string;
+    loadedYoutubeCaptionCodes: string[];
+    /** Backend note while a caption fetch waits out a rate limit. */
+    youtubeCaptionStatus: string;
 }>();
 
 const emit = defineEmits<{
@@ -109,7 +115,30 @@ const emit = defineEmits<{
     (e: "set-youtube-quality", height: number | null): void;
     (e: "toggle-youtube-drawer"): void;
     (e: "download-youtube"): void;
+    (e: "open-youtube-captions"): void;
+    (
+        e: "use-youtube-caption",
+        track: { code: string; name: string; auto: boolean },
+    ): void;
 }>();
+
+// YouTube caption picker, shown inside the subtitle menu.
+const showYoutubeCaptions = ref(false);
+const captionFilter = ref("");
+
+const filteredCaptionTracks = computed(() => {
+    const needle = captionFilter.value.trim().toLowerCase();
+    if (!needle) return props.youtubeCaptionTracks;
+    return props.youtubeCaptionTracks.filter((track) =>
+        track.name.toLowerCase().includes(needle),
+    );
+});
+
+const openYoutubeCaptions = () => {
+    showYoutubeCaptions.value = true;
+    captionFilter.value = "";
+    emit("open-youtube-captions");
+};
 
 const YT_QUALITY_OPTIONS: { height: number | null; label: string }[] = [
     { height: null, label: "Auto" },
@@ -419,6 +448,7 @@ watch(
     (showSubMenu) => {
         if (!showSubMenu) {
             emit("update:showSubtitleAdvancedSettings", false);
+            showYoutubeCaptions.value = false;
             renderedSubtitleTrackCount.value = 0;
             cancelSubtitleRenderFrame();
             return;
@@ -733,7 +763,28 @@ watch(
                     <div class="track-menu__header">
                         <div class="track-menu__title-group">
                             <button
-                                v-if="props.showSubtitleAdvancedSettings"
+                                v-if="showYoutubeCaptions"
+                                class="track-menu__back-button"
+                                type="button"
+                                title="Back to subtitle tracks"
+                                aria-label="Back to subtitle tracks"
+                                @click.stop="showYoutubeCaptions = false"
+                            >
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    height="24px"
+                                    viewBox="0 -960 960 960"
+                                    width="24px"
+                                    fill="currentColor"
+                                    aria-hidden="true"
+                                >
+                                    <path
+                                        d="M560-240 320-480l240-240 56 56-184 184 184 184-56 56Z"
+                                    />
+                                </svg>
+                            </button>
+                            <button
+                                v-else-if="props.showSubtitleAdvancedSettings"
                                 class="track-menu__back-button"
                                 type="button"
                                 title="Back to subtitle tracks"
@@ -771,16 +822,36 @@ watch(
                             </button>
                             <span>
                                 {{
-                                    props.showSubtitleAdvancedSettings
-                                        ? "Advance Settings"
-                                        : "Subtitle"
+                                    showYoutubeCaptions
+                                        ? "YouTube subtitles"
+                                        : props.showSubtitleAdvancedSettings
+                                          ? "Advance Settings"
+                                          : "Subtitle"
                                 }}
                             </span>
                         </div>
                         <div
-                            v-if="!props.showSubtitleAdvancedSettings"
+                            v-if="
+                                !props.showSubtitleAdvancedSettings &&
+                                !showYoutubeCaptions
+                            "
                             class="track-menu__header-actions"
                         >
+                            <button
+                                v-if="props.youtubeQualityLabel !== null"
+                                class="icon-button track-menu__header-action"
+                                type="button"
+                                title="YouTube subtitles"
+                                aria-label="YouTube subtitles"
+                                @click.stop="openYoutubeCaptions"
+                            >
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path
+                                        d="M2.5 17a24.12 24.12 0 0 1 0-10 2 2 0 0 1 1.4-1.4 49.56 49.56 0 0 1 16.2 0A2 2 0 0 1 21.5 7a24.12 24.12 0 0 1 0 10 2 2 0 0 1-1.4 1.4 49.55 49.55 0 0 1-16.2 0A2 2 0 0 1 2.5 17"
+                                    />
+                                    <path d="m10 15 5-3-5-3z" fill="currentColor" stroke="none" />
+                                </svg>
+                            </button>
                             <button
                                 class="track-menu__dual-button"
                                 :class="{ 'track-menu__dual-button--active': dualSubEnabled }"
@@ -818,7 +889,83 @@ watch(
                         </div>
                     </div>
                     <div
-                        v-if="props.showSubtitleAdvancedSettings"
+                        v-if="showYoutubeCaptions"
+                        class="track-menu__list track-menu__list--captions"
+                    >
+                        <input
+                            v-model="captionFilter"
+                            class="track-menu__caption-filter"
+                            type="text"
+                            placeholder="Filter languages…"
+                            spellcheck="false"
+                            @keydown.stop
+                        />
+                        <div
+                            v-if="props.youtubeCaptionStatus"
+                            class="track-menu__caption-state track-menu__caption-state--busy"
+                        >
+                            {{ props.youtubeCaptionStatus }}
+                        </div>
+                        <div
+                            v-if="props.isLoadingYoutubeCaptions"
+                            class="track-menu__caption-state"
+                        >
+                            Looking for subtitles…
+                        </div>
+                        <div
+                            v-else-if="!filteredCaptionTracks.length"
+                            class="track-menu__caption-state"
+                        >
+                            {{
+                                props.youtubeCaptionTracks.length
+                                    ? "No language matches that filter"
+                                    : "This video has no subtitles"
+                            }}
+                        </div>
+                        <button
+                            v-for="track in filteredCaptionTracks"
+                            :key="`${track.code}-${track.auto}`"
+                            class="track-menu__item"
+                            :class="{
+                                'track-menu__item--active':
+                                    props.loadedYoutubeCaptionCodes.includes(
+                                        track.code,
+                                    ),
+                            }"
+                            type="button"
+                            :disabled="!!props.loadingYoutubeCaptionCode"
+                            @click="emit('use-youtube-caption', track)"
+                        >
+                            <span class="track-menu__check">
+                                <svg
+                                    v-if="
+                                        props.loadedYoutubeCaptionCodes.includes(
+                                            track.code,
+                                        )
+                                    "
+                                    viewBox="0 0 24 24"
+                                    fill="currentColor"
+                                >
+                                    <path
+                                        d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"
+                                    />
+                                </svg>
+                            </span>
+                            <span class="track-menu__text">{{ track.name }}</span>
+                            <span
+                                v-if="props.loadingYoutubeCaptionCode === track.code"
+                                class="track-menu__caption-tag"
+                                >loading…</span
+                            >
+                            <span
+                                v-else-if="track.auto"
+                                class="track-menu__caption-tag"
+                                >auto</span
+                            >
+                        </button>
+                    </div>
+                    <div
+                        v-else-if="props.showSubtitleAdvancedSettings"
                         class="track-menu__list track-menu__list--subtitle-advanced"
                     >
                         <div class="subtitle-advanced">
@@ -996,7 +1143,11 @@ watch(
                         </div>
                     </div>
                     <div
-                        v-if="props.hasSubTracks && !props.showSubtitleAdvancedSettings"
+                        v-if="
+                            props.hasSubTracks &&
+                            !props.showSubtitleAdvancedSettings &&
+                            !showYoutubeCaptions
+                        "
                         class="track-menu__footer"
                     >
                         <ControlSlider
@@ -1611,6 +1762,48 @@ watch(
 </template>
 
 <style scoped>
+/* YouTube caption picker inside the subtitle menu. */
+.track-menu__caption-filter {
+    width: 100%;
+    box-sizing: border-box;
+    margin-bottom: 6px;
+    padding: 6px 9px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    color: #fff;
+    font-size: 12px;
+    outline: none;
+}
+
+.track-menu__caption-filter:focus {
+    border-color: rgba(143, 179, 255, 0.7);
+}
+
+.track-menu__caption-state {
+    padding: 14px 6px;
+    text-align: center;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.track-menu__caption-state--busy {
+    padding: 8px 6px;
+    color: rgba(255, 214, 138, 0.9);
+    line-height: 1.35;
+}
+
+.track-menu__caption-tag {
+    margin-left: auto;
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, 0.45);
+}
+
+.track-menu__list--captions {
+    max-height: 320px;
+    overflow-y: auto;
+}
+
 .yt-quality-chip {
     font-size: 12px;
     font-weight: 700;

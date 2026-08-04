@@ -57,6 +57,8 @@ import { useSubtitleSyncByEar } from "./composables/useSubtitleSyncByEar";
 import { useSceneIndex } from "./composables/useSceneIndex";
 import { useYouTubeWatch } from "./composables/useYouTubeWatch";
 import { useYouTubeSettings } from "./composables/useYouTubeSettings";
+import { useSubtitleAiConfig } from "./composables/useSubtitleAiConfig";
+import { useCommentTranslateAi } from "./composables/useCommentTranslateAi";
 import {
     createDebouncedUiStateSaver,
     loadUiState,
@@ -303,6 +305,9 @@ const {
     playPath,
     playPreviousTrack: playbackNavigation.playPreviousTrack,
     playNextTrack: playbackNavigation.playNextTrack,
+    closeYoutubeDrawer: () => {
+        ytWatch.isDrawerOpen.value = false;
+    },
 });
 
 const onSideNavNavigate = async (
@@ -1999,7 +2004,49 @@ const ytWatch = useYouTubeWatch({
     },
     seekTo: (seconds) => onSeek(seconds),
     settings: youtubeSettings,
+    addSubtitleFile: (path, title) =>
+        // (path, mode, mediaKey, title) — the key stays unset so the track
+        // is accepted for whatever is playing right now.
+        tracks.addExternalSubPath(path, "select", undefined, title),
+    notify: (message) => showMessageOverlay(message, 2600),
+    closeOtherDrawers: () => {
+        closePlaylist();
+        isInfoOpen.value = false;
+    },
 });
+
+// Comments translate into the language chosen for subtitle AI, using the
+// same provider/key resolution.
+const commentAiConfig = useSubtitleAiConfig();
+const commentTranslateLanguage = computed(
+    () => commentAiConfig.targetLanguage.value || "en",
+);
+
+const commentAi = useCommentTranslateAi();
+
+const onTranslateComments = (onlySelected = false) => {
+    const credentials = commentAi.resolve();
+    if ("error" in credentials) {
+        showMessageOverlay(credentials.error, 4200);
+        return;
+    }
+    void ytWatch.translateComments(
+        commentTranslateLanguage.value,
+        credentials,
+        onlySelected,
+    );
+};
+
+watch(
+    () => [ytWatch.isDrawerOpen.value, ytWatch.activeTab.value] as const,
+    ([open, tab]) => {
+        if (!open) return;
+        if (tab === "captions") void ytWatch.loadCaptionTracks();
+        if (tab === "comments" && !ytWatch.comments.value.length) {
+            void ytWatch.loadComments();
+        }
+    },
+);
 
 watch(
     () => player.state.playback.currentTime,
@@ -2572,11 +2619,35 @@ useAppStartupBindings({
             :is-loading="ytWatch.isLoadingContext.value"
             :autoplay-next="ytWatch.autoplayNext.value"
             :current-time="player.state.playback.currentTime"
+            :caption-tracks="ytWatch.captionTracks.value"
+            :is-loading-captions="ytWatch.isLoadingCaptions.value"
+            :loading-caption-code="ytWatch.loadingCaptionCode.value"
+            :loaded-caption-codes="ytWatch.loadedCaptionCodes.value"
+            :comments="ytWatch.comments.value"
+            :comments-total="ytWatch.commentsTotal.value"
+            :comments-cursor="ytWatch.commentsCursor.value"
+            :is-loading-comments="ytWatch.isLoadingComments.value"
+            :comments-error="ytWatch.commentsError.value"
+            :is-translating="ytWatch.isTranslating.value"
+            :show-translated="ytWatch.showTranslated.value"
+            :translate-language="commentTranslateLanguage"
+            :selected-comment-ids="ytWatch.selectedCommentIds.value"
+            :ai-provider="commentAi.provider.value"
+            :ai-model="commentAi.model.value"
+            :ai-providers="commentAi.providerOptions.value"
+            :ai-models="commentAi.modelOptions.value"
             @close="ytWatch.isDrawerOpen.value = false"
             @set-tab="ytWatch.activeTab.value = $event"
             @set-autoplay="ytWatch.setAutoplayNext"
             @play="onPlayYoutube"
             @seek="onSeek"
+            @use-caption="ytWatch.useCaption"
+            @load-more-comments="ytWatch.loadComments(true)"
+            @translate-comments="onTranslateComments"
+            @toggle-translated="ytWatch.showTranslated.value = $event"
+            @toggle-comment-selection="ytWatch.toggleCommentSelection"
+            @set-ai-provider="commentAi.setProvider"
+            @set-ai-model="commentAi.setModel"
         />
 
         <MainPanels
@@ -2818,9 +2889,16 @@ useAppStartupBindings({
             :current-time="player.state.playback.currentTime"
             :duration="player.state.playback.duration"
             :youtube-quality-label="youtubeQualityLabel"
+            :youtube-caption-tracks="ytWatch.captionTracks.value"
+            :is-loading-youtube-captions="ytWatch.isLoadingCaptions.value"
+            :loading-youtube-caption-code="ytWatch.loadingCaptionCode.value"
+            :loaded-youtube-caption-codes="ytWatch.loadedCaptionCodes.value"
+            :youtube-caption-status="ytWatch.captionStatus.value"
             @set-youtube-quality="onSetYoutubeQuality"
             @toggle-youtube-drawer="ytWatch.toggleDrawer()"
             @download-youtube="onDownloadCurrentYoutube"
+            @open-youtube-captions="ytWatch.loadCaptionTracks()"
+            @use-youtube-caption="ytWatch.useCaption"
             :media-path="player.state.media.url"
             :thumb-reload-token="thumbReloadToken"
             :ab-point-a="abRange.pointA.value"

@@ -773,6 +773,7 @@ export const useMediaTracks = (
         setActiveSubTarget: subtitleState.setActiveSubTarget,
         addExternalAudioTrack,
         addExternalSubtitleTrack,
+        addExternalSubPath,
         removeSubtitleTrack,
         searchOnlineSubtitleTracks,
         setOnlineSubtitleProvider,
