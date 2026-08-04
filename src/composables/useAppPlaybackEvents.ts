@@ -70,6 +70,8 @@ type UseAppPlaybackEventsOptions = {
     isLoading: Ref<boolean>;
     loadingUrl: Ref<string>;
     playNextAfterEnd: () => Promise<void>;
+    /** Returns true when it retried the source itself (keeps loading state). */
+    onSourceError?: () => Promise<boolean>;
 };
 
 export const useAppPlaybackEvents = ({
@@ -82,6 +84,7 @@ export const useAppPlaybackEvents = ({
     isLoading,
     loadingUrl,
     playNextAfterEnd,
+    onSourceError,
 }: UseAppPlaybackEventsOptions) => {
     const shouldAutoPlayNextInPlaylist = async () => {
         const stored = await loadUiState<{
@@ -153,6 +156,16 @@ export const useAppPlaybackEvents = ({
     };
 
     const onEndFile = ({ reason }: EndFilePayload) => {
+        if (reason === "error") {
+            // The source died on open (commonly an expired YouTube URL).
+            // Give the caller one chance to refresh before giving up.
+            void (async () => {
+                if (await onSourceError?.()) return;
+                isLoading.value = false;
+                loadingUrl.value = "";
+            })();
+            return;
+        }
         if (reason !== "eof") return;
         isLoading.value = false;
         loadingUrl.value = "";

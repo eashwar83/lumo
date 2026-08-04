@@ -21,6 +21,7 @@ pub(crate) use thumbnails::generate_thumbnails;
 #[cfg(target_os = "macos")]
 pub(crate) use ffi::SoiaUtils;
 pub(crate) use handle::MpvHandle;
+pub(crate) use ytdlp_resolver::forget_resolution;
 pub(crate) use ytdlp_resolver::try_resolve as try_resolve_with_ytdlp;
 pub(crate) use ytdlp_resolver::ytdlp_base_command;
 pub(crate) use ytdlp_resolver::resolve_playlist as resolve_ytdlp_playlist;

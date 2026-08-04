@@ -617,6 +617,41 @@ watch(
     },
 );
 
+// YouTube stream URLs are tied to the IP that resolved them, so a VPN hop
+// (or an expiry) turns them into 403s and mpv reports an error end-file.
+// Re-resolve once and resume where we were.
+let ytStreamRetryUrl = "";
+
+const retryYoutubeWithFreshStream = async (): Promise<boolean> => {
+    const url = player.state.media.url;
+    if (!isYoutubePlayback.value || !url) return false;
+    if (ytStreamRetryUrl === url) return false;
+    ytStreamRetryUrl = url;
+    showMessageOverlay("Stream expired — refreshing…", 2600);
+    try {
+        await player.loadFile(
+            pendingResume.value?.position ?? 0,
+            true,
+            ytQualityOverride.value ?? undefined,
+            true,
+        );
+        return true;
+    } catch (error) {
+        showMessageOverlay(
+            String(error).replace(/^Error:\s*/, "").slice(0, 160),
+            3600,
+        );
+        return false;
+    }
+};
+
+watch(
+    () => player.state.media.url,
+    () => {
+        ytStreamRetryUrl = "";
+    },
+);
+
 // --- download the video that's playing ------------------------------------
 const youtubeDownloads = useYouTubeDownloads();
 const playerDownloadItem = ref<{
@@ -2346,6 +2381,7 @@ const {
         isLoading,
         loadingUrl,
         playNextAfterEnd: playbackNavigation.playNextAfterEnd,
+        onSourceError: () => retryYoutubeWithFreshStream(),
     });
 
 const onFileLoaded = async () => {

@@ -85,6 +85,7 @@ export const usePlaybackCommands = (
     resumePosition?: number,
     autoPlay = true,
     qualityMaxHeight?: number,
+    forceRefresh = false,
   ): Promise<LoadFileResult> => {
     if (state.media.url) {
       return await invoke<LoadFileResult>("load_file", {
@@ -93,6 +94,7 @@ export const usePlaybackCommands = (
           resumePosition,
           autoPlay,
           qualityMaxHeight,
+          forceRefresh,
         },
       });
     }

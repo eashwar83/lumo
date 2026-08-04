@@ -87,6 +87,9 @@ pub(crate) struct LoadFilePayload {
     /// Per-play stream quality cap (e.g. 720/1080/2160); None = the
     /// configured default. Only meaningful for yt-dlp-resolved URLs.
     quality_max_height: Option<u32>,
+    /// Re-resolve instead of reusing the cached stream URLs (used when a
+    /// previously working URL starts returning 403).
+    force_refresh: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -167,6 +170,9 @@ pub(crate) async fn load_file(
             .then(|| youtube_default_quality(&app))
             .flatten()
     });
+    if payload.force_refresh.unwrap_or(false) {
+        crate::mpv::forget_resolution(&payload.url);
+    }
     let resolved_media =
         crate::mpv::try_resolve_with_ytdlp(&app, &payload.url, quality_max_height).await;
     // A YouTube page URL is useless to mpv — failing the resolve must fail

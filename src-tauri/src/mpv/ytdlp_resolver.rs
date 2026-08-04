@@ -81,6 +81,15 @@ fn resolve_cache_get(key: &str) -> Option<ResolvedMedia> {
         .then(|| media.clone())
 }
 
+/// Drops every cached resolution for a video. Stream URLs are tied to the
+/// IP that requested them, so a VPN hop or an expiry makes them 403 — the
+/// cure is to resolve again rather than replay a dead URL.
+pub(crate) fn forget_resolution(raw_url: &str) {
+    if let Ok(mut guard) = resolve_cache().lock() {
+        guard.retain(|key, _| !key.starts_with(raw_url));
+    }
+}
+
 fn resolve_cache_put(key: String, media: &ResolvedMedia) {
     if media.is_live_playback {
         return;
