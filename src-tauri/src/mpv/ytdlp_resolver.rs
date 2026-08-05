@@ -434,7 +434,7 @@ pub(crate) async fn resolve(
 
     let value: Value = serde_json::from_slice(&output.stdout)
         .map_err(|error| format!("yt-dlp returned invalid JSON: {error}"))?;
-    let Some(candidate) = select_candidate(&value, effective_max_height) else {
+    let Some(candidate) = select_candidate(&value) else {
         return Err("yt-dlp did not return a playable URL".to_string());
     };
     log_selected_candidate("selected", &candidate);
@@ -608,19 +608,16 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-fn select_candidate(value: &Value, max_height: u32) -> Option<Candidate> {
+fn select_candidate(value: &Value) -> Option<Candidate> {
     let top_headers = parse_headers(value.get("http_headers"));
 
-    // YouTube "ramps" fresh anonymous DASH URLs: the first byte is withheld
-    // until `available_at`. When the wait would be noticeable, prefer a
-    // PO-token-attested HLS format (immune to the ramp) if one exists.
-    let ramp = requested_ramp_seconds(value);
-    if ramp > 3 {
-        if let Some(candidate) = select_potted_hls(value, max_height, &top_headers) {
-            info!("yt-dlp: DASH ramp {ramp}s pending; using token-attested HLS instead");
-            return Some(candidate);
-        }
-    }
+    // YouTube "ramps" fresh DASH URLs: the first byte is withheld until
+    // `available_at`, a few seconds out. Preferring PO-token-attested HLS
+    // skipped that wait, but an HLS stream has to be proxied playlist and
+    // all — thousands of segment URLs rewritten on every refresh — and
+    // that path cost far more than the seconds it saved. DASH is a single
+    // URL the proxy passes straight through, so the ramp is the better
+    // trade.
 
     if let Some(candidate) = select_requested_formats(value, &top_headers) {
         return Some(candidate);
@@ -748,59 +745,6 @@ fn is_live_video(value: &Value) -> bool {
             .is_some_and(|status| status == "is_live" || status == "post_live")
 }
 
-fn now_unix() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_secs() as i64)
-        .unwrap_or(0)
-}
-
-/// Longest remaining `available_at` wait across the formats yt-dlp picked.
-fn requested_ramp_seconds(value: &Value) -> i64 {
-    let now = now_unix();
-    value
-        .get("requested_formats")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|format| format.get("available_at").and_then(Value::as_i64))
-        .map(|available_at| available_at - now)
-        .max()
-        .unwrap_or(0)
-}
-
-fn has_pot_param(url: &str) -> bool {
-    url.contains("pot=") || url.contains("/pot/")
-}
-
-/// Best muxed HLS format carrying a PO token, capped at `max_height`.
-fn select_potted_hls(
-    value: &Value,
-    max_height: u32,
-    top_headers: &[(String, String)],
-) -> Option<Candidate> {
-    value
-        .get("formats")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter(|format| {
-            format
-                .get("protocol")
-                .and_then(Value::as_str)
-                .is_some_and(|protocol| protocol.contains("m3u8"))
-                && format
-                    .get("url")
-                    .and_then(Value::as_str)
-                    .is_some_and(has_pot_param)
-                && format
-                    .get("height")
-                    .and_then(Value::as_u64)
-                    .is_some_and(|height| height <= u64::from(max_height))
-        })
-        .filter_map(|format| format_candidate(format, top_headers))
-        .max_by_key(|candidate| candidate.score)
-}
 
 fn extract_media_title(value: &Value) -> Option<String> {
     value
