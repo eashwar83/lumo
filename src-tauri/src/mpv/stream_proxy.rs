@@ -29,8 +29,12 @@ const SMB_STREAM_CHUNK_BYTES: u64 = 4 * 1024 * 1024;
 const SMB_PIPELINE_DEPTH: usize = 4;
 const STREAM_BACKEND_IDLE_TIMEOUT: Duration = Duration::from_secs(2 * 60 * 60);
 const STREAM_BACKEND_CLEANUP_INTERVAL: Duration = Duration::from_secs(60);
-const STREAM_BACKEND_MAX_ENTRIES: usize = 4096;
-const STREAM_BACKEND_TARGET_ENTRIES: usize = 3072;
+// A long HLS video is thousands of segments, and each one holds a token
+// for as long as it might still be played. The old 4096 cap was under
+// that for a feature-length film, so eviction reached segments that had
+// not been reached yet.
+const STREAM_BACKEND_MAX_ENTRIES: usize = 24_576;
+const STREAM_BACKEND_TARGET_ENTRIES: usize = 18_432;
 
 type BasicAuth = (String, String);
 pub(crate) type ProxyHeaders = Vec<(String, String)>;
@@ -69,6 +73,11 @@ struct StreamBackendEntry {
 
 struct StreamBackendRegistry {
     entries: HashMap<String, StreamBackendEntry>,
+    /// Reverse index so re-serving a URL reuses its token instead of
+    /// minting another. An HLS playlist is rewritten segment by segment
+    /// and refreshed as it plays, so without this the registry fills with
+    /// duplicates and evicts the segments about to be requested.
+    tokens_by_origin: HashMap<String, String>,
     last_cleanup: Instant,
 }
 
@@ -77,6 +86,7 @@ impl StreamBackendRegistry {
         let now = Instant::now();
         Self {
             entries: HashMap::new(),
+            tokens_by_origin: HashMap::new(),
             last_cleanup: now,
         }
     }
@@ -84,6 +94,8 @@ impl StreamBackendRegistry {
     fn insert(&mut self, token: String, backend: Arc<dyn StreamBackend>) {
         let now = Instant::now();
         self.cleanup_if_due(now);
+        self.tokens_by_origin
+            .insert(backend.origin().to_string(), token.clone());
         self.entries.insert(
             token,
             StreamBackendEntry {
@@ -109,13 +121,12 @@ impl StreamBackendRegistry {
     fn find_token_by_origin(&mut self, origin: &str) -> Option<String> {
         let now = Instant::now();
         self.cleanup_if_due(now);
-        for (token, entry) in self.entries.iter_mut() {
-            if entry.backend.origin() == origin {
-                entry.last_access = now;
-                return Some(token.clone());
-            }
-        }
-        None
+        let token = self.tokens_by_origin.get(origin)?.clone();
+        // Touching it keeps a segment that is still being served away
+        // from the eviction end of the list.
+        let entry = self.entries.get_mut(&token)?;
+        entry.last_access = now;
+        Some(token)
     }
 
     fn cleanup_if_due(&mut self, now: Instant) {
@@ -129,8 +140,15 @@ impl StreamBackendRegistry {
 
     fn cleanup_idle(&mut self, now: Instant) {
         let before = self.entries.len();
-        self.entries
-            .retain(|_, entry| now.duration_since(entry.last_access) <= STREAM_BACKEND_IDLE_TIMEOUT);
+        let mut dropped = Vec::new();
+        self.entries.retain(|token, entry| {
+            let keep = now.duration_since(entry.last_access) <= STREAM_BACKEND_IDLE_TIMEOUT;
+            if !keep {
+                dropped.push((token.clone(), entry.backend.origin().to_string()));
+            }
+            keep
+        });
+        self.forget_origins(dropped);
         self.last_cleanup = now;
         let removed = before.saturating_sub(self.entries.len());
         if removed > 0 {
@@ -152,13 +170,25 @@ impl StreamBackendRegistry {
             .map(|(token, entry)| (token.clone(), entry.last_access))
             .collect::<Vec<_>>();
         oldest.sort_by_key(|(_, last_access)| *last_access);
+        let mut dropped = Vec::new();
         for (token, _) in oldest.into_iter().take(remove_count) {
-            self.entries.remove(&token);
+            if let Some(entry) = self.entries.remove(&token) {
+                dropped.push((token, entry.backend.origin().to_string()));
+            }
         }
+        self.forget_origins(dropped);
         self.last_cleanup = now;
-        debug!(
-            "stream proxy: evicted {remove_count} backend token(s) to enforce registry limit"
-        );
+        debug!("stream proxy: evicted {remove_count} backend token(s) to enforce registry limit");
+    }
+
+    /// Drops reverse-index entries for removed tokens, leaving alone any
+    /// origin that has since been re-registered under a newer token.
+    fn forget_origins(&mut self, dropped: Vec<(String, String)>) {
+        for (token, origin) in dropped {
+            if self.tokens_by_origin.get(&origin) == Some(&token) {
+                self.tokens_by_origin.remove(&origin);
+            }
+        }
     }
 }
 
@@ -1228,7 +1258,13 @@ fn rewrite_playlist_url(
         register_headers(resolved.as_str(), headers);
     }
     match resolved.scheme() {
-        "http" | "https" => proxy_url_for(resolved.as_str()),
+        // Playlists are rewritten in full and re-fetched as playback
+        // moves, so every segment would otherwise take a new token on
+        // each pass and push the ones still to be played out of the
+        // registry — the segment mpv asked for next had already been
+        // evicted, and the stream failed with HTTP 400.
+        "http" | "https" => proxy_url_for_existing_origin(resolved.as_str())
+            .or_else(|| proxy_url_for(resolved.as_str())),
         _ => None,
     }
 }
@@ -1640,5 +1676,54 @@ mod tests {
     #[test]
     fn handles_an_authority_with_no_path() {
         assert_eq!(strip_request_authority("http://127.0.0.1:6543"), "/");
+    }
+}
+
+#[cfg(test)]
+mod registry_tests {
+    use super::*;
+
+    fn backend(url: &str) -> Arc<dyn StreamBackend> {
+        Arc::new(HttpStreamBackend::new(url.to_string()))
+    }
+
+    #[test]
+    fn reuses_the_token_for_a_url_already_registered() {
+        let mut registry = StreamBackendRegistry::new();
+        registry.insert("token-a".to_string(), backend("https://host/seg1.ts"));
+        assert_eq!(
+            registry.find_token_by_origin("https://host/seg1.ts"),
+            Some("token-a".to_string())
+        );
+        assert_eq!(registry.find_token_by_origin("https://host/seg2.ts"), None);
+    }
+
+    #[test]
+    fn rewriting_a_playlist_twice_does_not_grow_the_registry() {
+        let mut registry = StreamBackendRegistry::new();
+        let segments: Vec<String> = (0..500)
+            .map(|index| format!("https://host/seg{index}.ts"))
+            .collect();
+        for pass in 0..2 {
+            for (index, url) in segments.iter().enumerate() {
+                if registry.find_token_by_origin(url).is_none() {
+                    registry.insert(format!("t{pass}-{index}"), backend(url));
+                }
+            }
+        }
+        assert_eq!(registry.len(), segments.len());
+    }
+
+    #[test]
+    fn eviction_keeps_the_reverse_index_consistent() {
+        let mut registry = StreamBackendRegistry::new();
+        registry.insert("token-a".to_string(), backend("https://host/seg1.ts"));
+        registry.entries.remove("token-a");
+        registry.forget_origins(vec![(
+            "token-a".to_string(),
+            "https://host/seg1.ts".to_string(),
+        )]);
+        // The index must not hand out a token whose entry is gone.
+        assert_eq!(registry.find_token_by_origin("https://host/seg1.ts"), None);
     }
 }
