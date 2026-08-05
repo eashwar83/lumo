@@ -543,8 +543,8 @@ watch(
             v-if="props.youtubeQualityLabel !== null"
             class="icon-button icon-button--player"
             type="button"
-            title="Up next & chapters"
-            aria-label="Up next and chapters"
+            title="Extras"
+            aria-label="Extras"
             @click.stop="emit('toggle-youtube-drawer')"
         >
             <svg

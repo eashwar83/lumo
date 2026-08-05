@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import type { YoutubeItem } from "../../composables/useYouTubeModule";
 import type {
     CaptionTrack,
@@ -56,7 +57,18 @@ const emit = defineEmits<{
     (e: "fetch-ai-models"): void;
     (e: "set-comment-sort", option: CommentSortOption): void;
     (e: "comments-scroll", element: HTMLElement): void;
+    (e: "clear-comment-selection"): void;
 }>();
+
+// One button covers both scopes: ticking comments narrows it, clearing the
+// selection widens it again — so there is never a wrong button to press.
+const hasSelection = computed(() => props.selectedCommentIds.length > 0);
+const translateLabel = computed(() => {
+    if (props.isTranslating) return "Translating…";
+    return hasSelection.value
+        ? `Translate ${props.selectedCommentIds.length} selected to ${props.translateLanguage}`
+        : `Translate all to ${props.translateLanguage}`;
+});
 
 const chapterIndexAt = (time: number) => {
     let index = -1;
@@ -295,26 +307,24 @@ const formatTime = (seconds: number) => {
                                 class="yt-drawer__translate"
                                 type="button"
                                 :disabled="props.isTranslating"
-                                @click="emit('translate-comments', false)"
+                                @click="
+                                    emit(
+                                        'translate-comments',
+                                        hasSelection,
+                                    )
+                                "
                             >
-                                {{
-                                    props.isTranslating
-                                        ? "Translating…"
-                                        : `Translate all to ${props.translateLanguage}`
-                                }}
+                                {{ translateLabel }}
                             </button>
                             <button
-                                class="yt-drawer__translate"
+                                v-if="hasSelection"
+                                class="yt-drawer__icon-button"
                                 type="button"
-                                :disabled="
-                                    props.isTranslating ||
-                                    !props.selectedCommentIds.length
-                                "
-                                @click="emit('translate-comments', true)"
+                                title="Clear selection"
+                                aria-label="Clear selection"
+                                @click="emit('clear-comment-selection')"
                             >
-                                Translate selected ({{
-                                    props.selectedCommentIds.length
-                                }})
+                                ✕
                             </button>
                         </div>
                     </template>

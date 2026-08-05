@@ -2677,6 +2677,7 @@ useAppStartupBindings({
             @fetch-ai-models="onFetchCommentAiModels"
             @set-comment-sort="ytWatch.setCommentSort"
             @comments-scroll="ytWatch.loadMoreCommentsIfNeeded"
+            @clear-comment-selection="ytWatch.clearCommentSelection"
         />
 
         <MainPanels
@@ -3045,7 +3046,8 @@ useAppStartupBindings({
                 !isPlaylistOpen &&
                 !isCurvesOpen &&
                 !isAudioPanelOpen &&
-                !isSettingsOpen
+                !isSettingsOpen &&
+                !ytWatch.isDrawerOpen.value
             "
             :disabled="
                 tracks.showAudioMenu.value ||
