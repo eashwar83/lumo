@@ -438,6 +438,12 @@ pub(crate) async fn resolve(
         return Err("yt-dlp did not return a playable URL".to_string());
     };
     log_selected_candidate("selected", &candidate);
+    // YouTube withholds the first byte of a freshly minted URL until
+    // `available_at`. Handing it to mpv before then makes the open fail
+    // outright — the player reports a dead stream and the user has to
+    // press play a second time, by which point the wait has elapsed.
+    // Waiting here turns a failure into a few seconds of loading.
+    wait_out_availability_ramp(&value).await;
     let is_live_playback = is_live_video(&value);
     let playback_url = proxied_candidate_url(&candidate);
     let title = extract_media_title(&value);
@@ -606,6 +612,34 @@ fn shell_quote(value: &str) -> String {
         return value.to_string();
     }
     format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+/// Sleeps until the chosen formats are actually servable. Capped, so a
+/// nonsense `available_at` cannot strand playback.
+async fn wait_out_availability_ramp(value: &Value) {
+    const MAX_WAIT: Duration = Duration::from_secs(12);
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs() as i64)
+        .unwrap_or(0);
+    let ramp = value
+        .get("requested_formats")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|format| format.get("available_at").and_then(Value::as_i64))
+        .map(|available_at| available_at - now)
+        .max()
+        .unwrap_or(0);
+    if ramp <= 0 {
+        return;
+    }
+    // A second of margin: the ramp is measured in whole seconds, so
+    // waiting exactly to the boundary can still land fractionally early.
+    let wait = Duration::from_secs(ramp as u64 + 1).min(MAX_WAIT);
+    info!("yt-dlp: waiting {}s for the stream to become available", wait.as_secs());
+    tokio::time::sleep(wait).await;
 }
 
 fn select_candidate(value: &Value) -> Option<Candidate> {
