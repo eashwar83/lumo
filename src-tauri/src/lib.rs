@@ -75,7 +75,37 @@ fn init_logging() {
 
         writeln!(buf, "{} [{}] {}", time, level, record.args())
     });
+    // A windowed build has no console, so stderr goes nowhere — and it
+    // cannot be redirected either, which left every warn!/info! in the
+    // app invisible while diagnosing playback. Mirror them to a file
+    // beside mpv's own log.
+    if let Some(file) = open_rust_log_file() {
+        builder.target(env_logger::Target::Pipe(Box::new(file)));
+    }
     let _ = builder.try_init();
+}
+
+/// `<app log dir>/lumo.log`, truncated at startup so it only ever holds
+/// the current run. Returns None if the directory cannot be prepared, in
+/// which case logging falls back to stderr.
+fn open_rust_log_file() -> Option<std::fs::File> {
+    // Mirrors Tauri's app_log_dir, which is not available this early.
+    #[cfg(windows)]
+    let dir = std::path::PathBuf::from(std::env::var("LOCALAPPDATA").ok()?)
+        .join("com.lumo.player")
+        .join("logs");
+    #[cfg(target_os = "macos")]
+    let dir = std::path::PathBuf::from(std::env::var("HOME").ok()?)
+        .join("Library/Logs/com.lumo.player");
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    let dir = std::path::PathBuf::from(std::env::var("HOME").ok()?)
+        .join(".local/share/com.lumo.player/logs");
+
+    std::fs::create_dir_all(&dir).ok()?;
+    let path = dir.join("lumo.log");
+    let previous = dir.join("lumo.prev.log");
+    let _ = std::fs::rename(&path, &previous);
+    std::fs::File::create(path).ok()
 }
 
 fn json_value_to_string(value: serde_json::Value) -> AppResult<String> {

@@ -102,6 +102,10 @@ impl StreamBackendRegistry {
         Some(entry.backend.clone())
     }
 
+    fn len(&self) -> usize {
+        self.entries.len()
+    }
+
     fn find_token_by_origin(&mut self, origin: &str) -> Option<String> {
         let now = Instant::now();
         self.cleanup_if_due(now);
@@ -555,6 +559,20 @@ fn stream_backends() -> &'static Mutex<StreamBackendRegistry> {
     STREAM_PROXY_BACKENDS.get_or_init(|| Mutex::new(StreamBackendRegistry::new()))
 }
 
+/// Locks the registry, taking it back if a panicking request poisoned it.
+/// The entries are plain data and stay valid, so refusing to touch them
+/// after an unrelated panic would strand every stream behind HTTP 400
+/// until the app restarted.
+fn lock_stream_backends() -> std::sync::MutexGuard<'static, StreamBackendRegistry> {
+    match stream_backends().lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            warn!("stream proxy: backend registry lock was poisoned; recovering");
+            poisoned.into_inner()
+        }
+    }
+}
+
 fn proxy_url_for(raw: &str) -> Option<String> {
     proxy_url_for_backend(Arc::new(HttpStreamBackend::new(raw.to_string())))
 }
@@ -562,13 +580,18 @@ fn proxy_url_for(raw: &str) -> Option<String> {
 fn proxy_url_for_backend(backend: Arc<dyn StreamBackend>) -> Option<String> {
     let base = STREAM_PROXY_BASE_URL.get()?;
     let token = uuid::Uuid::now_v7().to_string();
-    stream_backends().lock().ok()?.insert(token.clone(), backend);
+    let registered = {
+        let mut registry = lock_stream_backends();
+        registry.insert(token.clone(), backend);
+        registry.len()
+    };
+    debug!("stream proxy: registered token {token} ({registered} live)");
     Some(format!("{base}/stream/{token}"))
 }
 
 fn proxy_url_for_existing_origin(origin: &str) -> Option<String> {
     let base = STREAM_PROXY_BASE_URL.get()?;
-    let token = stream_backends().lock().ok()?.find_token_by_origin(origin)?;
+    let token = lock_stream_backends().find_token_by_origin(origin)?;
     Some(format!("{base}/stream/{token}"))
 }
 
@@ -576,12 +599,26 @@ fn lookup_stream_backend(target: &str) -> Option<Arc<dyn StreamBackend>> {
     if let Some(remote_url) = parse_remote_url(target) {
         return Some(Arc::new(HttpStreamBackend::new(remote_url)));
     }
+    // A request line may carry the whole URL rather than just the path
+    // (absolute-form, RFC 9112 §3.2.2 — clients send it when they think
+    // they are talking to a proxy, which is exactly what we look like).
+    let target = strip_request_authority(target);
     let path = target.split_once('?').map(|(path, _)| path).unwrap_or(target);
     let token = path.strip_prefix("/stream/")?.trim();
     if token.is_empty() {
         return None;
     }
-    stream_backends().lock().ok()?.get(token)
+    let mut registry = lock_stream_backends();
+    let backend = registry.get(token);
+    if backend.is_none() {
+        // Every playback failure funnels through here, so say enough to
+        // tell an unknown token from an emptied registry.
+        warn!(
+            "stream proxy: no backend for token {token} ({} live)",
+            registry.len()
+        );
+    }
+    backend
 }
 
 fn redact_url(raw: &str) -> String {
@@ -931,6 +968,18 @@ fn parse_request(request: &str) -> Result<(String, String, Option<String>), Stri
         })
     });
     Ok((method, target, range))
+}
+
+/// Reduces `http://host:port/path` to `/path`, leaving origin-form alone.
+fn strip_request_authority(target: &str) -> &str {
+    let rest = target
+        .strip_prefix("http://")
+        .or_else(|| target.strip_prefix("https://"));
+    match rest {
+        // Everything from the first slash after the authority.
+        Some(rest) => rest.find('/').map(|index| &rest[index..]).unwrap_or("/"),
+        None => target,
+    }
 }
 
 fn parse_remote_url(target: &str) -> Option<String> {
@@ -1564,4 +1613,32 @@ async fn write_response(
         .write_all(header.as_bytes())
         .await
         .map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_request_authority;
+
+    #[test]
+    fn keeps_origin_form_targets() {
+        assert_eq!(strip_request_authority("/stream/abc"), "/stream/abc");
+        assert_eq!(strip_request_authority("/stream/abc?x=1"), "/stream/abc?x=1");
+    }
+
+    #[test]
+    fn reduces_absolute_form_to_the_path() {
+        assert_eq!(
+            strip_request_authority("http://127.0.0.1:6543/stream/abc"),
+            "/stream/abc"
+        );
+        assert_eq!(
+            strip_request_authority("https://localhost/stream/abc?x=1"),
+            "/stream/abc?x=1"
+        );
+    }
+
+    #[test]
+    fn handles_an_authority_with_no_path() {
+        assert_eq!(strip_request_authority("http://127.0.0.1:6543"), "/");
+    }
 }
