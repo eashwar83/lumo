@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
+import {
+    open as openFileDialog,
+    save as saveDialog,
+} from "@tauri-apps/plugin-dialog";
 import { saveJsonFile, openJsonFile } from "./composables/useBackupIo";
 import {
     currentMonitor,
@@ -2041,6 +2044,64 @@ const commentTranslateLanguage = computed(
 
 const commentAi = useCommentTranslateAi();
 
+const isExportingComments = ref(false);
+
+/** Saves the comments (with any translations) as a PDF. */
+const onExportComments = async (onlySelected: boolean) => {
+    if (isExportingComments.value) return;
+    const selected = ytWatch.selectedCommentIds.value;
+    const scope = ytWatch.visibleComments.value.filter(
+        (comment) => !onlySelected || selected.includes(comment.id),
+    );
+    if (!scope.length) {
+        showMessageOverlay("Nothing to export", 3200);
+        return;
+    }
+    // Replies are indented in the PDF, so mark them as the drawer does.
+    const topLevel = new Set(ytWatch.comments.value.map((entry) => entry.id));
+    const title = player.state.media.title || "YouTube comments";
+    const destination = await saveDialog({
+        defaultPath: `${title.replace(/[\\/:*?"<>|]/g, "_").slice(0, 80)} - comments.pdf`,
+        filters: [{ name: "PDF", extensions: ["pdf"] }],
+    });
+    if (!destination) return;
+
+    isExportingComments.value = true;
+    try {
+        const written = await invoke<string>("youtube_export_comments", {
+            payload: {
+                title,
+                videoUrl: player.state.media.url,
+                destination,
+                subtitle: onlySelected
+                    ? `${scope.length} selected comments`
+                    : `${scope.length} comments`,
+                comments: scope.map((comment) => ({
+                    author: comment.author,
+                    text: comment.text,
+                    translated: comment.translated ?? null,
+                    publishedText: comment.publishedText ?? null,
+                    likeCountText: comment.likeCountText ?? null,
+                    isReply: !topLevel.has(comment.id),
+                })),
+            },
+        });
+        showMessageOverlay(
+            written.toLowerCase().endsWith(".html")
+                ? `Edge wasn't found, so the comments were saved as HTML: ${written}`
+                : `Saved ${scope.length} comments to ${written}`,
+            6000,
+        );
+    } catch (error) {
+        showMessageOverlay(
+            String(error).replace(/^Error:\s*/, "").slice(0, 300),
+            6000,
+        );
+    } finally {
+        isExportingComments.value = false;
+    }
+};
+
 const onFetchCommentAiModels = async () => {
     const result = await commentAi.fetchModels();
     if (result.message) showMessageOverlay(result.message, 4200);
@@ -2663,6 +2724,13 @@ useAppStartupBindings({
             :active-comment-sort="ytWatch.activeCommentSort.value"
             :comments-count="ytWatch.commentsCount.value"
             :reply-threads="ytWatch.replyThreads.value"
+            :visible-list="ytWatch.filteredComments.value"
+            :comment-query="ytWatch.commentQuery.value"
+            :match-count="ytWatch.matchCount.value"
+            :is-crawling="ytWatch.isCrawling.value"
+            :crawl-loaded="ytWatch.crawlLoaded.value"
+            :crawl-stopped="ytWatch.crawlStopped.value"
+            :is-exporting="isExportingComments"
             @close="ytWatch.isDrawerOpen.value = false"
             @set-tab="ytWatch.activeTab.value = $event"
             @set-autoplay="ytWatch.setAutoplayNext"
@@ -2681,6 +2749,10 @@ useAppStartupBindings({
             @clear-comment-selection="ytWatch.clearCommentSelection"
             @toggle-replies="ytWatch.toggleReplies"
             @load-more-replies="ytWatch.loadReplies($event, true)"
+            @set-comment-query="ytWatch.setCommentQuery"
+            @search-all="ytWatch.searchAllComments"
+            @stop-search="ytWatch.stopSearchingAll"
+            @export-comments="onExportComments"
         />
 
         <MainPanels

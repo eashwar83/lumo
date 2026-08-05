@@ -8,6 +8,8 @@
 mod auth;
 mod browse;
 mod captions;
+mod comment_crawl;
+mod comment_export;
 mod comments;
 mod data;
 mod downloads;
@@ -30,6 +32,11 @@ pub(crate) use comments::{
     __cmd__youtube_comment_replies, __cmd__youtube_comments, __cmd__youtube_translate_comments,
     youtube_comment_replies, youtube_comments, youtube_translate_comments,
 };
+pub(crate) use comment_crawl::{
+    __cmd__youtube_comments_fetch_all, __cmd__youtube_comments_stop, youtube_comments_fetch_all,
+    youtube_comments_stop,
+};
+pub(crate) use comment_export::{__cmd__youtube_export_comments, youtube_export_comments};
 pub(crate) use downloads::{
     __cmd__youtube_download_add, __cmd__youtube_download_cancel,
     __cmd__youtube_download_clear_done, __cmd__youtube_download_list,

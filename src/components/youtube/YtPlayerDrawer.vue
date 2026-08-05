@@ -25,6 +25,8 @@ const props = defineProps<{
     loadingCaptionCode: string;
     loadedCaptionCodes: string[];
     comments: YoutubeComment[];
+    /** What to render: the search result when searching, else all. */
+    visibleList: YoutubeComment[];
     commentsTotal: string;
     commentsCursor: string | null;
     isLoadingComments: boolean;
@@ -42,6 +44,12 @@ const props = defineProps<{
     activeCommentSort: string;
     commentsCount: number | null;
     replyThreads: Record<string, ReplyThread>;
+    commentQuery: string;
+    matchCount: number;
+    isCrawling: boolean;
+    crawlLoaded: number;
+    crawlStopped: boolean;
+    isExporting: boolean;
 }>();
 
 const replyThreadOf = (comment: YoutubeComment): ReplyThread | undefined =>
@@ -66,11 +74,30 @@ const emit = defineEmits<{
     (e: "clear-comment-selection"): void;
     (e: "toggle-replies", comment: YoutubeComment): void;
     (e: "load-more-replies", comment: YoutubeComment): void;
+    (e: "set-comment-query", value: string): void;
+    (e: "search-all"): void;
+    (e: "stop-search"): void;
+    (e: "export-comments", onlySelected: boolean): void;
 }>();
 
 // One button covers both scopes: ticking comments narrows it, clearing the
 // selection widens it again — so there is never a wrong button to press.
 const hasSelection = computed(() => props.selectedCommentIds.length > 0);
+const exportLabel = computed(() =>
+    hasSelection.value
+        ? `Export ${props.selectedCommentIds.length} selected to PDF`
+        : "Export all comments to PDF",
+);
+
+const searchStatus = computed(() => {
+    if (props.isCrawling) {
+        return `${props.matchCount} matches · reading all comments (${props.crawlLoaded} so far)`;
+    }
+    const found = `${props.matchCount} match${props.matchCount === 1 ? "" : "es"}`;
+    if (props.crawlStopped) return `${found} · search stopped early`;
+    return found;
+});
+
 const translateLabel = computed(() => {
     if (props.isTranslating) return "Translating…";
     return hasSelection.value
@@ -239,6 +266,44 @@ const formatTime = (seconds: number) => {
                             Show original
                         </button>
                     </div>
+                    <div class="yt-drawer__comments-row">
+                        <input
+                            :value="props.commentQuery"
+                            class="yt-drawer__search"
+                            type="search"
+                            placeholder="Search comments…"
+                            spellcheck="false"
+                            @input="
+                                emit(
+                                    'set-comment-query',
+                                    ($event.target as HTMLInputElement).value,
+                                )
+                            "
+                            @keydown.stop
+                        />
+                    </div>
+                    <div
+                        v-if="props.commentQuery.trim() || props.isCrawling"
+                        class="yt-drawer__comments-row yt-drawer__search-state"
+                    >
+                        <span>{{ searchStatus }}</span>
+                        <button
+                            v-if="props.isCrawling"
+                            class="yt-drawer__icon-button"
+                            type="button"
+                            @click="emit('stop-search')"
+                        >
+                            Stop
+                        </button>
+                        <button
+                            v-else-if="props.commentsCursor"
+                            class="yt-drawer__icon-button"
+                            type="button"
+                            @click="emit('search-all')"
+                        >
+                            Search all
+                        </button>
+                    </div>
                     <div
                         v-if="props.commentSortOptions.length > 1"
                         class="yt-drawer__comments-row yt-drawer__sorts"
@@ -334,6 +399,16 @@ const formatTime = (seconds: number) => {
                             >
                                 ✕
                             </button>
+                            <button
+                                class="yt-drawer__icon-button"
+                                type="button"
+                                :disabled="props.isExporting"
+                                :title="exportLabel"
+                                :aria-label="exportLabel"
+                                @click="emit('export-comments', hasSelection)"
+                            >
+                                {{ props.isExporting ? "…" : "PDF" }}
+                            </button>
                         </div>
                     </template>
                 </div>
@@ -361,13 +436,17 @@ const formatTime = (seconds: number) => {
                         Loading comments…
                     </div>
                     <div
-                        v-else-if="!props.comments.length"
+                        v-else-if="!props.visibleList.length"
                         class="yt-drawer__state"
                     >
-                        No comments
+                        {{
+                            props.commentQuery.trim()
+                                ? "No comments match that search"
+                                : "No comments"
+                        }}
                     </div>
                     <template
-                        v-for="comment in props.comments"
+                        v-for="comment in props.visibleList"
                         :key="comment.id"
                     >
                         <YtCommentRow
@@ -787,6 +866,27 @@ const formatTime = (seconds: number) => {
 
 .yt-drawer__sorts {
     justify-content: flex-start;
+}
+
+.yt-drawer__search {
+    flex: 1 1 auto;
+    min-width: 0;
+    border: 1px solid var(--yt-border, #26262c);
+    background: var(--yt-surface, #17171b);
+    color: var(--yt-text, #ececef);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
+.yt-drawer__search:focus {
+    outline: none;
+    border-color: var(--yt-accent, #8b7cf7);
+}
+
+.yt-drawer__search-state {
+    font-size: 11px;
+    color: var(--yt-text-faint, #6f6f78);
 }
 
 .yt-drawer__replies-toggle {

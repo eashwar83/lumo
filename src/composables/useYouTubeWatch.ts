@@ -172,6 +172,10 @@ export const useYouTubeWatch = (options: UseYouTubeWatchOptions) => {
             commentSortOptions.value = [];
             activeCommentSort.value = "";
             replyThreads.value = {};
+            commentQuery.value = "";
+            if (isCrawling.value) stopSearchingAll();
+            crawlLoaded.value = 0;
+            crawlStopped.value = false;
             commentsError.value = "";
             showTranslated.value = false;
             selectedCommentIds.value = [];
@@ -422,6 +426,110 @@ export const useYouTubeWatch = (options: UseYouTubeWatchOptions) => {
         }),
     );
 
+    // --- search ------------------------------------------------------
+    // YouTube has no comment-search endpoint, so reaching comments that
+    // were never scrolled to means walking every page locally. The crawl
+    // streams batches in so matches appear while the rest still loads.
+    const commentQuery = ref("");
+    const isCrawling = ref(false);
+    const crawlLoaded = ref(0);
+    const crawlStopped = ref(false);
+    let crawlRunId = 0;
+
+    const matches = (comment: YoutubeComment, needle: string) =>
+        comment.text.toLowerCase().includes(needle) ||
+        comment.author.toLowerCase().includes(needle) ||
+        (comment.translated ?? "").toLowerCase().includes(needle);
+
+    void listen<{ runId: number; comments: YoutubeComment[] }>(
+        "youtube://comments-batch",
+        (event) => {
+            if (event.payload.runId !== crawlRunId) return;
+            const seen = new Set(comments.value.map((entry) => entry.id));
+            const fresh = event.payload.comments.filter(
+                (entry) => !seen.has(entry.id),
+            );
+            if (fresh.length) comments.value = [...comments.value, ...fresh];
+        },
+    );
+
+    void listen<{
+        runId: number;
+        loaded: number;
+        done: boolean;
+        stopped: boolean;
+        error: string | null;
+    }>("youtube://comments-progress", (event) => {
+        if (event.payload.runId !== crawlRunId) return;
+        crawlLoaded.value = event.payload.loaded;
+        if (event.payload.done) {
+            isCrawling.value = false;
+            crawlStopped.value = event.payload.stopped;
+            // Everything is in hand, so there is nothing left to page.
+            if (!event.payload.stopped) commentsCursor.value = null;
+            if (event.payload.error) commentsError.value = event.payload.error;
+        }
+    });
+
+    /** Walks the rest of the thread so search covers every comment. */
+    const searchAllComments = async () => {
+        const videoId = currentVideoId.value;
+        if (!videoId || isCrawling.value) return;
+        isCrawling.value = true;
+        crawlStopped.value = false;
+        crawlLoaded.value = 0;
+        try {
+            crawlRunId = await invoke<number>("youtube_comments_fetch_all", {
+                payload: {
+                    videoId,
+                    cursor: commentsCursor.value,
+                    includeReplies: true,
+                },
+            });
+        } catch (error) {
+            isCrawling.value = false;
+            options.notify(
+                String(error).replace(/^Error:\s*/, "").slice(0, 160),
+            );
+        }
+    };
+
+    const stopSearchingAll = () => {
+        void invoke("youtube_comments_stop").catch(() => {});
+        isCrawling.value = false;
+        crawlStopped.value = true;
+    };
+
+    const setCommentQuery = (value: string) => {
+        commentQuery.value = value;
+        // A search is only trustworthy once everything has been read.
+        if (value.trim() && commentsCursor.value && !isCrawling.value) {
+            void searchAllComments();
+        }
+    };
+
+    /** What the drawer shows: the search result, or everything. */
+    const filteredComments = computed<YoutubeComment[]>(() => {
+        const needle = commentQuery.value.trim().toLowerCase();
+        if (!needle) return comments.value;
+        return comments.value.filter((comment) => {
+            if (matches(comment, needle)) return true;
+            // Keep a parent whose reply matched, so the hit has context.
+            const thread = replyThreads.value[comment.id];
+            return (thread?.replies ?? []).some((reply) =>
+                matches(reply, needle),
+            );
+        });
+    });
+
+    const matchCount = computed(() => {
+        const needle = commentQuery.value.trim().toLowerCase();
+        if (!needle) return 0;
+        return visibleComments.value.filter((comment) =>
+            matches(comment, needle),
+        ).length;
+    });
+
     /** Pulls the next page when the list is scrolled near its end. */
     const loadMoreCommentsIfNeeded = (element: HTMLElement) => {
         if (!commentsCursor.value || isLoadingComments.value) return;
@@ -567,6 +675,15 @@ export const useYouTubeWatch = (options: UseYouTubeWatchOptions) => {
         toggleReplies,
         loadReplies,
         visibleComments,
+        commentQuery,
+        setCommentQuery,
+        filteredComments,
+        matchCount,
+        isCrawling,
+        crawlLoaded,
+        crawlStopped,
+        searchAllComments,
+        stopSearchingAll,
         isLoadingComments,
         commentsError,
         loadComments,

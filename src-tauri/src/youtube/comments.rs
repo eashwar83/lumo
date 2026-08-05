@@ -113,30 +113,59 @@ pub(crate) async fn youtube_comment_replies(
     app: AppHandle,
     payload: RepliesPayload,
 ) -> Result<YoutubeCommentPage, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut auth = None;
-        let token = match payload.token.strip_prefix(AUTHED_CURSOR_PREFIX) {
-            Some(inner) => {
-                auth = super::auth::session_auth(&app);
-                inner.to_string()
-            }
-            None => payload.token.clone(),
-        };
-        let value = post_next(
-            &app,
-            json!({ "context": client_context(), "continuation": token }),
-            auth.as_ref(),
-        )?;
-        let mut page = parse_comment_page(&value);
-        if auth.is_some() {
-            page.next_cursor = page
-                .next_cursor
-                .map(|cursor| format!("{AUTHED_CURSOR_PREFIX}{cursor}"));
+    tauri::async_runtime::spawn_blocking(move || fetch_replies_page(&app, &payload.token))
+        .await
+        .map_err(|error| format!("Replies worker failed: {error}"))?
+}
+
+/// Blocking form of [`youtube_comment_replies`], for the crawler.
+pub(super) fn fetch_replies_page(
+    app: &AppHandle,
+    token: &str,
+) -> Result<YoutubeCommentPage, String> {
+    let mut auth = None;
+    let token = match token.strip_prefix(AUTHED_CURSOR_PREFIX) {
+        Some(inner) => {
+            auth = super::auth::session_auth(app);
+            inner.to_string()
         }
-        Ok::<YoutubeCommentPage, String>(page)
-    })
-    .await
-    .map_err(|error| format!("Replies worker failed: {error}"))?
+        None => token.to_string(),
+    };
+    let value = post_next(
+        app,
+        json!({ "context": client_context(), "continuation": token }),
+        auth.as_ref(),
+    )?;
+    let mut page = parse_comment_page(&value);
+    if auth.is_some() {
+        page.next_cursor = page
+            .next_cursor
+            .map(|cursor| format!("{AUTHED_CURSOR_PREFIX}{cursor}"));
+        for comment in &mut page.comments {
+            comment.reply_token = comment
+                .reply_token
+                .take()
+                .map(|token| format!("{AUTHED_CURSOR_PREFIX}{token}"));
+        }
+    }
+    Ok(page)
+}
+
+/// Blocking form of [`youtube_comments`], for the crawler.
+pub(super) fn fetch_page(
+    app: &AppHandle,
+    video_id: &str,
+    cursor: Option<String>,
+    sort_token: Option<String>,
+) -> Result<YoutubeCommentPage, String> {
+    fetch_comments(
+        app,
+        &CommentsPayload {
+            video_id: video_id.to_string(),
+            cursor,
+            sort_token,
+        },
+    )
 }
 
 /// What the watch response tells us about a video's comments section.
