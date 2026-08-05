@@ -1,5 +1,5 @@
 use log::{debug, info, warn};
-use percent_encoding::{percent_decode_str, AsciiSet, CONTROLS};
+use percent_encoding::percent_decode_str;
 use reqwest::header::{
     HeaderName, HeaderValue, ACCEPT_ENCODING, ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE,
     CONTENT_TYPE, RANGE, USER_AGENT,
@@ -16,19 +16,6 @@ use tauri::AppHandle;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use url::Url;
-
-/// Everything that would otherwise be read as part of our own query.
-const SEGMENT_URL_ENCODE_SET: &AsciiSet = &CONTROLS
-    .add(b' ')
-    .add(b'"')
-    .add(b'#')
-    .add(b'<')
-    .add(b'>')
-    .add(b'&')
-    .add(b'=')
-    .add(b'?')
-    .add(b'%')
-    .add(b'+');
 
 const HTTP_USER_AGENT: &str = "Lavf/61.7.100";
 const MAX_REQUEST_HEADER_BYTES: usize = 128 * 1024;
@@ -63,6 +50,10 @@ static STREAM_PROXY_CLIENT: OnceLock<Mutex<Option<CachedClient>>> = OnceLock::ne
 static STREAM_PROXY_PARALLEL_RANGE_ENABLED: AtomicBool = AtomicBool::new(false);
 static STREAM_PROXY_BACKENDS: OnceLock<Mutex<StreamBackendRegistry>> =
     OnceLock::new();
+/// Segment URLs per rewritten playlist, addressed by index.
+static STREAM_PROXY_SEGMENT_SETS: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
+/// How many playlists' segment lists to keep at once.
+const SEGMENT_SET_MAX: usize = 6;
 
 struct CachedClient {
     proxy_key: Option<String>,
@@ -662,6 +653,9 @@ fn lookup_stream_backend(target: &str) -> Option<Arc<dyn StreamBackend>> {
     // they are talking to a proxy, which is exactly what we look like).
     let target = strip_request_authority(target);
     let path = target.split_once('?').map(|(path, _)| path).unwrap_or(target);
+    if let Some(url) = segment_set_url(path) {
+        return Some(Arc::new(HttpStreamBackend::new(url)));
+    }
     let token = path.strip_prefix("/stream/")?.trim();
     if token.is_empty() {
         return None;
@@ -791,15 +785,18 @@ async fn handle_http_stream_source(
 
     if should_rewrite_playlist(remote_url, &response) {
         let content_type = content_type(&response);
-        let reason = status.canonical_reason().unwrap_or("OK").to_string();
         let bytes = response.bytes().await.map_err(|error| error.to_string())?;
         let text = String::from_utf8_lossy(&bytes);
         let inherited_headers = lookup_headers(remote_url);
         let body = rewrite_playlist(remote_url, &text, inherited_headers.as_deref()).into_bytes();
+        // Always 200. The body is rewritten, so its length no longer
+        // matches the range that was asked for — answering 206 with a
+        // mismatched length and no Content-Range is malformed, and a
+        // player is entitled to make nothing of it.
         write_response(
             stream,
-            status.as_u16(),
-            &reason,
+            200,
+            "OK",
             &content_type,
             Some(body.len() as u64),
             None,
@@ -1252,30 +1249,99 @@ fn rewrite_playlist(
     inherited_headers: Option<&[(String, String)]>,
 ) -> String {
     let base = Url::parse(base_url).ok();
-    text.lines()
-        .map(|line| rewrite_playlist_line(base.as_ref(), line, inherited_headers))
+    // One set per rewrite: segments become short references into it
+    // rather than carrying their own URL. A googlevideo segment URL is
+    // ~1.4 KB, so inlining them turned a 90 KB playlist into 2.3 MB and
+    // made mpv re-read megabytes of text on every refresh.
+    let set = SegmentSet::new();
+    let body = text
+        .lines()
+        .map(|line| rewrite_playlist_line(base.as_ref(), line, inherited_headers, &set))
         .collect::<Vec<_>>()
-        .join("\n")
+        .join("\n");
+    set.publish();
+    body
+}
+
+/// Collects the segment URLs of one playlist so they can be addressed by
+/// index instead of by value.
+struct SegmentSet {
+    token: String,
+    urls: Mutex<Vec<String>>,
+}
+
+impl SegmentSet {
+    fn new() -> Self {
+        Self {
+            token: uuid::Uuid::now_v7().to_string(),
+            urls: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Adds a URL and returns the proxy reference that stands for it.
+    fn reference(&self, url: &str) -> Option<String> {
+        let base = STREAM_PROXY_BASE_URL.get()?;
+        let mut urls = self.urls.lock().ok()?;
+        urls.push(url.to_string());
+        Some(format!("{base}/seg/{}/{}", self.token, urls.len() - 1))
+    }
+
+    fn publish(self) {
+        let Ok(urls) = self.urls.into_inner() else {
+            return;
+        };
+        if urls.is_empty() {
+            return;
+        }
+        let count = urls.len();
+        if let Ok(mut sets) = segment_sets().lock() {
+            sets.insert(self.token.clone(), urls);
+            // Keep only the newest few playlists: a live stream rewrites
+            // its playlist repeatedly, and each pass is a fresh set.
+            if sets.len() > SEGMENT_SET_MAX {
+                let mut tokens: Vec<String> = sets.keys().cloned().collect();
+                // UUIDv7 sorts by creation time, so the oldest sort first.
+                tokens.sort();
+                for token in tokens.into_iter().take(sets.len() - SEGMENT_SET_MAX) {
+                    sets.remove(&token);
+                }
+            }
+        }
+        debug!("stream proxy: playlist set {} holds {count} segments", self.token);
+    }
+}
+
+fn segment_sets() -> &'static Mutex<HashMap<String, Vec<String>>> {
+    STREAM_PROXY_SEGMENT_SETS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Resolves `/seg/<playlist>/<index>` back to the segment's real URL.
+fn segment_set_url(path: &str) -> Option<String> {
+    let (token, index) = path.strip_prefix("/seg/")?.split_once('/')?;
+    let index: usize = index.trim().parse().ok()?;
+    segment_sets().lock().ok()?.get(token)?.get(index).cloned()
 }
 
 fn rewrite_playlist_line(
     base: Option<&Url>,
     line: &str,
     inherited_headers: Option<&[(String, String)]>,
+    set: &SegmentSet,
 ) -> String {
     if line.trim().is_empty() {
         return line.to_string();
     }
     if line.starts_with('#') {
-        return rewrite_uri_attributes(base, line, inherited_headers);
+        return rewrite_uri_attributes(base, line, inherited_headers, set);
     }
-    rewrite_playlist_url(base, line, inherited_headers).unwrap_or_else(|| line.to_string())
+    rewrite_playlist_url(base, line, inherited_headers, set).unwrap_or_else(|| line.to_string())
 }
 
 fn rewrite_uri_attributes(
     base: Option<&Url>,
     line: &str,
     inherited_headers: Option<&[(String, String)]>,
+    set: &SegmentSet,
 ) -> String {
     let mut rewritten = String::with_capacity(line.len());
     let mut rest = line;
@@ -1290,7 +1356,8 @@ fn rewrite_uri_attributes(
         };
         let uri = &uri_start[..end];
         rewritten.push_str(
-            &rewrite_playlist_url(base, uri, inherited_headers).unwrap_or_else(|| uri.to_string()),
+            &rewrite_playlist_url(base, uri, inherited_headers, set)
+                .unwrap_or_else(|| uri.to_string()),
         );
         rest = &uri_start[end..];
     }
@@ -1302,6 +1369,7 @@ fn rewrite_playlist_url(
     base: Option<&Url>,
     value: &str,
     inherited_headers: Option<&[(String, String)]>,
+    set: &SegmentSet,
 ) -> Option<String> {
     let resolved = if let Ok(url) = Url::parse(value) {
         url
@@ -1323,18 +1391,11 @@ fn rewrite_playlist_url(
         // playlist fetch, so a token per segment meant thousands of dead
         // entries per pass, evicting the segments still to be played —
         // mpv would ask for the next one and get HTTP 400.
-        "http" | "https" => stateless_proxy_url(resolved.as_str()),
+        "http" | "https" => set.reference(resolved.as_str()),
         _ => None,
     }
 }
 
-/// A proxy URL that needs no registry entry: the destination travels in
-/// the query, which `lookup_stream_backend` already understands.
-fn stateless_proxy_url(url: &str) -> Option<String> {
-    let base = STREAM_PROXY_BASE_URL.get()?;
-    let encoded = percent_encoding::utf8_percent_encode(url, SEGMENT_URL_ENCODE_SET);
-    Some(format!("{base}/stream?url={encoded}"))
-}
 
 fn parse_open_ended_range(value: Option<&str>) -> Option<u64> {
     let value = value?;
@@ -1796,30 +1857,30 @@ mod registry_tests {
 }
 
 #[cfg(test)]
-mod segment_url_tests {
+mod segment_set_tests {
     use super::*;
 
-    /// A googlevideo segment URL is full of the characters that would
-    /// otherwise terminate or split our own query.
     #[test]
-    fn segment_urls_survive_the_round_trip() {
-        let original = "https://rr3---sn-abc.googlevideo.com/videoplayback/\
-                        expire/1785894563/ei/x?y&z=1+2&pot=A%2FB#frag";
-        let encoded = percent_encoding::utf8_percent_encode(original, SEGMENT_URL_ENCODE_SET)
-            .to_string();
-        let target = format!("/stream?url={encoded}");
-        assert_eq!(parse_remote_url(&target).as_deref(), Some(original));
-    }
+    fn resolves_a_reference_back_to_its_segment() {
+        let _ = STREAM_PROXY_BASE_URL.set("http://127.0.0.1:3243".to_string());
+        let set = SegmentSet::new();
+        let token = set.token.clone();
+        let first = set.reference("https://host/seg0.ts").unwrap();
+        let second = set.reference("https://host/seg1.ts").unwrap();
+        set.publish();
 
-    #[test]
-    fn a_plain_segment_url_round_trips() {
-        let original = "https://host/seg00001.ts";
-        let encoded = percent_encoding::utf8_percent_encode(original, SEGMENT_URL_ENCODE_SET)
-            .to_string();
+        // References stay short: the whole point is that a 1.4 KB
+        // googlevideo URL no longer goes inline into the playlist.
+        assert!(first.len() < 80, "reference too long: {first}");
+        assert_eq!(first, format!("http://127.0.0.1:3243/seg/{token}/0"));
+        assert_eq!(second, format!("http://127.0.0.1:3243/seg/{token}/1"));
+
         assert_eq!(
-            parse_remote_url(&format!("/stream?url={encoded}")).as_deref(),
-            Some(original)
+            segment_set_url(&format!("/seg/{token}/1")).as_deref(),
+            Some("https://host/seg1.ts")
         );
+        assert_eq!(segment_set_url(&format!("/seg/{token}/9")), None);
+        assert_eq!(segment_set_url("/seg/unknown/0"), None);
     }
 }
 
@@ -1829,15 +1890,14 @@ mod self_proxy_tests {
 
     #[test]
     fn declines_to_proxy_its_own_urls() {
-        // One test owns the OnceLock so ordering cannot matter.
         let _ = STREAM_PROXY_BASE_URL.set("http://127.0.0.1:3243".to_string());
 
         assert!(is_own_proxy_url("http://127.0.0.1:3243/stream/abc"));
-        assert!(is_own_proxy_url("http://127.0.0.1:3243/stream?url=https://host/a.ts"));
+        assert!(is_own_proxy_url("http://127.0.0.1:3243/seg/abc/0"));
         assert!(!is_own_proxy_url("https://rr4---sn-x.googlevideo.com/videoplayback"));
 
-        // The rewrite entry points must pass an already-proxied URL through
-        // untouched rather than wrapping it a second time.
+        // An already-proxied URL must pass through untouched rather than
+        // being wrapped a second time.
         assert_eq!(rewrite_http_stream_url("http://127.0.0.1:3243/stream/abc"), None);
         assert_eq!(
             rewrite_stream_url_with_headers("http://127.0.0.1:3243/stream/abc", &[]),
