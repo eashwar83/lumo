@@ -1,5 +1,5 @@
 use log::{debug, info, warn};
-use percent_encoding::percent_decode_str;
+use percent_encoding::{percent_decode_str, AsciiSet, CONTROLS};
 use reqwest::header::{
     HeaderName, HeaderValue, ACCEPT_ENCODING, ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE,
     CONTENT_TYPE, RANGE, USER_AGENT,
@@ -16,6 +16,19 @@ use tauri::AppHandle;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use url::Url;
+
+/// Everything that would otherwise be read as part of our own query.
+const SEGMENT_URL_ENCODE_SET: &AsciiSet = &CONTROLS
+    .add(b' ')
+    .add(b'"')
+    .add(b'#')
+    .add(b'<')
+    .add(b'>')
+    .add(b'&')
+    .add(b'=')
+    .add(b'?')
+    .add(b'%')
+    .add(b'+');
 
 const HTTP_USER_AGENT: &str = "Lavf/61.7.100";
 const MAX_REQUEST_HEADER_BYTES: usize = 128 * 1024;
@@ -42,6 +55,10 @@ pub(crate) type ProxyHeaders = Vec<(String, String)>;
 static STREAM_PROXY_BASE_URL: OnceLock<String> = OnceLock::new();
 static STREAM_PROXY_BASIC_AUTH: OnceLock<Mutex<HashMap<String, BasicAuth>>> = OnceLock::new();
 static STREAM_PROXY_HEADERS: OnceLock<Mutex<HashMap<String, ProxyHeaders>>> = OnceLock::new();
+/// Headers keyed by host, so a playlist's segments inherit them without an
+/// entry per segment URL — those URLs are regenerated on every playlist
+/// fetch, so keying by URL grows without bound and never matches twice.
+static STREAM_PROXY_HOST_HEADERS: OnceLock<Mutex<HashMap<String, ProxyHeaders>>> = OnceLock::new();
 static STREAM_PROXY_CLIENT: OnceLock<Mutex<Option<CachedClient>>> = OnceLock::new();
 static STREAM_PROXY_PARALLEL_RANGE_ENABLED: AtomicBool = AtomicBool::new(false);
 static STREAM_PROXY_BACKENDS: OnceLock<Mutex<StreamBackendRegistry>> =
@@ -1172,10 +1189,36 @@ fn apply_headers(mut request: RequestBuilder, remote_url: &str) -> RequestBuilde
 }
 
 fn lookup_headers(url: &str) -> Option<ProxyHeaders> {
-    STREAM_PROXY_HEADERS
+    let exact = STREAM_PROXY_HEADERS
         .get()
         .and_then(|headers_map| headers_map.lock().ok())
-        .and_then(|headers_map| headers_map.get(url).cloned())
+        .and_then(|headers_map| headers_map.get(url).cloned());
+    if exact.is_some() {
+        return exact;
+    }
+    let host = Url::parse(url).ok()?.host_str()?.to_string();
+    STREAM_PROXY_HOST_HEADERS
+        .get()
+        .and_then(|headers_map| headers_map.lock().ok())
+        .and_then(|headers_map| headers_map.get(&host).cloned())
+}
+
+/// Remembers a stream's headers for every later request to the same host.
+fn register_host_headers(url: &str, headers: &[(String, String)]) {
+    let normalized = normalize_headers(headers);
+    if normalized.is_empty() {
+        return;
+    }
+    let Some(host) = Url::parse(url).ok().and_then(|url| url.host_str().map(str::to_string))
+    else {
+        return;
+    };
+    if let Ok(mut headers_map) = STREAM_PROXY_HOST_HEADERS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+    {
+        headers_map.insert(host, normalized);
+    }
 }
 
 fn should_rewrite_playlist(remote_url: &str, response: &Response) -> bool {
@@ -1255,18 +1298,26 @@ fn rewrite_playlist_url(
         base?.join(value).ok()?
     };
     if let Some(headers) = inherited_headers {
-        register_headers(resolved.as_str(), headers);
+        // By host, not by URL: these URLs are single-use.
+        register_host_headers(resolved.as_str(), headers);
     }
     match resolved.scheme() {
-        // Playlists are rewritten in full and re-fetched as playback
-        // moves, so every segment would otherwise take a new token on
-        // each pass and push the ones still to be played out of the
-        // registry — the segment mpv asked for next had already been
-        // evicted, and the stream failed with HTTP 400.
-        "http" | "https" => proxy_url_for_existing_origin(resolved.as_str())
-            .or_else(|| proxy_url_for(resolved.as_str())),
+        // Segments carry their target in the URL rather than taking a
+        // registry token. YouTube regenerates every segment URL on each
+        // playlist fetch, so a token per segment meant thousands of dead
+        // entries per pass, evicting the segments still to be played —
+        // mpv would ask for the next one and get HTTP 400.
+        "http" | "https" => stateless_proxy_url(resolved.as_str()),
         _ => None,
     }
+}
+
+/// A proxy URL that needs no registry entry: the destination travels in
+/// the query, which `lookup_stream_backend` already understands.
+fn stateless_proxy_url(url: &str) -> Option<String> {
+    let base = STREAM_PROXY_BASE_URL.get()?;
+    let encoded = percent_encoding::utf8_percent_encode(url, SEGMENT_URL_ENCODE_SET);
+    Some(format!("{base}/stream?url={encoded}"))
 }
 
 fn parse_open_ended_range(value: Option<&str>) -> Option<u64> {
@@ -1725,5 +1776,33 @@ mod registry_tests {
         )]);
         // The index must not hand out a token whose entry is gone.
         assert_eq!(registry.find_token_by_origin("https://host/seg1.ts"), None);
+    }
+}
+
+#[cfg(test)]
+mod segment_url_tests {
+    use super::*;
+
+    /// A googlevideo segment URL is full of the characters that would
+    /// otherwise terminate or split our own query.
+    #[test]
+    fn segment_urls_survive_the_round_trip() {
+        let original = "https://rr3---sn-abc.googlevideo.com/videoplayback/\
+                        expire/1785894563/ei/x?y&z=1+2&pot=A%2FB#frag";
+        let encoded = percent_encoding::utf8_percent_encode(original, SEGMENT_URL_ENCODE_SET)
+            .to_string();
+        let target = format!("/stream?url={encoded}");
+        assert_eq!(parse_remote_url(&target).as_deref(), Some(original));
+    }
+
+    #[test]
+    fn a_plain_segment_url_round_trips() {
+        let original = "https://host/seg00001.ts";
+        let encoded = percent_encoding::utf8_percent_encode(original, SEGMENT_URL_ENCODE_SET)
+            .to_string();
+        assert_eq!(
+            parse_remote_url(&format!("/stream?url={encoded}")).as_deref(),
+            Some(original)
+        );
     }
 }
