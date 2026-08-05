@@ -13,6 +13,7 @@ import {
 import {
     describeFilters,
     useYouTubeSearchStore,
+    type StoredSearch,
 } from "../composables/useYouTubeSearchStore";
 import { useYouTubeSettings } from "../composables/useYouTubeSettings";
 import {
@@ -77,7 +78,73 @@ const onRunStoredSearch = (entry: {
     query: string;
     filters: typeof yt.filters;
 }) => {
+    isHistoryOpen.value = false;
     void yt.applyStoredSearch(entry.query, entry.filters);
+};
+
+// --- search history dropdown -----------------------------------------
+// Anchored to the input rather than to the results area: the old
+// full-width list lived in the "nothing searched yet" branch, so the
+// first search hid it for the rest of the session.
+const isHistoryOpen = ref(false);
+const highlightedIndex = ref(-1);
+
+/** Saved searches first, then recent, narrowed by what is typed. */
+const historyEntries = computed(() => {
+    const needle = yt.query.value.trim().toLowerCase();
+    const match = (entry: StoredSearch) =>
+        !needle || entry.query.toLowerCase().includes(needle);
+    return [
+        ...searchStore.saved.value
+            .filter(match)
+            .map((entry) => ({ entry, saved: true })),
+        ...searchStore.recent.value
+            .filter(match)
+            .map((entry) => ({ entry, saved: false })),
+    ].slice(0, 12);
+});
+
+const openHistory = () => {
+    highlightedIndex.value = -1;
+    isHistoryOpen.value = true;
+};
+
+const closeHistory = () => {
+    isHistoryOpen.value = false;
+    highlightedIndex.value = -1;
+};
+
+const onSubmitSearch = () => {
+    closeHistory();
+    void yt.search();
+};
+
+/** Arrow keys walk the list; Enter runs whichever row is highlighted. */
+const onSearchKeydown = (event: KeyboardEvent) => {
+    if (event.key === "Escape") {
+        closeHistory();
+        return;
+    }
+    if (!isHistoryOpen.value || !historyEntries.value.length) return;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        // -1 means no row is highlighted, so Enter searches what was typed.
+        const count = historyEntries.value.length;
+        const next =
+            highlightedIndex.value + (event.key === "ArrowDown" ? 1 : -1);
+        highlightedIndex.value =
+            next < -1 ? count - 1 : next >= count ? -1 : next;
+        return;
+    }
+    if (event.key === "Enter" && highlightedIndex.value >= 0) {
+        event.preventDefault();
+        onRunStoredSearch(historyEntries.value[highlightedIndex.value].entry);
+    }
+};
+
+const removeHistoryEntry = (item: { entry: StoredSearch; saved: boolean }) => {
+    if (item.saved) searchStore.removeSaved(item.entry);
+    else searchStore.removeRecent(item.entry);
 };
 const searchInputRef = ref<HTMLInputElement | null>(null);
 const listRef = ref<HTMLDivElement | null>(null);
@@ -507,16 +574,93 @@ const statusLabel = (item: {
         </template>
 
         <template v-else-if="yt.activeTab.value === 'search'">
-            <form class="yt-search" @submit.prevent="yt.search()">
-                <input
-                    ref="searchInputRef"
-                    v-model="yt.query.value"
-                    class="yt-search__input"
-                    type="text"
-                    placeholder="Search YouTube..."
-                    spellcheck="false"
-                    autocomplete="off"
-                />
+            <form class="yt-search" @submit.prevent="onSubmitSearch">
+                <div class="yt-search__field">
+                    <input
+                        ref="searchInputRef"
+                        v-model="yt.query.value"
+                        class="yt-search__input"
+                        type="text"
+                        placeholder="Search YouTube..."
+                        spellcheck="false"
+                        autocomplete="off"
+                        @focus="openHistory"
+                        @input="openHistory"
+                        @blur="closeHistory"
+                        @keydown="onSearchKeydown"
+                    />
+                    <div
+                        v-if="isHistoryOpen && historyEntries.length"
+                        class="yt-history"
+                    >
+                        <div
+                            v-for="(item, index) in historyEntries"
+                            :key="`${item.saved ? 'saved' : 'recent'}-${item.entry.at}`"
+                            class="yt-history__row"
+                            :class="{
+                                'yt-history__row--on':
+                                    index === highlightedIndex,
+                                'yt-history__row--divide':
+                                    index > 0 &&
+                                    historyEntries[index - 1].saved &&
+                                    !item.saved,
+                            }"
+                            role="button"
+                            tabindex="-1"
+                            @mousedown.prevent="onRunStoredSearch(item.entry)"
+                        >
+                            <svg
+                                v-if="item.saved"
+                                class="yt-history__icon yt-history__icon--saved"
+                                viewBox="0 0 24 24"
+                                fill="currentColor"
+                                aria-hidden="true"
+                            >
+                                <path d="m12 3 2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.8 6.2 20.9l1.1-6.5L2.6 9.8l6.5-.9z" />
+                            </svg>
+                            <svg
+                                v-else
+                                class="yt-history__icon"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                aria-hidden="true"
+                            >
+                                <circle cx="12" cy="12" r="9" />
+                                <path d="M12 7v6l4 2" />
+                            </svg>
+                            <span class="yt-history__query">{{
+                                item.entry.query
+                            }}</span>
+                            <span class="yt-history__filters">{{
+                                describeFilters(item.entry.filters)
+                            }}</span>
+                            <button
+                                class="yt-history__remove"
+                                type="button"
+                                :title="
+                                    item.saved
+                                        ? 'Remove saved search'
+                                        : 'Remove from history'
+                                "
+                                @mousedown.stop.prevent="
+                                    removeHistoryEntry(item)
+                                "
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <button
+                            v-if="searchStore.recent.value.length"
+                            class="yt-history__clear"
+                            type="button"
+                            @mousedown.prevent="searchStore.clearRecent()"
+                        >
+                            Clear search history
+                        </button>
+                    </div>
+                </div>
                 <button
                     class="yt-search__save"
                     :class="{ 'yt-search__save--on': isCurrentSearchSaved }"
@@ -686,109 +830,7 @@ const statusLabel = (item: {
                     No results for “{{ yt.submittedQuery.value }}”
                 </div>
                 <template v-else>
-                    <div
-                        v-if="searchStore.saved.value.length"
-                        class="yt-searchlist"
-                    >
-                        <div class="yt-searchlist__head">
-                            <span class="yt-searchlist__title">
-                                Saved searches
-                            </span>
-                        </div>
-                        <div
-                            v-for="entry in searchStore.saved.value"
-                            :key="`saved-${entry.at}`"
-                            class="yt-searchlist__row"
-                            role="button"
-                            tabindex="0"
-                            @click="onRunStoredSearch(entry)"
-                            @keydown.enter="onRunStoredSearch(entry)"
-                        >
-                            <svg
-                                class="yt-searchlist__icon yt-searchlist__icon--saved"
-                                viewBox="0 0 24 24"
-                                fill="currentColor"
-                                aria-hidden="true"
-                            >
-                                <path d="m12 3 2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.8 6.2 20.9l1.1-6.5L2.6 9.8l6.5-.9z" />
-                            </svg>
-                            <span class="yt-searchlist__query">{{
-                                entry.query
-                            }}</span>
-                            <span class="yt-searchlist__filters">{{
-                                describeFilters(entry.filters)
-                            }}</span>
-                            <button
-                                class="yt-searchlist__remove"
-                                type="button"
-                                title="Remove saved search"
-                                @click.stop="searchStore.removeSaved(entry)"
-                            >
-                                ✕
-                            </button>
-                        </div>
-                    </div>
-
-                    <div
-                        v-if="searchStore.recent.value.length"
-                        class="yt-searchlist"
-                    >
-                        <div class="yt-searchlist__head">
-                            <span class="yt-searchlist__title">
-                                Recent searches
-                            </span>
-                            <button
-                                class="yt-chip"
-                                type="button"
-                                @click="searchStore.clearRecent()"
-                            >
-                                Clear all
-                            </button>
-                        </div>
-                        <div
-                            v-for="entry in searchStore.recent.value"
-                            :key="`recent-${entry.at}`"
-                            class="yt-searchlist__row"
-                            role="button"
-                            tabindex="0"
-                            @click="onRunStoredSearch(entry)"
-                            @keydown.enter="onRunStoredSearch(entry)"
-                        >
-                            <svg
-                                class="yt-searchlist__icon"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                aria-hidden="true"
-                            >
-                                <circle cx="12" cy="12" r="9" />
-                                <path d="M12 7v6l4 2" />
-                            </svg>
-                            <span class="yt-searchlist__query">{{
-                                entry.query
-                            }}</span>
-                            <span class="yt-searchlist__filters">{{
-                                describeFilters(entry.filters)
-                            }}</span>
-                            <button
-                                class="yt-searchlist__remove"
-                                type="button"
-                                title="Remove from history"
-                                @click.stop="searchStore.removeRecent(entry)"
-                            >
-                                ✕
-                            </button>
-                        </div>
-                    </div>
-
-                    <div
-                        v-if="
-                            !searchStore.saved.value.length &&
-                            !searchStore.recent.value.length
-                        "
-                        class="yt-state yt-state--hint"
-                    >
+                    <div class="yt-state yt-state--hint">
                         <svg
                             class="yt-state__icon"
                             viewBox="0 0 24 24"
