@@ -564,6 +564,7 @@ pub fn run() {
             youtube::youtube_caption_tracks,
             youtube::youtube_caption_file,
             youtube::youtube_comments,
+            youtube::youtube_comment_replies,
             youtube::youtube_translate_comments
         ])
         .build(tauri::generate_context!())

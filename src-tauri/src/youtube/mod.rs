@@ -27,8 +27,8 @@ pub(crate) use captions::{
     youtube_caption_tracks,
 };
 pub(crate) use comments::{
-    __cmd__youtube_comments, __cmd__youtube_translate_comments, youtube_comments,
-    youtube_translate_comments,
+    __cmd__youtube_comment_replies, __cmd__youtube_comments, __cmd__youtube_translate_comments,
+    youtube_comment_replies, youtube_comments, youtube_translate_comments,
 };
 pub(crate) use downloads::{
     __cmd__youtube_download_add, __cmd__youtube_download_cancel,

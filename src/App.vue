@@ -2662,6 +2662,7 @@ useAppStartupBindings({
             :comment-sort-options="ytWatch.commentSortOptions.value"
             :active-comment-sort="ytWatch.activeCommentSort.value"
             :comments-count="ytWatch.commentsCount.value"
+            :reply-threads="ytWatch.replyThreads.value"
             @close="ytWatch.isDrawerOpen.value = false"
             @set-tab="ytWatch.activeTab.value = $event"
             @set-autoplay="ytWatch.setAutoplayNext"
@@ -2678,6 +2679,8 @@ useAppStartupBindings({
             @set-comment-sort="ytWatch.setCommentSort"
             @comments-scroll="ytWatch.loadMoreCommentsIfNeeded"
             @clear-comment-selection="ytWatch.clearCommentSelection"
+            @toggle-replies="ytWatch.toggleReplies"
+            @load-more-replies="ytWatch.loadReplies($event, true)"
         />
 
         <MainPanels

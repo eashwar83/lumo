@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import YtCommentRow from "./YtCommentRow.vue";
 import type { YoutubeItem } from "../../composables/useYouTubeModule";
 import type {
     CaptionTrack,
     CommentSortOption,
+    ReplyThread,
     YoutubeChapter,
     YoutubeComment,
 } from "../../composables/useYouTubeWatch";
@@ -39,7 +41,11 @@ const props = defineProps<{
     commentSortOptions: CommentSortOption[];
     activeCommentSort: string;
     commentsCount: number | null;
+    replyThreads: Record<string, ReplyThread>;
 }>();
+
+const replyThreadOf = (comment: YoutubeComment): ReplyThread | undefined =>
+    props.replyThreads[comment.id];
 
 const emit = defineEmits<{
     (e: "close"): void;
@@ -58,6 +64,8 @@ const emit = defineEmits<{
     (e: "set-comment-sort", option: CommentSortOption): void;
     (e: "comments-scroll", element: HTMLElement): void;
     (e: "clear-comment-selection"): void;
+    (e: "toggle-replies", comment: YoutubeComment): void;
+    (e: "load-more-replies", comment: YoutubeComment): void;
 }>();
 
 // One button covers both scopes: ticking comments narrows it, clearing the
@@ -358,59 +366,79 @@ const formatTime = (seconds: number) => {
                     >
                         No comments
                     </div>
-                    <div
+                    <template
                         v-for="comment in props.comments"
                         :key="comment.id"
-                        class="yt-drawer__comment"
                     >
-                        <div class="yt-drawer__comment-head">
-                            <input
-                                class="yt-drawer__check"
-                                type="checkbox"
-                                :checked="
-                                    props.selectedCommentIds.includes(
-                                        comment.id,
-                                    )
+                        <YtCommentRow
+                            :comment="comment"
+                            :selected="
+                                props.selectedCommentIds.includes(comment.id)
+                            "
+                            :show-translated="props.showTranslated"
+                            @toggle-selection="
+                                emit('toggle-comment-selection', $event)
+                            "
+                        >
+                            <template #actions>
+                                <button
+                                    v-if="comment.replyToken"
+                                    class="yt-drawer__replies-toggle"
+                                    type="button"
+                                    @click="emit('toggle-replies', comment)"
+                                >
+                                    💬
+                                    {{
+                                        replyThreadOf(comment)?.open
+                                            ? "Hide replies"
+                                            : `${comment.replyCountText ?? ""} replies`.trim()
+                                    }}
+                                    {{
+                                        replyThreadOf(comment)?.open ? "▴" : "▾"
+                                    }}
+                                </button>
+                                <span
+                                    v-else-if="comment.replyCountText"
+                                    >💬 {{ comment.replyCountText }}</span
+                                >
+                            </template>
+                        </YtCommentRow>
+                        <template v-if="replyThreadOf(comment)?.open">
+                            <YtCommentRow
+                                v-for="reply in replyThreadOf(comment)!.replies"
+                                :key="reply.id"
+                                :comment="reply"
+                                :is-reply="true"
+                                :selected="
+                                    props.selectedCommentIds.includes(reply.id)
                                 "
-                                :aria-label="`Select comment by ${comment.author}`"
-                                @change="
-                                    emit(
-                                        'toggle-comment-selection',
-                                        comment.id,
-                                    )
+                                :show-translated="props.showTranslated"
+                                @toggle-selection="
+                                    emit('toggle-comment-selection', $event)
                                 "
                             />
-                            <img
-                                v-if="comment.authorThumbnail"
-                                class="yt-drawer__avatar"
-                                :src="comment.authorThumbnail"
-                                alt=""
-                                loading="lazy"
-                                referrerpolicy="no-referrer"
-                            />
-                            <span class="yt-drawer__comment-author">{{
-                                comment.author
-                            }}</span>
-                            <span class="yt-drawer__tagline">{{
-                                comment.publishedText
-                            }}</span>
-                        </div>
-                        <div class="yt-drawer__comment-text">
-                            {{
-                                props.showTranslated && comment.translated
-                                    ? comment.translated
-                                    : comment.text
-                            }}
-                        </div>
-                        <div class="yt-drawer__comment-meta">
-                            <span v-if="comment.likeCountText"
-                                >♥ {{ comment.likeCountText }}</span
+                            <div
+                                v-if="replyThreadOf(comment)!.loading"
+                                class="yt-drawer__replies-state"
                             >
-                            <span v-if="comment.replyCountText"
-                                >💬 {{ comment.replyCountText }}</span
+                                Loading replies…
+                            </div>
+                            <div
+                                v-else-if="replyThreadOf(comment)!.error"
+                                class="yt-drawer__replies-state yt-drawer__state--error"
                             >
-                        </div>
-                    </div>
+                                {{ replyThreadOf(comment)!.error }}
+                            </div>
+                            <button
+                                v-else-if="replyThreadOf(comment)!.cursor"
+                                class="yt-drawer__replies-more"
+                                type="button"
+                                @click="emit('load-more-replies', comment)"
+                            >
+                                Show more replies
+                            </button>
+                        </template>
+                    </template>
                     <button
                         v-if="props.commentsCursor"
                         class="yt-drawer__more"
@@ -740,12 +768,6 @@ const formatTime = (seconds: number) => {
     font-size: 11.5px;
 }
 
-.yt-drawer__check {
-    flex: none;
-    accent-color: var(--yt-accent, #8b7cf7);
-    cursor: pointer;
-}
-
 .yt-drawer__icon-button {
     flex: none;
     border: 1px solid var(--yt-border, #26262c);
@@ -765,6 +787,35 @@ const formatTime = (seconds: number) => {
 
 .yt-drawer__sorts {
     justify-content: flex-start;
+}
+
+.yt-drawer__replies-toggle {
+    border: none;
+    background: transparent;
+    padding: 0;
+    color: var(--yt-accent, #8b7cf7);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.yt-drawer__replies-state {
+    margin-left: 24px;
+    padding: 4px 0 8px;
+    font-size: 11px;
+    color: var(--yt-text-faint, #6f6f78);
+}
+
+.yt-drawer__replies-more {
+    margin: 0 0 10px 24px;
+    border: none;
+    background: transparent;
+    padding: 2px 0;
+    color: var(--yt-accent, #8b7cf7);
+    font-size: 11.5px;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: left;
 }
 
 .yt-drawer__sort {
@@ -802,48 +853,6 @@ const formatTime = (seconds: number) => {
 .yt-drawer__translate:disabled {
     opacity: 0.6;
     cursor: default;
-}
-
-.yt-drawer__comment {
-    border-bottom: 1px solid var(--yt-border, #26262c);
-    padding: 8px 2px 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-}
-
-.yt-drawer__comment-head {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-}
-
-.yt-drawer__avatar {
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    flex: none;
-}
-
-.yt-drawer__comment-author {
-    font-size: 12px;
-    font-weight: 700;
-    color: var(--yt-text, #ececef);
-}
-
-.yt-drawer__comment-text {
-    font-size: 12.5px;
-    line-height: 1.45;
-    color: var(--yt-text, #ececef);
-    white-space: pre-wrap;
-    word-break: break-word;
-}
-
-.yt-drawer__comment-meta {
-    display: flex;
-    gap: 12px;
-    font-size: 11px;
-    color: var(--yt-text-faint, #6f6f78);
 }
 
 .yt-drawer__more {

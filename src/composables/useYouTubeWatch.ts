@@ -28,8 +28,19 @@ export type YoutubeComment = {
     replyCountText?: string | null;
     isPinned: boolean;
     isHearted: boolean;
+    /** Continuation token for this comment's replies, when it has any. */
+    replyToken?: string | null;
     /** Filled in by the AI translation pass. */
     translated?: string;
+};
+
+/** Replies to one comment, loaded on demand. */
+export type ReplyThread = {
+    open: boolean;
+    loading: boolean;
+    replies: YoutubeComment[];
+    cursor: string | null;
+    error: string;
 };
 
 export type CommentSortOption = {
@@ -160,6 +171,7 @@ export const useYouTubeWatch = (options: UseYouTubeWatchOptions) => {
             commentsCount.value = null;
             commentSortOptions.value = [];
             activeCommentSort.value = "";
+            replyThreads.value = {};
             commentsError.value = "";
             showTranslated.value = false;
             selectedCommentIds.value = [];
@@ -340,6 +352,76 @@ export const useYouTubeWatch = (options: UseYouTubeWatchOptions) => {
         await loadComments(false, option.token);
     };
 
+    // --- replies -----------------------------------------------------
+    const replyThreads = ref<Record<string, ReplyThread>>({});
+
+    const loadReplies = async (comment: YoutubeComment, more = false) => {
+        const existing = replyThreads.value[comment.id];
+        const token = more ? existing?.cursor : comment.replyToken;
+        if (!token || existing?.loading) return;
+        replyThreads.value = {
+            ...replyThreads.value,
+            [comment.id]: {
+                open: true,
+                loading: true,
+                replies: existing?.replies ?? [],
+                cursor: existing?.cursor ?? null,
+                error: "",
+            },
+        };
+        try {
+            const page = await invoke<CommentPage>("youtube_comment_replies", {
+                payload: { token },
+            });
+            const thread = replyThreads.value[comment.id];
+            replyThreads.value = {
+                ...replyThreads.value,
+                [comment.id]: {
+                    open: true,
+                    loading: false,
+                    replies: more
+                        ? [...thread.replies, ...page.comments]
+                        : page.comments,
+                    cursor: page.nextCursor,
+                    error: "",
+                },
+            };
+        } catch (error) {
+            const thread = replyThreads.value[comment.id];
+            replyThreads.value = {
+                ...replyThreads.value,
+                [comment.id]: {
+                    ...thread,
+                    loading: false,
+                    error: String(error)
+                        .replace(/^Error:\s*/, "")
+                        .slice(0, 160),
+                },
+            };
+        }
+    };
+
+    /** Opens a reply thread (loading it the first time) or closes it. */
+    const toggleReplies = (comment: YoutubeComment) => {
+        const thread = replyThreads.value[comment.id];
+        if (!thread) {
+            void loadReplies(comment);
+            return;
+        }
+        replyThreads.value = {
+            ...replyThreads.value,
+            [comment.id]: { ...thread, open: !thread.open },
+        };
+    };
+
+    /** Top-level comments plus every reply currently on screen. */
+    const visibleComments = computed<YoutubeComment[]>(() =>
+        comments.value.flatMap((comment) => {
+            const thread = replyThreads.value[comment.id];
+            return thread?.open ? [comment, ...thread.replies] : [comment];
+        }),
+    );
+
     /** Pulls the next page when the list is scrolled near its end. */
     const loadMoreCommentsIfNeeded = (element: HTMLElement) => {
         if (!commentsCursor.value || isLoadingComments.value) return;
@@ -372,12 +454,13 @@ export const useYouTubeWatch = (options: UseYouTubeWatchOptions) => {
         onlySelected = false,
     ) => {
         if (isTranslating.value || !comments.value.length) return;
+        // Expanded replies read like comments and translate like them.
         const scope =
             onlySelected && selectedCommentIds.value.length
-                ? comments.value.filter((comment) =>
+                ? visibleComments.value.filter((comment) =>
                       selectedCommentIds.value.includes(comment.id),
                   )
-                : comments.value;
+                : visibleComments.value;
         const pending = scope.filter((comment) => !comment.translated);
         if (!pending.length) {
             showTranslated.value = true;
@@ -480,6 +563,10 @@ export const useYouTubeWatch = (options: UseYouTubeWatchOptions) => {
         activeCommentSort,
         setCommentSort,
         loadMoreCommentsIfNeeded,
+        replyThreads,
+        toggleReplies,
+        loadReplies,
+        visibleComments,
         isLoadingComments,
         commentsError,
         loadComments,

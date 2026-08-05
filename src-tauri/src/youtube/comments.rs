@@ -30,6 +30,8 @@ pub(crate) struct YoutubeComment {
     pub(crate) reply_count_text: Option<String>,
     pub(crate) is_pinned: bool,
     pub(crate) is_hearted: bool,
+    /// Continuation token for this comment's replies, when it has any.
+    pub(crate) reply_token: Option<String>,
 }
 
 /// One entry of YouTube's "Sort by" menu ("Top" / "Newest"). The token
@@ -96,6 +98,45 @@ pub(crate) async fn youtube_comments(
     tauri::async_runtime::spawn_blocking(move || fetch_comments(&app, &payload))
         .await
         .map_err(|error| format!("Comments worker failed: {error}"))?
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RepliesPayload {
+    /// A comment's reply token, or a cursor from a previous reply page.
+    pub(crate) token: String,
+}
+
+/// Loads one page of replies to a single comment.
+#[tauri::command]
+pub(crate) async fn youtube_comment_replies(
+    app: AppHandle,
+    payload: RepliesPayload,
+) -> Result<YoutubeCommentPage, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut auth = None;
+        let token = match payload.token.strip_prefix(AUTHED_CURSOR_PREFIX) {
+            Some(inner) => {
+                auth = super::auth::session_auth(&app);
+                inner.to_string()
+            }
+            None => payload.token.clone(),
+        };
+        let value = post_next(
+            &app,
+            json!({ "context": client_context(), "continuation": token }),
+            auth.as_ref(),
+        )?;
+        let mut page = parse_comment_page(&value);
+        if auth.is_some() {
+            page.next_cursor = page
+                .next_cursor
+                .map(|cursor| format!("{AUTHED_CURSOR_PREFIX}{cursor}"));
+        }
+        Ok::<YoutubeCommentPage, String>(page)
+    })
+    .await
+    .map_err(|error| format!("Replies worker failed: {error}"))?
 }
 
 /// What the watch response tells us about a video's comments section.
@@ -180,13 +221,19 @@ fn fetch_comments(app: &AppHandle, payload: &CommentsPayload) -> Result<YoutubeC
             page.total_text = Some(format!("{count} comments"));
         }
     }
-    // Sort tokens are as session-bound as continuations are.
+    // Sort and reply tokens are as session-bound as continuations are.
     if auth.is_some() {
         page.next_cursor = page
             .next_cursor
             .map(|cursor| format!("{AUTHED_CURSOR_PREFIX}{cursor}"));
         for option in &mut page.sort_options {
             option.token = format!("{AUTHED_CURSOR_PREFIX}{}", option.token);
+        }
+        for comment in &mut page.comments {
+            comment.reply_token = comment
+                .reply_token
+                .take()
+                .map(|token| format!("{AUTHED_CURSOR_PREFIX}{token}"));
         }
     }
     Ok(page)
@@ -290,6 +337,31 @@ fn parse_comment_page(value: &Value) -> YoutubeCommentPage {
             .map(|count| format!("{count} comments"))
     });
 
+    // A thread that has replies carries its own continuation token. The
+    // bodies arrive in the same entity batch as everything else, so the
+    // token is the only thing the renderers add — match it to its comment
+    // and hand it to the UI as the "view replies" handle.
+    for item in &items {
+        let Some(thread) = item.get("commentThreadRenderer") else {
+            continue;
+        };
+        let Some(id) = thread
+            .pointer("/commentViewModel/commentViewModel/commentId")
+            .and_then(Value::as_str)
+        else {
+            continue;
+        };
+        let token = thread
+            .pointer("/replies/commentRepliesRenderer/contents/0/continuationItemRenderer/continuationEndpoint/continuationCommand/token")
+            .and_then(Value::as_str);
+        if let (Some(token), Some(comment)) = (
+            token,
+            comments.iter_mut().find(|comment| comment.id == id),
+        ) {
+            comment.reply_token = Some(token.to_string());
+        }
+    }
+
     YoutubeCommentPage {
         comments,
         next_cursor,
@@ -345,6 +417,8 @@ fn parse_comment_entity(entity: &Value) -> Option<YoutubeComment> {
             .and_then(|bar| bar.get("heartState"))
             .and_then(Value::as_str)
             .is_some_and(|state| state.contains("HEARTED")),
+        // Filled in from the thread renderer, which owns the token.
+        reply_token: None,
     })
 }
 
