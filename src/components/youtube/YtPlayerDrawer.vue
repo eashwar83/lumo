@@ -2,6 +2,7 @@
 import type { YoutubeItem } from "../../composables/useYouTubeModule";
 import type {
     CaptionTrack,
+    CommentSortOption,
     YoutubeChapter,
     YoutubeComment,
 } from "../../composables/useYouTubeWatch";
@@ -33,6 +34,10 @@ const props = defineProps<{
     aiModel: string;
     aiProviders: readonly string[];
     aiModels: readonly string[];
+    isFetchingModels: boolean;
+    commentSortOptions: CommentSortOption[];
+    activeCommentSort: string;
+    commentsCount: number | null;
 }>();
 
 const emit = defineEmits<{
@@ -48,6 +53,9 @@ const emit = defineEmits<{
     (e: "toggle-comment-selection", id: string): void;
     (e: "set-ai-provider", provider: string): void;
     (e: "set-ai-model", model: string): void;
+    (e: "fetch-ai-models"): void;
+    (e: "set-comment-sort", option: CommentSortOption): void;
+    (e: "comments-scroll", element: HTMLElement): void;
 }>();
 
 const chapterIndexAt = (time: number) => {
@@ -198,7 +206,9 @@ const formatTime = (seconds: number) => {
                 <div class="yt-drawer__comments-head">
                     <div class="yt-drawer__comments-row">
                         <span class="yt-drawer__tagline">{{
-                            props.commentsTotal || "Comments"
+                            props.commentsCount !== null
+                                ? `${props.comments.length} of ${props.commentsCount} comments`
+                                : props.commentsTotal || "Comments"
                         }}</span>
                         <button
                             v-if="props.showTranslated"
@@ -207,6 +217,25 @@ const formatTime = (seconds: number) => {
                             @click="emit('toggle-translated', false)"
                         >
                             Show original
+                        </button>
+                    </div>
+                    <div
+                        v-if="props.commentSortOptions.length > 1"
+                        class="yt-drawer__comments-row yt-drawer__sorts"
+                    >
+                        <button
+                            v-for="option in props.commentSortOptions"
+                            :key="option.title"
+                            class="yt-drawer__sort"
+                            :class="{
+                                'yt-drawer__sort--active':
+                                    props.activeCommentSort === option.title,
+                            }"
+                            type="button"
+                            :disabled="props.isLoadingComments"
+                            @click="emit('set-comment-sort', option)"
+                        >
+                            {{ option.title }}
                         </button>
                     </div>
                     <template v-if="props.comments.length">
@@ -250,6 +279,16 @@ const formatTime = (seconds: number) => {
                                     {{ model }}
                                 </option>
                             </select>
+                            <button
+                                class="yt-drawer__icon-button"
+                                type="button"
+                                :disabled="props.isFetchingModels"
+                                title="Fetch this provider's current models"
+                                aria-label="Fetch this provider's current models"
+                                @click="emit('fetch-ai-models')"
+                            >
+                                {{ props.isFetchingModels ? "…" : "⟳" }}
+                            </button>
                         </div>
                         <div class="yt-drawer__comments-row">
                             <button
@@ -280,7 +319,15 @@ const formatTime = (seconds: number) => {
                         </div>
                     </template>
                 </div>
-                <div class="yt-drawer__list">
+                <div
+                    class="yt-drawer__list"
+                    @scroll.passive="
+                        emit(
+                            'comments-scroll',
+                            $event.currentTarget as HTMLElement,
+                        )
+                    "
+                >
                     <div
                         v-if="props.commentsError"
                         class="yt-drawer__state yt-drawer__state--error"
@@ -687,6 +734,48 @@ const formatTime = (seconds: number) => {
     flex: none;
     accent-color: var(--yt-accent, #8b7cf7);
     cursor: pointer;
+}
+
+.yt-drawer__icon-button {
+    flex: none;
+    border: 1px solid var(--yt-border, #26262c);
+    background: var(--yt-surface, #17171b);
+    color: var(--yt-text, #ececef);
+    border-radius: 6px;
+    padding: 3px 8px;
+    font-size: 12px;
+    line-height: 1.2;
+    cursor: pointer;
+}
+
+.yt-drawer__icon-button:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.yt-drawer__sorts {
+    justify-content: flex-start;
+}
+
+.yt-drawer__sort {
+    border: 1px solid var(--yt-border, #26262c);
+    background: transparent;
+    color: var(--yt-text-faint, #6f6f78);
+    border-radius: 999px;
+    padding: 3px 12px;
+    font-size: 11.5px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.yt-drawer__sort--active {
+    border-color: var(--yt-accent, #8b7cf7);
+    color: var(--yt-accent, #8b7cf7);
+}
+
+.yt-drawer__sort:disabled {
+    opacity: 0.6;
+    cursor: default;
 }
 
 .yt-drawer__translate {

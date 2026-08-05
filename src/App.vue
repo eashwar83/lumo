@@ -2041,6 +2041,11 @@ const commentTranslateLanguage = computed(
 
 const commentAi = useCommentTranslateAi();
 
+const onFetchCommentAiModels = async () => {
+    const result = await commentAi.fetchModels();
+    if (result.message) showMessageOverlay(result.message, 4200);
+};
+
 const onTranslateComments = (onlySelected = false) => {
     const credentials = commentAi.resolve();
     if ("error" in credentials) {
@@ -2653,6 +2658,10 @@ useAppStartupBindings({
             :ai-model="commentAi.model.value"
             :ai-providers="commentAi.providerOptions.value"
             :ai-models="commentAi.modelOptions.value"
+            :is-fetching-models="commentAi.isFetchingModels.value"
+            :comment-sort-options="ytWatch.commentSortOptions.value"
+            :active-comment-sort="ytWatch.activeCommentSort.value"
+            :comments-count="ytWatch.commentsCount.value"
             @close="ytWatch.isDrawerOpen.value = false"
             @set-tab="ytWatch.activeTab.value = $event"
             @set-autoplay="ytWatch.setAutoplayNext"
@@ -2665,6 +2674,9 @@ useAppStartupBindings({
             @toggle-comment-selection="ytWatch.toggleCommentSelection"
             @set-ai-provider="commentAi.setProvider"
             @set-ai-model="commentAi.setModel"
+            @fetch-ai-models="onFetchCommentAiModels"
+            @set-comment-sort="ytWatch.setCommentSort"
+            @comments-scroll="ytWatch.loadMoreCommentsIfNeeded"
         />
 
         <MainPanels

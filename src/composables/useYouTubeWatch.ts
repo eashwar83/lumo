@@ -32,10 +32,18 @@ export type YoutubeComment = {
     translated?: string;
 };
 
+export type CommentSortOption = {
+    title: string;
+    token: string;
+    selected: boolean;
+};
+
 type CommentPage = {
     comments: YoutubeComment[];
     nextCursor: string | null;
     totalText: string | null;
+    sortOptions: CommentSortOption[];
+    totalCount: number | null;
 };
 
 type UseYouTubeWatchOptions = {
@@ -149,6 +157,9 @@ export const useYouTubeWatch = (options: UseYouTubeWatchOptions) => {
             comments.value = [];
             commentsCursor.value = null;
             commentsTotal.value = "";
+            commentsCount.value = null;
+            commentSortOptions.value = [];
+            activeCommentSort.value = "";
             commentsError.value = "";
             showTranslated.value = false;
             selectedCommentIds.value = [];
@@ -272,10 +283,13 @@ export const useYouTubeWatch = (options: UseYouTubeWatchOptions) => {
     const comments = ref<YoutubeComment[]>([]);
     const commentsCursor = ref<string | null>(null);
     const commentsTotal = ref("");
+    const commentsCount = ref<number | null>(null);
+    const commentSortOptions = ref<CommentSortOption[]>([]);
+    const activeCommentSort = ref("");
     const isLoadingComments = ref(false);
     const commentsError = ref("");
 
-    const loadComments = async (more = false) => {
+    const loadComments = async (more = false, sortToken?: string) => {
         const videoId = currentVideoId.value;
         if (!videoId || isLoadingComments.value) return;
         if (more && !commentsCursor.value) return;
@@ -286,6 +300,7 @@ export const useYouTubeWatch = (options: UseYouTubeWatchOptions) => {
                 payload: {
                     videoId,
                     cursor: more ? commentsCursor.value : null,
+                    sortToken: sortToken ?? null,
                 },
             });
             comments.value = more
@@ -293,6 +308,17 @@ export const useYouTubeWatch = (options: UseYouTubeWatchOptions) => {
                 : page.comments;
             commentsCursor.value = page.nextCursor;
             if (page.totalText) commentsTotal.value = page.totalText;
+            if (page.totalCount !== null) commentsCount.value = page.totalCount;
+            // Only the first page carries the menu; a re-sort keeps the
+            // options already on screen.
+            if (page.sortOptions.length) {
+                commentSortOptions.value = page.sortOptions;
+                if (!activeCommentSort.value) {
+                    activeCommentSort.value =
+                        page.sortOptions.find((option) => option.selected)
+                            ?.title ?? "";
+                }
+            }
         } catch (error) {
             commentsError.value = String(error)
                 .replace(/^Error:\s*/, "")
@@ -300,6 +326,26 @@ export const useYouTubeWatch = (options: UseYouTubeWatchOptions) => {
         } finally {
             isLoadingComments.value = false;
         }
+    };
+
+    /** Reloads the list in YouTube's "Top" or "Newest" order. */
+    const setCommentSort = async (option: CommentSortOption) => {
+        if (isLoadingComments.value || activeCommentSort.value === option.title) {
+            return;
+        }
+        activeCommentSort.value = option.title;
+        comments.value = [];
+        commentsCursor.value = null;
+        selectedCommentIds.value = [];
+        await loadComments(false, option.token);
+    };
+
+    /** Pulls the next page when the list is scrolled near its end. */
+    const loadMoreCommentsIfNeeded = (element: HTMLElement) => {
+        if (!commentsCursor.value || isLoadingComments.value) return;
+        const remaining =
+            element.scrollHeight - element.scrollTop - element.clientHeight;
+        if (remaining < 240) void loadComments(true);
     };
 
     const isTranslating = ref(false);
@@ -429,6 +475,11 @@ export const useYouTubeWatch = (options: UseYouTubeWatchOptions) => {
         comments,
         commentsCursor,
         commentsTotal,
+        commentsCount,
+        commentSortOptions,
+        activeCommentSort,
+        setCommentSort,
+        loadMoreCommentsIfNeeded,
         isLoadingComments,
         commentsError,
         loadComments,

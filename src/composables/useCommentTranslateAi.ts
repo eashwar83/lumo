@@ -1,4 +1,5 @@
 import { computed, ref } from "vue";
+import { invoke } from "@tauri-apps/api/core";
 import {
     AI_PROVIDERS,
     CURATED_AI_MODELS,
@@ -11,6 +12,7 @@ import { useAiConfig } from "./useAiConfig";
 
 const PROVIDER_KEY = "lumo.commentTranslate.provider";
 const MODEL_KEY = "lumo.commentTranslate.model";
+const FETCHED_KEY = "lumo.commentTranslate.fetchedModels";
 
 const readStored = (key: string): string => {
     try {
@@ -32,6 +34,18 @@ const writeStored = (key: string, value: string) => {
 // one AI Enhance is set to, but it reuses the API keys already stored there.
 const provider = ref(readStored(PROVIDER_KEY));
 const model = ref(readStored(MODEL_KEY));
+// Models discovered from each provider's own API, so the list is not
+// frozen to whatever was curated when Lumo shipped.
+const fetchedModels = ref<Record<string, string[]>>(
+    (() => {
+        try {
+            return JSON.parse(readStored(FETCHED_KEY) || "{}");
+        } catch {
+            return {};
+        }
+    })(),
+);
+const isFetchingModels = ref(false);
 
 export const useCommentTranslateAi = () => {
     const aiConfig = useAiConfig();
@@ -51,7 +65,8 @@ export const useCommentTranslateAi = () => {
     const modelOptions = computed<readonly string[]>(() => {
         const curated =
             CURATED_AI_MODELS[activeProvider.value as AiProvider] ?? [];
-        const set = new Set<string>(curated);
+        const discovered = fetchedModels.value[activeProvider.value] ?? [];
+        const set = new Set<string>([...curated, ...discovered]);
         if (activeModel.value) set.add(activeModel.value);
         return [...set].sort((a, b) =>
             a.localeCompare(b, undefined, {
@@ -60,6 +75,43 @@ export const useCommentTranslateAi = () => {
             }),
         );
     });
+
+    /** Asks the provider which models it currently offers. */
+    const fetchModels = async (): Promise<{ ok: boolean; message: string }> => {
+        if (isFetchingModels.value) return { ok: false, message: "" };
+        const name = activeProvider.value;
+        const key = aiConfig.keyFor(name).trim();
+        if (!key) {
+            return {
+                ok: false,
+                message: `Add an API key for ${name} in Settings → AI Enhance first.`,
+            };
+        }
+        isFetchingModels.value = true;
+        try {
+            const list = await invoke<string[]>("ai_list_models", {
+                provider: name,
+                apiKey: key,
+                baseUrl: aiConfig.baseUrlFor(name).trim() || null,
+            });
+            if (!list.length) {
+                return { ok: false, message: `${name} reported no models.` };
+            }
+            fetchedModels.value = { ...fetchedModels.value, [name]: list };
+            writeStored(FETCHED_KEY, JSON.stringify(fetchedModels.value));
+            return {
+                ok: true,
+                message: `${name}: ${list.length} model${list.length === 1 ? "" : "s"} available.`,
+            };
+        } catch (error) {
+            return {
+                ok: false,
+                message: String(error).replace(/^Error:\s*/, "").slice(0, 160),
+            };
+        } finally {
+            isFetchingModels.value = false;
+        }
+    };
 
     const setProvider = (value: string) => {
         provider.value = value;
@@ -106,6 +158,8 @@ export const useCommentTranslateAi = () => {
         model: activeModel,
         providerOptions,
         modelOptions,
+        isFetchingModels,
+        fetchModels,
         setProvider,
         setModel,
         resolve,

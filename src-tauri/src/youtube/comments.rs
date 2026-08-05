@@ -32,12 +32,26 @@ pub(crate) struct YoutubeComment {
     pub(crate) is_hearted: bool,
 }
 
+/// One entry of YouTube's "Sort by" menu ("Top" / "Newest"). The token
+/// reloads the whole comment list in that order.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CommentSortOption {
+    pub(crate) title: String,
+    pub(crate) token: String,
+    pub(crate) selected: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct YoutubeCommentPage {
     pub(crate) comments: Vec<YoutubeComment>,
     pub(crate) next_cursor: Option<String>,
     pub(crate) total_text: Option<String>,
+    /// Only populated on the first page; the UI keeps them afterwards.
+    pub(crate) sort_options: Vec<CommentSortOption>,
+    /// How many comments the video has, when YouTube says.
+    pub(crate) total_count: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -47,6 +61,9 @@ pub(crate) struct CommentsPayload {
     /// Continuation token from a previous page.
     #[serde(default)]
     pub(crate) cursor: Option<String>,
+    /// A sort option's token: loads the list afresh in that order.
+    #[serde(default)]
+    pub(crate) sort_token: Option<String>,
 }
 
 fn client_context() -> Value {
@@ -81,50 +98,72 @@ pub(crate) async fn youtube_comments(
         .map_err(|error| format!("Comments worker failed: {error}"))?
 }
 
+/// What the watch response tells us about a video's comments section.
+struct CommentsEntry {
+    token: String,
+    sort_options: Vec<CommentSortOption>,
+    total_count: Option<u32>,
+}
+
 fn fetch_comments(app: &AppHandle, payload: &CommentsPayload) -> Result<YoutubeCommentPage, String> {
-    // Page one needs the watch response first: it holds the token that opens
-    // the comments section.
     let mut auth = None;
-    let token = match payload.cursor.clone() {
-        // A cursor minted under a session only works under that session;
-        // the marker keeps anonymous videos anonymous on "load more".
-        Some(cursor) => match cursor.strip_prefix(AUTHED_CURSOR_PREFIX) {
+    // Strips the marker that says a token was minted under a session; a
+    // token only works under the session that produced it, and this keeps
+    // anonymous videos anonymous when paging or re-sorting.
+    let take_token = |value: String, auth: &mut Option<super::auth::SessionAuth>| {
+        match value.strip_prefix(AUTHED_CURSOR_PREFIX) {
             Some(inner) => {
-                auth = super::auth::session_auth(app);
+                *auth = super::auth::session_auth(app);
                 inner.to_string()
             }
-            None => cursor,
-        },
+            None => value,
+        }
+    };
+
+    let mut entry = None;
+    // A sort choice reloads the list; a cursor extends it. Either way the
+    // token is already in hand and no watch call is needed.
+    let token = match payload
+        .sort_token
+        .clone()
+        .or_else(|| payload.cursor.clone())
+    {
+        Some(value) => take_token(value, &mut auth),
         None => {
             let body = json!({ "context": client_context(), "videoId": payload.video_id });
             let watch = post_next(app, body.clone(), None)?;
-            match comments_token(&watch) {
-                Some(token) => token,
+            let found = match comments_entry(&watch) {
+                Some(found) => Some(found),
                 None => {
                     // YouTube hides an age-restricted video's comments from
                     // signed-out clients and reports them as turned off.
                     // Retry signed before believing it.
                     auth = super::auth::session_auth(app);
-                    let signed = auth
-                        .as_ref()
+                    auth.as_ref()
                         .map(|auth| post_next(app, body, Some(auth)))
-                        .transpose()?;
-                    let Some(token) = signed.as_ref().and_then(comments_token) else {
-                        return Ok(YoutubeCommentPage {
-                            comments: Vec::new(),
-                            next_cursor: None,
-                            total_text: Some(if auth.is_some() {
-                                "Comments are turned off".to_string()
-                            } else {
-                                "Comments are hidden for signed-out viewers — set a cookies \
-                                 file in Settings → YouTube"
-                                    .to_string()
-                            }),
-                        });
-                    };
-                    token
+                        .transpose()?
+                        .as_ref()
+                        .and_then(comments_entry)
                 }
-            }
+            };
+            let Some(found) = found else {
+                return Ok(YoutubeCommentPage {
+                    comments: Vec::new(),
+                    next_cursor: None,
+                    total_text: Some(if auth.is_some() {
+                        "Comments are turned off".to_string()
+                    } else {
+                        "Comments are hidden for signed-out viewers — set a cookies \
+                         file in Settings → YouTube"
+                            .to_string()
+                    }),
+                    sort_options: Vec::new(),
+                    total_count: None,
+                });
+            };
+            let token = found.token.clone();
+            entry = Some(found);
+            token
         }
     };
 
@@ -134,15 +173,28 @@ fn fetch_comments(app: &AppHandle, payload: &CommentsPayload) -> Result<YoutubeC
         auth.as_ref(),
     )?;
     let mut page = parse_comment_page(&value);
+    if let Some(entry) = entry {
+        page.total_count = entry.total_count;
+        page.sort_options = entry.sort_options;
+        if let Some(count) = entry.total_count {
+            page.total_text = Some(format!("{count} comments"));
+        }
+    }
+    // Sort tokens are as session-bound as continuations are.
     if auth.is_some() {
         page.next_cursor = page
             .next_cursor
             .map(|cursor| format!("{AUTHED_CURSOR_PREFIX}{cursor}"));
+        for option in &mut page.sort_options {
+            option.token = format!("{AUTHED_CURSOR_PREFIX}{}", option.token);
+        }
     }
     Ok(page)
 }
 
-fn comments_token(watch: &Value) -> Option<String> {
+/// Reads the comments engagement panel: its continuation token, the
+/// "Sort by" menu, and the comment count shown beside the title.
+fn comments_entry(watch: &Value) -> Option<CommentsEntry> {
     watch
         .get("engagementPanels")?
         .as_array()?
@@ -153,11 +205,42 @@ fn comments_token(watch: &Value) -> Option<String> {
             if !identifier.contains("comments") {
                 return None;
             }
-            renderer
+            let token = renderer
                 .pointer("/content/sectionListRenderer/contents/0/itemSectionRenderer/contents/0/continuationItemRenderer/continuationEndpoint/continuationCommand/token")
+                .and_then(Value::as_str)?
+                .to_string();
+
+            let header = renderer.pointer("/header/engagementPanelTitleHeaderRenderer");
+            let total_count = header
+                .and_then(|header| header.pointer("/contextualInfo/runs/0/text"))
                 .and_then(Value::as_str)
-                .map(str::to_string)
+                .and_then(|text| text.replace(',', "").parse::<u32>().ok());
+            let sort_options = header
+                .and_then(|header| header.pointer("/menu/sortFilterSubMenuRenderer/subMenuItems"))
+                .and_then(Value::as_array)
+                .map(|items| items.iter().filter_map(parse_sort_option).collect())
+                .unwrap_or_default();
+
+            Some(CommentsEntry {
+                token,
+                sort_options,
+                total_count,
+            })
         })
+}
+
+fn parse_sort_option(item: &Value) -> Option<CommentSortOption> {
+    Some(CommentSortOption {
+        title: item.get("title").and_then(Value::as_str)?.to_string(),
+        token: item
+            .pointer("/serviceEndpoint/continuationCommand/token")
+            .and_then(Value::as_str)?
+            .to_string(),
+        selected: item
+            .get("selected")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    })
 }
 
 fn parse_comment_page(value: &Value) -> YoutubeCommentPage {
@@ -211,6 +294,8 @@ fn parse_comment_page(value: &Value) -> YoutubeCommentPage {
         comments,
         next_cursor,
         total_text,
+        sort_options: Vec::new(),
+        total_count: None,
     }
 }
 
