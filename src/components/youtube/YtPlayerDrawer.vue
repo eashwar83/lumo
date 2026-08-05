@@ -50,6 +50,8 @@ const props = defineProps<{
     crawlLoaded: number;
     crawlStopped: boolean;
     isExporting: boolean;
+    /** Set once an export succeeds, enabling "Show in folder". */
+    exportedPath: string;
 }>();
 
 const replyThreadOf = (comment: YoutubeComment): ReplyThread | undefined =>
@@ -78,6 +80,7 @@ const emit = defineEmits<{
     (e: "search-all"): void;
     (e: "stop-search"): void;
     (e: "export-comments", onlySelected: boolean): void;
+    (e: "reveal-export"): void;
 }>();
 
 // One button covers both scopes: ticking comments narrows it, clearing the
@@ -408,6 +411,16 @@ const formatTime = (seconds: number) => {
                                 @click="emit('export-comments', hasSelection)"
                             >
                                 {{ props.isExporting ? "…" : "PDF" }}
+                            </button>
+                            <button
+                                v-if="props.exportedPath"
+                                class="yt-drawer__icon-button"
+                                type="button"
+                                title="Show the export in its folder"
+                                aria-label="Show the export in its folder"
+                                @click="emit('reveal-export')"
+                            >
+                                📂
                             </button>
                         </div>
                     </template>

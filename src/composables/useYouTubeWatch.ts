@@ -32,6 +32,11 @@ export type YoutubeComment = {
     replyToken?: string | null;
     /** Filled in by the AI translation pass. */
     translated?: string;
+    /**
+     * Which language+model produced `translated`. Changing either has to
+     * invalidate the cached text, or the old translation sticks forever.
+     */
+    translatedBy?: string;
 };
 
 /** Replies to one comment, loaded on demand. */
@@ -569,14 +574,20 @@ export const useYouTubeWatch = (options: UseYouTubeWatchOptions) => {
                       selectedCommentIds.value.includes(comment.id),
                   )
                 : visibleComments.value;
-        const pending = scope.filter((comment) => !comment.translated);
+        // Anything not yet translated, plus anything translated by a
+        // different model or into a different language.
+        const stamp = `${targetLanguage}|${credentials.model}`;
+        const pending = scope.filter(
+            (comment) => comment.translatedBy !== stamp,
+        );
         if (!pending.length) {
             showTranslated.value = true;
+            options.notify(`Already translated to ${targetLanguage}`);
             return;
         }
         isTranslating.value = true;
         try {
-            const translations = await invoke<string[]>(
+            const translations = await invoke<(string | null)[]>(
                 "youtube_translate_comments",
                 {
                     payload: {
@@ -588,10 +599,27 @@ export const useYouTubeWatch = (options: UseYouTubeWatchOptions) => {
                     },
                 },
             );
+            let failed = 0;
             pending.forEach((comment, index) => {
-                comment.translated = translations[index] ?? comment.text;
+                const translated = translations[index];
+                // A null means the model failed on this one. Leaving it
+                // unstamped is what keeps it retryable — recording the
+                // original text as its translation is the bug that made
+                // failures look permanent.
+                if (translated == null) {
+                    failed += 1;
+                    return;
+                }
+                comment.translated = translated;
+                comment.translatedBy = stamp;
             });
             showTranslated.value = true;
+            const done = pending.length - failed;
+            options.notify(
+                failed
+                    ? `Translated ${done} · ${failed} failed — press Translate again to retry`
+                    : `Translated ${done} comment${done === 1 ? "" : "s"}`,
+            );
         } catch (error) {
             options.notify(
                 String(error).replace(/^Error:\s*/, "").slice(0, 160),

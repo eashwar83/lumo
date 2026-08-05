@@ -568,6 +568,7 @@ pub fn run() {
             youtube::youtube_comments_fetch_all,
             youtube::youtube_comments_stop,
             youtube::youtube_export_comments,
+            youtube::youtube_export_reveal,
             youtube::youtube_translate_comments
         ])
         .build(tauri::generate_context!())

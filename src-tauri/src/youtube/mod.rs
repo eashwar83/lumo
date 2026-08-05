@@ -36,7 +36,10 @@ pub(crate) use comment_crawl::{
     __cmd__youtube_comments_fetch_all, __cmd__youtube_comments_stop, youtube_comments_fetch_all,
     youtube_comments_stop,
 };
-pub(crate) use comment_export::{__cmd__youtube_export_comments, youtube_export_comments};
+pub(crate) use comment_export::{
+    __cmd__youtube_export_comments, __cmd__youtube_export_reveal, youtube_export_comments,
+    youtube_export_reveal,
+};
 pub(crate) use downloads::{
     __cmd__youtube_download_add, __cmd__youtube_download_cancel,
     __cmd__youtube_download_clear_done, __cmd__youtube_download_list,

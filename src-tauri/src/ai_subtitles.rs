@@ -580,6 +580,11 @@ fences, no commentary."
 
 /// Translate a batch of lines via the chat API. Returns the translated lines, or
 /// the originals if the model's reply can't be parsed 1:1.
+///
+/// Callers that need to know whether the work actually happened must use
+/// [`try_translate_batch`]: returning the originals is indistinguishable
+/// from a translation into the same language, so a caller that caches the
+/// result would silently record a failure as done.
 pub(crate) fn translate_batch(
     client: &reqwest::blocking::Client,
     url: &str,
@@ -588,6 +593,20 @@ pub(crate) fn translate_batch(
     target_language: &str,
     lines: &[String],
 ) -> Vec<String> {
+    try_translate_batch(client, url, api_key, model, target_language, lines)
+        .unwrap_or_else(|| lines.to_vec())
+}
+
+/// Translate a batch, reporting failure instead of hiding it. `None` means
+/// the request failed or the reply did not line up 1:1 with the input.
+pub(crate) fn try_translate_batch(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    api_key: &str,
+    model: &str,
+    target_language: &str,
+    lines: &[String],
+) -> Option<Vec<String>> {
     let system = format!(
         "You are a subtitle translator. Translate each string in the user's JSON \
 array into {target_language}. Return ONLY a JSON array of strings, the same \
@@ -609,7 +628,7 @@ No commentary, no markdown."
         payload["max_tokens"] = Value::from(4000);
     }
 
-    let parsed = (|| -> Option<Vec<String>> {
+    (|| -> Option<Vec<String>> {
         let resp = client
             .post(url)
             .header("authorization", format!("Bearer {api_key}"))
@@ -635,9 +654,7 @@ No commentary, no markdown."
         } else {
             None
         }
-    })();
-
-    parsed.unwrap_or_else(|| lines.to_vec())
+    })()
 }
 
 /// Translate one string with Sarvam's own /translate endpoint. `source_lang` is

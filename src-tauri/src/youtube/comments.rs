@@ -466,7 +466,7 @@ pub(crate) struct TranslatePayload {
 #[tauri::command]
 pub(crate) async fn youtube_translate_comments(
     payload: TranslatePayload,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<Option<String>>, String> {
     if payload.texts.is_empty() {
         return Ok(Vec::new());
     }
@@ -486,17 +486,51 @@ pub(crate) async fn youtube_translate_comments(
         );
         let mut translated = Vec::with_capacity(payload.texts.len());
         for chunk in payload.texts.chunks(TRANSLATE_BATCH) {
-            translated.extend(crate::ai_subtitles::translate_batch(
+            translate_chunk(
                 &client,
                 &url,
                 &payload.chat_key,
                 &payload.chat_model,
                 &payload.target_language,
                 chunk,
-            ));
+                &mut translated,
+            );
         }
         Ok(translated)
     })
     .await
     .map_err(|error| format!("Translation worker failed: {error}"))?
+}
+
+/// Translates one chunk, appending a `None` for anything that failed so the
+/// caller can retry it rather than caching the original text as a result.
+///
+/// A whole chunk fails together when the model's reply is truncated or
+/// miscounted, which long comments make likely — so a failure is halved and
+/// retried before giving up, down to individual comments.
+fn translate_chunk(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    key: &str,
+    model: &str,
+    target_language: &str,
+    chunk: &[String],
+    out: &mut Vec<Option<String>>,
+) {
+    if chunk.is_empty() {
+        return;
+    }
+    if let Some(translated) =
+        crate::ai_subtitles::try_translate_batch(client, url, key, model, target_language, chunk)
+    {
+        out.extend(translated.into_iter().map(Some));
+        return;
+    }
+    if chunk.len() == 1 {
+        out.push(None);
+        return;
+    }
+    let middle = chunk.len() / 2;
+    translate_chunk(client, url, key, model, target_language, &chunk[..middle], out);
+    translate_chunk(client, url, key, model, target_language, &chunk[middle..], out);
 }

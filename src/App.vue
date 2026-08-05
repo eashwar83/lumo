@@ -2045,6 +2045,15 @@ const commentTranslateLanguage = computed(
 const commentAi = useCommentTranslateAi();
 
 const isExportingComments = ref(false);
+/** The last export, offered as a "Show in folder" action in the drawer. */
+const exportedPath = ref("");
+
+const onRevealExport = () => {
+    if (!exportedPath.value) return;
+    void invoke("youtube_export_reveal", { path: exportedPath.value }).catch(
+        (error) => showMessageOverlay(String(error).slice(0, 200), 4200),
+    );
+};
 
 /** Saves the comments (with any translations) as a PDF. */
 const onExportComments = async (onlySelected: boolean) => {
@@ -2086,11 +2095,14 @@ const onExportComments = async (onlySelected: boolean) => {
                 })),
             },
         });
+        // Reveal rather than open: a broken .pdf association is common
+        // and would make a successful export look like a failure.
+        exportedPath.value = written;
         showMessageOverlay(
             written.toLowerCase().endsWith(".html")
                 ? `Edge wasn't found, so the comments were saved as HTML: ${written}`
-                : `Saved ${scope.length} comments to ${written}`,
-            6000,
+                : `Saved ${scope.length} comments — click Show in folder`,
+            8000,
         );
     } catch (error) {
         showMessageOverlay(
@@ -2731,6 +2743,7 @@ useAppStartupBindings({
             :crawl-loaded="ytWatch.crawlLoaded.value"
             :crawl-stopped="ytWatch.crawlStopped.value"
             :is-exporting="isExportingComments"
+            :exported-path="exportedPath"
             @close="ytWatch.isDrawerOpen.value = false"
             @set-tab="ytWatch.activeTab.value = $event"
             @set-autoplay="ytWatch.setAutoplayNext"
@@ -2753,6 +2766,7 @@ useAppStartupBindings({
             @search-all="ytWatch.searchAllComments"
             @stop-search="ytWatch.stopSearchingAll"
             @export-comments="onExportComments"
+            @reveal-export="onRevealExport"
         />
 
         <MainPanels

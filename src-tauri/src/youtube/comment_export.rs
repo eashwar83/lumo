@@ -55,7 +55,10 @@ pub(crate) struct ExportPayload {
 /// Writes the comments to `destination` as a PDF and returns the path
 /// actually written — which is the .html fallback when Edge is missing.
 #[tauri::command]
-pub(crate) async fn youtube_export_comments(payload: ExportPayload) -> Result<String, String> {
+pub(crate) async fn youtube_export_comments(
+    app: tauri::AppHandle,
+    payload: ExportPayload,
+) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         if payload.comments.is_empty() {
             return Err("There are no comments to export".to_string());
@@ -70,34 +73,122 @@ pub(crate) async fn youtube_export_comments(payload: ExportPayload) -> Result<St
             return Ok(fallback.to_string_lossy().into_owned());
         };
 
-        // Edge reads the page from disk; a temp file next to the target
-        // keeps any relative path handling predictable.
-        let source = destination.with_extension("export.html");
+        // Staged in our own cache rather than beside the target: the
+        // destination folder may be watched or synced, and the name we
+        // control cannot collide with the user's files.
+        let staging = staging_dir(&app)?;
+        let source = staging.join("comments.html");
         std::fs::write(&source, &html)
             .map_err(|error| format!("Couldn't stage the export: {error}"))?;
 
-        let result = print_pdf(&edge, &source, &destination);
-        let _ = std::fs::remove_file(&source);
-        result?;
+        // Deliberately not cleaned up here. Edge can return before it has
+        // finished reading the page, and deleting it out from under the
+        // browser is what silently produced a PDF of Chromium's
+        // "File not found" page. The next export clears the directory.
+        print_pdf(&edge, &staging, &source, &destination)?;
 
         if !destination.is_file() {
             return Err("Edge did not produce a PDF".to_string());
         }
+        verify_pdf(&destination)?;
         Ok(destination.to_string_lossy().into_owned())
     })
     .await
     .map_err(|error| format!("Export worker failed: {error}"))?
 }
 
-fn print_pdf(edge: &Path, source: &Path, destination: &Path) -> Result<(), String> {
-    let url = format!("file:///{}", source.to_string_lossy().replace('\\', "/"));
+/// Catches the failure mode where Edge printed something other than our
+/// page. Chromium records the document title in the PDF, falling back to
+/// the URL when the page did not load — so a `file:` title means the
+/// export is an error page, however valid the PDF itself looks.
+fn verify_pdf(destination: &Path) -> Result<(), String> {
+    let Ok(bytes) = std::fs::read(destination) else {
+        return Ok(());
+    };
+    let head = String::from_utf8_lossy(&bytes[..bytes.len().min(4096)]);
+    let Some(start) = head.find("/Title") else {
+        return Ok(());
+    };
+    let title: String = head[start..].chars().take(200).collect();
+    if title.contains("file:///") {
+        let _ = std::fs::remove_file(destination);
+        return Err(
+            "The PDF came out as a browser error page, so it was discarded. \
+             Please try the export again."
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+/// Reveals an exported file in the file manager. The system may have no
+/// working PDF association — showing the folder always works.
+#[tauri::command]
+pub(crate) fn youtube_export_reveal(path: String) -> Result<(), String> {
+    let path = PathBuf::from(path);
+    let folder = path
+        .parent()
+        .ok_or_else(|| "That file has no folder".to_string())?;
+    crate::commands::persistence::open_directory(folder)
+}
+
+/// A fresh directory for this export's page and Edge profile.
+fn staging_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    use tauri::Manager;
+    let base = app
+        .path()
+        .app_cache_dir()
+        .map_err(|error| format!("Cache dir unavailable: {error}"))?
+        .join("comment_export");
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(&base)
+        .map_err(|error| format!("Cache dir create failed: {error}"))?;
+    Ok(base)
+}
+
+/// Percent-encodes the parts of a path that a file URL cannot carry raw.
+fn file_url(path: &Path) -> String {
+    let mut url = String::from("file:///");
+    for character in path.to_string_lossy().chars() {
+        match character {
+            '\\' | '/' => url.push('/'),
+            ':' | '-' | '_' | '.' | '~' => url.push(character),
+            c if c.is_ascii_alphanumeric() => url.push(c),
+            c => {
+                let mut buffer = [0u8; 4];
+                for byte in c.encode_utf8(&mut buffer).as_bytes() {
+                    url.push_str(&format!("%{byte:02X}"));
+                }
+            }
+        }
+    }
+    url
+}
+
+fn print_pdf(
+    edge: &Path,
+    staging: &Path,
+    source: &Path,
+    destination: &Path,
+) -> Result<(), String> {
     let mut command = quiet_command(edge);
     let output = command
         .arg("--headless")
         .arg("--disable-gpu")
+        // Without a private profile Edge's headless mode honours the
+        // browser singleton: when Edge is already running our process
+        // hands the command line over and exits at once, so we tear the
+        // page down while the real browser is still loading it and the
+        // PDF ends up containing "ERR_FILE_NOT_FOUND".
+        .arg(format!(
+            "--user-data-dir={}",
+            staging.join("profile").to_string_lossy()
+        ))
+        .arg("--no-first-run")
+        .arg("--no-default-browser-check")
         .arg("--no-pdf-header-footer")
         .arg(format!("--print-to-pdf={}", destination.to_string_lossy()))
-        .arg(url)
+        .arg(file_url(source))
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .output()
