@@ -466,7 +466,7 @@ pub(crate) fn rewrite_stream_url_with_headers(
     url: &str,
     headers: &[(String, String)],
 ) -> Option<String> {
-    if !is_http_url(url) {
+    if !is_http_url(url) || is_own_proxy_url(url) {
         return None;
     }
     register_headers(url, headers);
@@ -534,7 +534,7 @@ pub(crate) fn start(app_handle: AppHandle) -> Result<(), String> {
 }
 
 pub(crate) fn rewrite_https_stream_url(url: &str) -> Option<String> {
-    if !is_https_url(url) {
+    if !is_https_url(url) || is_own_proxy_url(url) {
         return None;
     }
     let proxied = proxy_url_for(url)?;
@@ -543,12 +543,23 @@ pub(crate) fn rewrite_https_stream_url(url: &str) -> Option<String> {
 }
 
 pub(crate) fn rewrite_http_stream_url(url: &str) -> Option<String> {
-    if !is_http_url(url) {
+    if !is_http_url(url) || is_own_proxy_url(url) {
         return None;
     }
     let proxied = proxy_url_for(url)?;
     info!("stream proxy: rewrote HTTP stream url={}", redact_url(url));
     Some(proxied)
+}
+
+/// Whether this URL already points back at us. Proxying our own proxy
+/// URL puts a second hop in front of every request, and because each hop
+/// rewrites the playlist it serves, the segment URLs come back wrapped
+/// twice — which is how playback ended up opening
+/// `/stream?url=http://127.0.0.1:PORT/stream%3Furl%3Dhttps://…`.
+fn is_own_proxy_url(url: &str) -> bool {
+    STREAM_PROXY_BASE_URL
+        .get()
+        .is_some_and(|base| url.starts_with(base.as_str()))
 }
 
 pub(crate) fn rewrite_smb_stream_url(url: &str) -> Option<String> {
@@ -1297,6 +1308,11 @@ fn rewrite_playlist_url(
     } else {
         base?.join(value).ok()?
     };
+    // Already ours — a playlist served through two hops would otherwise
+    // have its lines wrapped a second time.
+    if is_own_proxy_url(resolved.as_str()) {
+        return None;
+    }
     if let Some(headers) = inherited_headers {
         // By host, not by URL: these URLs are single-use.
         register_host_headers(resolved.as_str(), headers);
@@ -1804,5 +1820,29 @@ mod segment_url_tests {
             parse_remote_url(&format!("/stream?url={encoded}")).as_deref(),
             Some(original)
         );
+    }
+}
+
+#[cfg(test)]
+mod self_proxy_tests {
+    use super::*;
+
+    #[test]
+    fn declines_to_proxy_its_own_urls() {
+        // One test owns the OnceLock so ordering cannot matter.
+        let _ = STREAM_PROXY_BASE_URL.set("http://127.0.0.1:3243".to_string());
+
+        assert!(is_own_proxy_url("http://127.0.0.1:3243/stream/abc"));
+        assert!(is_own_proxy_url("http://127.0.0.1:3243/stream?url=https://host/a.ts"));
+        assert!(!is_own_proxy_url("https://rr4---sn-x.googlevideo.com/videoplayback"));
+
+        // The rewrite entry points must pass an already-proxied URL through
+        // untouched rather than wrapping it a second time.
+        assert_eq!(rewrite_http_stream_url("http://127.0.0.1:3243/stream/abc"), None);
+        assert_eq!(
+            rewrite_stream_url_with_headers("http://127.0.0.1:3243/stream/abc", &[]),
+            None
+        );
+        assert!(rewrite_https_stream_url("https://host/video.m3u8").is_some());
     }
 }
