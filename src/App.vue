@@ -2077,30 +2077,33 @@ const onExportComments = async (onlySelected: boolean) => {
 
     isExportingComments.value = true;
     try {
-        const written = await invoke<string>("youtube_export_comments", {
-            payload: {
-                title,
-                videoUrl: player.state.media.url,
-                destination,
-                subtitle: onlySelected
-                    ? `${scope.length} selected comments`
-                    : `${scope.length} comments`,
-                comments: scope.map((comment) => ({
-                    author: comment.author,
-                    text: comment.text,
-                    translated: comment.translated ?? null,
-                    publishedText: comment.publishedText ?? null,
-                    likeCountText: comment.likeCountText ?? null,
-                    isReply: !topLevel.has(comment.id),
-                })),
+        const result = await invoke<{ path: string; warning: string | null }>(
+            "youtube_export_comments",
+            {
+                payload: {
+                    title,
+                    videoUrl: player.state.media.url,
+                    destination,
+                    subtitle: onlySelected
+                        ? `${scope.length} selected comments`
+                        : `${scope.length} comments`,
+                    comments: scope.map((comment) => ({
+                        author: comment.author,
+                        text: comment.text,
+                        translated: comment.translated ?? null,
+                        publishedText: comment.publishedText ?? null,
+                        likeCountText: comment.likeCountText ?? null,
+                        isReply: !topLevel.has(comment.id),
+                    })),
+                },
             },
-        });
+        );
         // Reveal rather than open: a broken .pdf association is common
         // and would make a successful export look like a failure.
-        exportedPath.value = written;
+        exportedPath.value = result.path;
         showMessageOverlay(
-            written.toLowerCase().endsWith(".html")
-                ? `Edge wasn't found, so the comments were saved as HTML: ${written}`
+            result.warning
+                ? `${result.warning} Saved anyway — click Show in folder.`
                 : `Saved ${scope.length} comments — click Show in folder`,
             8000,
         );

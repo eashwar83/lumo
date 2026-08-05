@@ -40,6 +40,14 @@ pub(crate) struct ExportComment {
     pub(crate) is_reply: bool,
 }
 
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ExportResult {
+    pub(crate) path: String,
+    /// Set when the file was written but looks wrong.
+    pub(crate) warning: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ExportPayload {
@@ -58,7 +66,7 @@ pub(crate) struct ExportPayload {
 pub(crate) async fn youtube_export_comments(
     app: tauri::AppHandle,
     payload: ExportPayload,
-) -> Result<String, String> {
+) -> Result<ExportResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
         if payload.comments.is_empty() {
             return Err("There are no comments to export".to_string());
@@ -70,7 +78,12 @@ pub(crate) async fn youtube_export_comments(
             let fallback = destination.with_extension("html");
             std::fs::write(&fallback, &html)
                 .map_err(|error| format!("Couldn't write the export: {error}"))?;
-            return Ok(fallback.to_string_lossy().into_owned());
+            return Ok(ExportResult {
+                path: fallback.to_string_lossy().into_owned(),
+                warning: Some(
+                    "Edge wasn't found, so the comments were saved as HTML.".to_string(),
+                ),
+            });
         };
 
         // Staged in our own cache rather than beside the target: the
@@ -90,35 +103,37 @@ pub(crate) async fn youtube_export_comments(
         if !destination.is_file() {
             return Err("Edge did not produce a PDF".to_string());
         }
-        verify_pdf(&destination)?;
-        Ok(destination.to_string_lossy().into_owned())
+        // The file is kept either way; a suspicion is reported alongside
+        // it rather than standing in for the result.
+        Ok(ExportResult {
+            path: destination.to_string_lossy().into_owned(),
+            warning: verify_pdf(&destination),
+        })
     })
     .await
     .map_err(|error| format!("Export worker failed: {error}"))?
 }
 
 /// Catches the failure mode where Edge printed something other than our
-/// page. Chromium records the document title in the PDF, falling back to
-/// the URL when the page did not load — so a `file:` title means the
-/// export is an error page, however valid the PDF itself looks.
-fn verify_pdf(destination: &Path) -> Result<(), String> {
-    let Ok(bytes) = std::fs::read(destination) else {
-        return Ok(());
-    };
-    let head = String::from_utf8_lossy(&bytes[..bytes.len().min(4096)]);
-    let Some(start) = head.find("/Title") else {
-        return Ok(());
-    };
-    let title: String = head[start..].chars().take(200).collect();
-    if title.contains("file:///") {
-        let _ = std::fs::remove_file(destination);
-        return Err(
-            "The PDF came out as a browser error page, so it was discarded. \
-             Please try the export again."
-                .to_string(),
-        );
-    }
-    Ok(())
+/// page: Chromium falls back to the URL for the document title when a page
+/// does not load, so a title of `file://…` means an error page.
+///
+/// Never deletes anything. An earlier version searched a rough window of
+/// the file's head and removed the PDF on a match, which destroyed a good
+/// export when the read raced the browser's write and picked up the
+/// previous file's bytes. A warning that turns out to be wrong costs
+/// nothing; deleting the user's export costs them the work.
+fn verify_pdf(destination: &Path) -> Option<String> {
+    let bytes = std::fs::read(destination).ok()?;
+    let head = String::from_utf8_lossy(&bytes[..bytes.len().min(8192)]);
+    // Read the exact title value rather than scanning nearby text.
+    let start = head.find("/Title")? + "/Title".len();
+    let rest = head[start..].trim_start();
+    let title = rest.strip_prefix('(')?;
+    let end = title.find(')')?;
+    title[..end]
+        .starts_with("file://")
+        .then(|| "That PDF looks like a browser error page rather than the comments.".to_string())
 }
 
 /// Reveals an exported file in the file manager. The system may have no
