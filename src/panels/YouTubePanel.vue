@@ -74,6 +74,20 @@ const onToggleSaveSearch = () => {
     emit("notify", nowSaved ? "Search saved" : "Search removed");
 };
 
+/** Only worth showing once there is something to clear. */
+const canClearSearch = computed(
+    () =>
+        yt.query.value.trim().length > 0 ||
+        yt.hasSearched.value ||
+        yt.items.value.length > 0,
+);
+
+const onClearSearch = () => {
+    closeHistory();
+    yt.clearSearch();
+    searchInputRef.value?.focus();
+};
+
 const onRunStoredSearch = (entry: {
     query: string;
     filters: typeof yt.filters;
@@ -759,6 +773,17 @@ const statusLabel = (item: {
                     "
                 >
                     HD
+                </button>
+                <!-- Sits at the end of the chip row so it lines up under
+                     the Search button without making the panel taller. -->
+                <button
+                    v-if="canClearSearch"
+                    class="yt-search__clear"
+                    type="button"
+                    title="Clear the query, results and filters"
+                    @click="onClearSearch"
+                >
+                    Clear
                 </button>
             </div>
 

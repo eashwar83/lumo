@@ -208,6 +208,17 @@ export const useYouTubeModule = (
         await runSearch(null);
     };
 
+    /** Empties the search back to a fresh panel, filters included. */
+    const clearSearch = () => {
+        query.value = "";
+        submittedQuery.value = "";
+        hasSearched.value = false;
+        items.value = [];
+        nextCursor.value = null;
+        error.value = "";
+        Object.assign(filters, defaultFilters());
+    };
+
     /** Restores a stored search (query + filters) and runs it. */
     const applyStoredSearch = async (
         storedQuery: string,
@@ -467,6 +478,7 @@ export const useYouTubeModule = (
         hasSearched,
         search,
         applyStoredSearch,
+        clearSearch,
         loadMore,
         applyFilters,
         browseView,
