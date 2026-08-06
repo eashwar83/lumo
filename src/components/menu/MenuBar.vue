@@ -31,6 +31,8 @@ const rootRef = ref<HTMLElement | null>(null);
 const OVERFLOW_INDEX = -2;
 const titlesRef = ref<HTMLElement | null>(null);
 const visibleCount = ref(props.menus.length);
+/** Right padding that pulls the title's box back onto the window centre. */
+const titleOffset = ref(0);
 /** Widths of the full title row, measured once while everything fits. */
 let titleWidths: number[] = [];
 
@@ -73,7 +75,27 @@ const fitTitles = () => {
     // Showing one menu plus » is no better than showing none, and an empty
     // bar is confusing; keep at least one.
     visibleCount.value = Math.max(1, Math.min(count, props.menus.length));
+
+    // The title sits in the gap between the menus and the window buttons,
+    // which is off to the right of the window's centre. Padding that gap
+    // on its right by the difference would centre it exactly — but the
+    // menus are wide, so exact centring leaves the title only
+    // `width - 2 * menus` to live in, which at ordinary window sizes is a
+    // few characters. So shift it as far towards the centre as it can
+    // afford: fully centred on a wide window, and progressively less so
+    // rather than squeezed unreadable on a narrow one.
+    const menusWidth =
+        titleWidths.slice(0, visibleCount.value).reduce((sum, w) => sum + w, 0) +
+        (visibleCount.value < props.menus.length ? OVERFLOW_BUTTON_WIDTH : 0) +
+        8;
+    const gap = root.clientWidth - menusWidth - controlsWidth;
+    const toCentre = menusWidth - controlsWidth;
+    const affordable = gap - TITLE_COMFORTABLE_WIDTH;
+    titleOffset.value = Math.max(0, Math.round(Math.min(toCentre, affordable)));
 };
+
+/** Room the title keeps for itself before it stops chasing the centre. */
+const TITLE_COMFORTABLE_WIDTH = 280;
 
 const OVERFLOW_BUTTON_WIDTH = 34;
 
@@ -214,10 +236,16 @@ defineExpose({ close });
 
         <!-- Pushes the window buttons to the far right of the bar, and
              carries the title the way a native title bar would. -->
-        <div class="menu-bar__spacer">
-            <span v-if="props.title" class="menu-bar__media-title">{{
-                props.title
-            }}</span>
+        <div
+            class="menu-bar__spacer"
+            :style="{ paddingRight: `${titleOffset}px` }"
+        >
+            <span
+                v-if="props.title"
+                class="menu-bar__media-title"
+                :title="props.title"
+                >{{ props.title }}</span
+            >
         </div>
         <WindowControls v-if="props.showWindowControls" />
     </div>
@@ -262,6 +290,7 @@ defineExpose({ close });
     align-items: center;
     justify-content: center;
     overflow: hidden;
+    box-sizing: border-box;
 }
 
 .menu-bar__titles {
@@ -271,16 +300,20 @@ defineExpose({ close });
     flex: none;
 }
 
-/* The title is decoration, not a control: it must never win space from
-   the menus, and it disappears rather than squeezing them. */
+/* Centred on the window, not on the gap left over beside the menus —
+   centring within the gap lands it around 62% across, close enough to
+   the middle to read as a mistake rather than a decision.
+   It is decoration, so it never takes space from the menus: it is out of
+   flow, ignores pointer events, and is hidden outright when the room
+   between the menus and the window buttons gets too tight. */
 .menu-bar__media-title {
     max-width: 100%;
     padding: 0 12px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: rgba(255, 255, 255, 0.62);
-    font-size: 12px;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 12.5px;
     pointer-events: none;
 }
 
