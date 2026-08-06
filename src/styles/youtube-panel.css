@@ -74,11 +74,13 @@
 
 .yt-search__input {
     width: 100%;
+    box-sizing: border-box;
     background: var(--yt-card);
     border: 1px solid var(--yt-border);
     border-radius: 10px;
     color: var(--yt-text);
-    padding: 9px 12px;
+    /* Right side leaves room for the save star that sits over the field. */
+    padding: 9px 40px 9px 12px;
     font-size: 13.5px;
     outline: none;
     transition: border-color 0.15s ease;
@@ -615,22 +617,29 @@
 
 /* --- Saved / recent searches -------------------------------------------------- */
 
+/* Sits inside the field rather than beside it. As a flex sibling it was
+   free to be squashed by the growing input, which clipped the icon; a
+   positioned overlay has a size of its own that nothing can compete for. */
 .yt-search__save {
-    border: 1px solid var(--yt-border);
-    background: var(--yt-card);
+    position: absolute;
+    top: 50%;
+    right: 6px;
+    transform: translateY(-50%);
+    width: 28px;
+    height: 28px;
+    box-sizing: border-box;
+    padding: 0;
+    border: none;
+    background: transparent;
     color: var(--yt-text-faint);
-    border-radius: 10px;
-    /* Without this the button shrinks as the field grows and the star
-       spills out over the input's edge. */
-    flex: none;
-    width: 38px;
+    border-radius: 8px;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
     transition:
         color 0.15s ease,
-        border-color 0.15s ease;
+        background-color 0.15s ease;
 }
 
 .yt-search__save svg {
@@ -640,12 +649,11 @@
 
 .yt-search__save:hover:not(:disabled) {
     color: var(--yt-accent);
-    border-color: var(--yt-border-hover);
+    background: rgba(255, 255, 255, 0.07);
 }
 
 .yt-search__save--on {
     color: var(--yt-accent);
-    border-color: var(--yt-accent);
 }
 
 .yt-search__save:disabled {

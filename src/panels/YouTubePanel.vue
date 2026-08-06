@@ -674,29 +674,29 @@ const statusLabel = (item: {
                             Clear search history
                         </button>
                     </div>
-                </div>
-                <button
-                    class="yt-search__save"
-                    :class="{ 'yt-search__save--on': isCurrentSearchSaved }"
-                    type="button"
-                    :title="
-                        isCurrentSearchSaved
-                            ? 'Remove saved search'
-                            : 'Save this search (with filters)'
-                    "
-                    :disabled="!yt.query.value.trim()"
-                    @click="onToggleSaveSearch"
-                >
-                    <svg
-                        viewBox="0 0 24 24"
-                        :fill="isCurrentSearchSaved ? 'currentColor' : 'none'"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linejoin="round"
+                    <button
+                        class="yt-search__save"
+                        :class="{ 'yt-search__save--on': isCurrentSearchSaved }"
+                        type="button"
+                        :title="
+                            isCurrentSearchSaved
+                                ? 'Remove saved search'
+                                : 'Save this search (with filters)'
+                        "
+                        :disabled="!yt.query.value.trim()"
+                        @click="onToggleSaveSearch"
                     >
-                        <path d="m12 3 2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.8 6.2 20.9l1.1-6.5L2.6 9.8l6.5-.9z" />
-                    </svg>
-                </button>
+                        <svg
+                            viewBox="0 0 24 24"
+                            :fill="isCurrentSearchSaved ? 'currentColor' : 'none'"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linejoin="round"
+                        >
+                            <path d="m12 3 2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.8 6.2 20.9l1.1-6.5L2.6 9.8l6.5-.9z" />
+                        </svg>
+                    </button>
+                </div>
                 <button
                     class="yt-search__btn"
                     type="submit"
