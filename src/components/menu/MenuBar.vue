@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from "vue";
-import type { MenuTopLevel } from "../../types/menu";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import type { MenuNode, MenuTopLevel } from "../../types/menu";
 import MenuList from "./MenuList.vue";
 import WindowControls from "../WindowControls.vue";
 
@@ -15,12 +15,67 @@ const props = defineProps<{
      * when the window is in compact mode, where the OS doesn't draw them.
      */
     showWindowControls?: boolean;
+    /** Shown in the middle of the bar, the way a title bar would. */
+    title?: string;
 }>();
 
 const emit = defineEmits<{ (e: "open"): void }>();
 
 const openIndex = ref<number | null>(null);
 const rootRef = ref<HTMLElement | null>(null);
+
+// --- overflow ---------------------------------------------------------
+// A narrow window used to clip the last menus and push the window buttons
+// off the edge entirely. Titles that no longer fit move into a » popup,
+// so every menu stays reachable at any width.
+const OVERFLOW_INDEX = -2;
+const titlesRef = ref<HTMLElement | null>(null);
+const visibleCount = ref(props.menus.length);
+/** Widths of the full title row, measured once while everything fits. */
+let titleWidths: number[] = [];
+
+const hiddenMenus = computed(() => props.menus.slice(visibleCount.value));
+const shownMenus = computed(() => props.menus.slice(0, visibleCount.value));
+
+/** The hidden menus as submenu nodes, for the » popup. */
+const overflowItems = computed<MenuNode[]>(() =>
+    hiddenMenus.value.map((menu) => ({
+        kind: "submenu",
+        label: menu.label,
+        children: menu.children,
+    })),
+);
+
+const measureTitles = () => {
+    const row = titlesRef.value;
+    if (!row) return;
+    titleWidths = Array.from(row.children).map(
+        (child) => (child as HTMLElement).offsetWidth,
+    );
+};
+
+const fitTitles = () => {
+    const root = rootRef.value;
+    if (!root || !titleWidths.length) return;
+    // What the row may occupy: everything except the window buttons and a
+    // little breathing room for the title.
+    const controls = root.querySelector("[data-window-controls]");
+    const controlsWidth = (controls as HTMLElement | null)?.offsetWidth ?? 0;
+    const available = root.clientWidth - controlsWidth - OVERFLOW_BUTTON_WIDTH - 16;
+
+    let used = 0;
+    let count = 0;
+    for (const width of titleWidths) {
+        if (used + width > available) break;
+        used += width;
+        count += 1;
+    }
+    // Showing one menu plus » is no better than showing none, and an empty
+    // bar is confusing; keep at least one.
+    visibleCount.value = Math.max(1, Math.min(count, props.menus.length));
+};
+
+const OVERFLOW_BUTTON_WIDTH = 34;
 
 const close = () => {
     openIndex.value = null;
@@ -61,22 +116,42 @@ const onDocumentKeydown = (event: KeyboardEvent) => {
     close();
 };
 
+// Measuring needs every title laid out, so show them all for one frame,
+// record their widths, then decide how many survive.
+const remeasure = async () => {
+    visibleCount.value = props.menus.length;
+    await nextTick();
+    measureTitles();
+    fitTitles();
+};
+
+let resizeObserver: ResizeObserver | null = null;
+
 // Capture phase: the app-level Escape handler listens on window, so we have to
 // get there first to keep Escape scoped to the open menu.
 onMounted(() => {
     window.addEventListener("pointerdown", onDocumentPointerDown, true);
     window.addEventListener("keydown", onDocumentKeydown, true);
+    void remeasure();
+    if (rootRef.value && typeof ResizeObserver !== "undefined") {
+        resizeObserver = new ResizeObserver(() => fitTitles());
+        resizeObserver.observe(rootRef.value);
+    }
 });
 
 onBeforeUnmount(() => {
     window.removeEventListener("pointerdown", onDocumentPointerDown, true);
     window.removeEventListener("keydown", onDocumentKeydown, true);
+    resizeObserver?.disconnect();
 });
 
 // A menu left open while the window changes shape would float detached.
 watch(
     () => props.menus.length,
-    () => close(),
+    () => {
+        close();
+        void remeasure();
+    },
 );
 
 defineExpose({ close });
@@ -88,32 +163,62 @@ defineExpose({ close });
         class="menu-bar"
         role="menubar"
     >
-        <div
-            v-for="(menu, index) in props.menus"
-            :key="menu.label"
-            class="menu-bar__item"
-        >
+        <div ref="titlesRef" class="menu-bar__titles">
+            <div
+                v-for="(menu, index) in shownMenus"
+                :key="menu.label"
+                class="menu-bar__item"
+            >
+                <button
+                    class="menu-bar__title"
+                    :class="{ 'menu-bar__title--open': openIndex === index }"
+                    type="button"
+                    role="menuitem"
+                    :aria-expanded="openIndex === index"
+                    aria-haspopup="true"
+                    @click.stop="onTitleClick(index)"
+                    @mouseenter="onTitleEnter(index)"
+                >
+                    {{ menu.label }}
+                </button>
+                <MenuList
+                    v-if="openIndex === index"
+                    :items="menu.children"
+                    @close="close"
+                />
+            </div>
+        </div>
+
+        <div v-if="hiddenMenus.length" class="menu-bar__item">
             <button
-                class="menu-bar__title"
-                :class="{ 'menu-bar__title--open': openIndex === index }"
+                class="menu-bar__title menu-bar__overflow"
+                :class="{
+                    'menu-bar__title--open': openIndex === OVERFLOW_INDEX,
+                }"
                 type="button"
                 role="menuitem"
-                :aria-expanded="openIndex === index"
+                :title="`More menus: ${hiddenMenus.map((m) => m.label).join(', ')}`"
+                :aria-expanded="openIndex === OVERFLOW_INDEX"
                 aria-haspopup="true"
-                @click.stop="onTitleClick(index)"
-                @mouseenter="onTitleEnter(index)"
+                @click.stop="onTitleClick(OVERFLOW_INDEX)"
+                @mouseenter="onTitleEnter(OVERFLOW_INDEX)"
             >
-                {{ menu.label }}
+                »
             </button>
             <MenuList
-                v-if="openIndex === index"
-                :items="menu.children"
+                v-if="openIndex === OVERFLOW_INDEX"
+                :items="overflowItems"
                 @close="close"
             />
         </div>
 
-        <!-- Pushes the window buttons to the far right of the bar. -->
-        <div class="menu-bar__spacer"></div>
+        <!-- Pushes the window buttons to the far right of the bar, and
+             carries the title the way a native title bar would. -->
+        <div class="menu-bar__spacer">
+            <span v-if="props.title" class="menu-bar__media-title">{{
+                props.title
+            }}</span>
+        </div>
         <WindowControls v-if="props.showWindowControls" />
     </div>
 </template>
@@ -152,6 +257,37 @@ defineExpose({ close });
 .menu-bar__spacer {
     flex: 1;
     align-self: stretch;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.menu-bar__titles {
+    display: flex;
+    align-items: center;
+    gap: 1px;
+    flex: none;
+}
+
+/* The title is decoration, not a control: it must never win space from
+   the menus, and it disappears rather than squeezing them. */
+.menu-bar__media-title {
+    max-width: 100%;
+    padding: 0 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: rgba(255, 255, 255, 0.62);
+    font-size: 12px;
+    pointer-events: none;
+}
+
+.menu-bar__overflow {
+    font-size: 15px;
+    line-height: 1;
+    padding: 3px 9px;
 }
 
 .menu-bar__title {

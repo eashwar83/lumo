@@ -68,7 +68,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <div class="win-controls" data-window-no-drag>
+    <div class="win-controls" data-window-controls data-window-no-drag>
         <button
             class="win-controls__btn"
             type="button"

@@ -1942,6 +1942,19 @@ const isMenuBarShown = computed(() => {
     return ui.showControls.value;
 });
 
+/**
+ * What plays now, shown in the middle of the menu bar. mpv reports
+ * `media-title` — a file's embedded title where it has one, its name
+ * otherwise — and YouTube playback sets the video's title here too.
+ */
+const menuBarTitle = computed(() => {
+    if (!player.state.media.isFileLoaded) return "";
+    const title = player.state.media.title?.trim();
+    if (!title) return "";
+    // An embedded title keeps its own form; a filename loses the extension.
+    return title.replace(/\.[a-z0-9]{2,4}$/i, "");
+});
+
 const openExportFolder = async () => {
     try {
         await invoke("open_export_folder");
@@ -2637,6 +2650,7 @@ useAppStartupBindings({
                 v-show="isMenuBarShown"
                 :menus="appMenus"
                 :show-window-controls="playerHeaderCompactModeEnabled"
+                :title="menuBarTitle"
                 @open="() => void refreshClipExportAvailability()"
             />
         </transition>
