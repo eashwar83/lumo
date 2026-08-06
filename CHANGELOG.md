@@ -1,5 +1,66 @@
 # Changelog
 
+## [1.3.0] - 2026-08-06 — Lumo
+
+Headline release: YouTube is built into Lumo. Search it, play it, download
+it, read and translate its comments — without a browser.
+
+### YouTube
+
+- **Search and browse** — search with sort, duration, upload-date, type and
+  HD filters; open a channel or a playlist and browse it in place, with the
+  same sort options the website offers. Channel names are clickable.
+- **Play in Lumo** — results play directly in the player at your chosen
+  quality, with a per-video quality override. yt-dlp ships with the app, so
+  there is nothing to install.
+- **Up next, chapters and SponsorBlock** — related videos queue up and
+  auto-advance, chapters appear as scene markers on the seek bar, and
+  sponsor segments are skipped with an undo prompt. All in the **Extras**
+  drawer beside the player.
+- **Downloads** — a queue with progress, speed and ETA; pause, resume,
+  cancel and reorder. Choose quality, container, audio-only, subtitles,
+  thumbnails and chapters.
+- **Subtitles from YouTube** — pick any caption track the video offers,
+  straight from the Subtitle menu, with a filter box for the long language
+  list. Rate-limited fetches retry rather than fail.
+- **Comments** — read them in the drawer, sorted by Top or Newest, with
+  replies expandable inline. Search every comment, including the ones not
+  yet loaded. Export to PDF, all or selected, with original and translation
+  side by side.
+- **AI comment translation** — translate all comments or just the ones you
+  tick, with your own choice of provider and model, and a refresh button
+  that asks the provider what models it currently offers.
+- **Search history** — recent and saved searches live in the search box
+  itself, filtering as you type; saved searches remember their filters.
+- **Settings** — quality, autoplay, SponsorBlock categories, download
+  folder, concurrency, rate limit, and a cookies file for age-restricted
+  videos.
+
+### Subtitles and AI
+
+- **Subtitle sync** — Quick offset nudging plus Smart AI re-timing for
+  subtitles that drift.
+- **Describe A–B Clip (AI)** — a vision-model summary of the marked range.
+- **Default subtitle-AI engine** setting, and duplicate loaded tracks are
+  now de-duplicated.
+- AI subtitle jobs ride out provider rate limits with a countdown and
+  adaptive pacing instead of giving up.
+
+### Video
+
+- **Deblock filter** and a stronger **Old Film Restore** preset.
+
+### Fixes
+
+- Diagnostics: the app now writes its own log to
+  `logs/lumo.log`, beside mpv's. Playback failures report what actually
+  went wrong instead of a generic message.
+- Stream proxy: several faults found while making YouTube play — HLS
+  playlists exhausting the backend registry, a URL being proxied through
+  the proxy twice, oversized rewritten playlists, and a malformed
+  `206` response.
+- YouTube streams that die with a `403` are re-resolved automatically.
+
 ## [1.0.1] - 2026-07-23 — Lumo
 
 A large feature release focused on editing, navigation, audio, and a full
