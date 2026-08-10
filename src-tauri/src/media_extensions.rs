@@ -32,7 +32,9 @@ pub(crate) fn all() -> &'static [String] {
         .as_slice()
 }
 
-pub(crate) fn media_association_extensions() -> &'static [String] {
+/// Video and audio only. Doubles as the file-association set: Lumo is a video
+/// player, so it does not claim `.jpg` from the system image viewer.
+pub(crate) fn non_image_extensions() -> &'static [String] {
     MEDIA_ASSOCIATION_EXTENSIONS
         .get_or_init(|| {
             match serde_json::from_str::<Vec<MediaExtensionEntry>>(MEDIA_EXTENSIONS_JSON) {
@@ -51,10 +53,28 @@ pub(crate) fn media_association_extensions() -> &'static [String] {
         .as_slice()
 }
 
-pub(crate) fn contains_extension(extension: &str) -> bool {
+/// `include_images` mirrors the Include Images in Playlist setting: with it
+/// off, a folder's cover art is not something Previous/Next steps through.
+pub(crate) fn contains_extension_of_kind(extension: &str, include_images: bool) -> bool {
     let normalized = extension.trim().to_ascii_lowercase();
     if normalized.is_empty() {
         return false;
     }
-    all().iter().any(|candidate| candidate == &normalized)
+    let candidates = if include_images {
+        all()
+    } else {
+        non_image_extensions()
+    };
+    candidates.iter().any(|candidate| candidate == &normalized)
+}
+
+const PLAYLIST_INCLUDE_IMAGES_LABEL: &str = "PLAYLIST_INCLUDE_IMAGES";
+
+/// Defaults to false, which is also what an unreadable settings file gives:
+/// the video player's answer, not the file manager's.
+pub(crate) fn include_images_in_playlist(app: &tauri::AppHandle) -> bool {
+    crate::store::ui_state_store::load_setting_value(app, PLAYLIST_INCLUDE_IMAGES_LABEL)
+        .ok()
+        .flatten()
+        .is_some_and(|value| value.eq_ignore_ascii_case("on"))
 }

@@ -1,18 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import { MEDIA_FILE_EXTENSIONS } from "../constants/media";
-
-const mediaExtensionSet = new Set(
-    MEDIA_FILE_EXTENSIONS.map((item) => item.toLowerCase()),
-);
-
-const getFileName = (path: string): string => {
-    const normalized = path.split(/[?#]/, 1)[0] ?? path;
-    const slashIndex = Math.max(
-        normalized.lastIndexOf("/"),
-        normalized.lastIndexOf("\\"),
-    );
-    return slashIndex >= 0 ? normalized.slice(slashIndex + 1) : normalized;
-};
 
 export const normalizeLocalPathForCompare = (path: string): string => {
     const trimmed = path.trim();
@@ -25,16 +11,6 @@ export const normalizeLocalPathForCompare = (path: string): string => {
         return trimmed;
     }
 };
-
-const getLowerExt = (path: string): string => {
-    const fileName = getFileName(path);
-    const index = fileName.lastIndexOf(".");
-    if (index < 0) return "";
-    return fileName.slice(index + 1).toLowerCase();
-};
-
-export const isMediaFilePath = (path: string): boolean =>
-    mediaExtensionSet.has(getLowerExt(path));
 
 export const listLocalSiblingFiles = async (
     currentPath: string,

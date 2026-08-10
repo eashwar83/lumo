@@ -12,13 +12,20 @@ pub(crate) fn set_native_pip_enabled(app: tauri::AppHandle, enabled: bool) -> Re
 }
 
 pub(crate) fn is_supported_media_file(path: &Path) -> bool {
+    is_supported_media_file_of_kind(path, true)
+}
+
+fn is_supported_media_file_of_kind(path: &Path, include_images: bool) -> bool {
     let Some(extension) = path.extension().and_then(|ext| ext.to_str()) else {
         return false;
     };
-    crate::media_extensions::contains_extension(extension)
+    crate::media_extensions::contains_extension_of_kind(extension, include_images)
 }
 
-fn expand_media_paths(paths: Vec<String>) -> Vec<String> {
+/// Folders picked here become playlists, so they follow the playlist's rules:
+/// a file named outright is taken as asked for, but a folder's contents are
+/// filtered the way an auto-loaded folder would be.
+fn expand_media_paths(paths: Vec<String>, include_images: bool) -> Vec<String> {
     let mut stack: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
     let mut expanded = BTreeSet::new();
 
@@ -47,7 +54,9 @@ fn expand_media_paths(paths: Vec<String>) -> Vec<String> {
                 stack.push(entry_path);
                 continue;
             }
-            if file_type.is_file() && is_supported_media_file(&entry_path) {
+            if file_type.is_file()
+                && is_supported_media_file_of_kind(&entry_path, include_images)
+            {
                 expanded.insert(entry_path.to_string_lossy().into_owned());
             }
         }
@@ -58,8 +67,9 @@ fn expand_media_paths(paths: Vec<String>) -> Vec<String> {
 
 #[tauri::command]
 pub(crate) fn pick_media_paths_native(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let include_images = crate::media_extensions::include_images_in_playlist(&app);
     let selected = crate::platform::pick_media_paths_native(app)?;
-    Ok(expand_media_paths(selected))
+    Ok(expand_media_paths(selected, include_images))
 }
 
 #[tauri::command]

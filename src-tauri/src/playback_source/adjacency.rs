@@ -19,20 +19,21 @@ pub(crate) struct AdjacentPlaybackSourceResult {
     playback_key: String,
 }
 
-fn is_media_path(path: &str) -> bool {
-    crate::media_extensions::contains_extension(&path_extension(path))
+fn is_media_path(path: &str, include_images: bool) -> bool {
+    crate::media_extensions::contains_extension_of_kind(&path_extension(path), include_images)
 }
 
 fn sorted_file_entries(
     entries: Vec<crate::network::types::NetworkBrowseEntry>,
     protocol: crate::network::service::BrowseProtocol,
+    include_images: bool,
 ) -> Vec<crate::network::types::NetworkBrowseEntry> {
     let mut files = entries
         .into_iter()
         .filter(|entry| {
             entry.entry_type == "file"
                 && (protocol == crate::network::service::BrowseProtocol::Dlna
-                    || is_media_path(&entry.path))
+                    || is_media_path(&entry.path, include_images))
         })
         .collect::<Vec<_>>();
     files.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
@@ -51,9 +52,11 @@ fn normalize_dlna_object_id(value: &str) -> String {
     value.trim().trim_start_matches('/').to_string()
 }
 
-fn resolve_adjacent_local(path: &str, direction: i32) -> Option<String> {
+fn resolve_adjacent_local(path: &str, direction: i32, include_images: bool) -> Option<String> {
     let local_path = resolve_local_media_path(path)?;
-    if !local_path.is_file() || !is_media_path(&local_path.to_string_lossy()) {
+    // The file playing may itself be an image the user opened deliberately;
+    // stepping off it still follows the playlist's rules.
+    if !local_path.is_file() || !is_media_path(&local_path.to_string_lossy(), true) {
         return None;
     }
     let parent = local_path.parent()?;
@@ -61,7 +64,11 @@ fn resolve_adjacent_local(path: &str, direction: i32) -> Option<String> {
         .ok()?
         .filter_map(Result::ok)
         .map(|entry| entry.path())
-        .filter(|entry_path| entry_path.is_file() && is_media_path(&entry_path.to_string_lossy()))
+        .filter(|entry_path| {
+            entry_path.is_file()
+                && (entry_path == &local_path
+                    || is_media_path(&entry_path.to_string_lossy(), include_images))
+        })
         .collect::<Vec<_>>();
     files.sort_by(|left, right| {
         let left_name = left
@@ -88,12 +95,13 @@ async fn resolve_adjacent_network(
     current_path: &str,
     parent_path: &str,
     direction: i32,
+    include_images: bool,
 ) -> Result<Option<String>, String> {
     let connection =
         crate::store::network_connection_store::find_network_connection(app, connection_id)?;
     let result =
         crate::network::service::browse_connection(app, &connection, parent_path, protocol).await?;
-    let files = sorted_file_entries(result.entries, protocol);
+    let files = sorted_file_entries(result.entries, protocol, include_images);
     let current_index = files
         .iter()
         .position(|entry| normalize_file_path(&entry.path) == normalize_file_path(current_path));
@@ -128,8 +136,10 @@ pub(crate) async fn resolve_adjacent_playback_source(
         _ => return Ok(None),
     };
 
+    let include_images = crate::media_extensions::include_images_in_playlist(&app);
+
     let playback_key = match parse_playback_source(&payload.playback_key) {
-        PlaybackSource::Local { path } => resolve_adjacent_local(&path, direction),
+        PlaybackSource::Local { path } => resolve_adjacent_local(&path, direction, include_images),
         PlaybackSource::Webdav {
             connection_id,
             file_path,
@@ -144,6 +154,7 @@ pub(crate) async fn resolve_adjacent_playback_source(
                 &file_path,
                 &parent_path,
                 direction,
+                include_images,
             )
             .await?
         }
@@ -163,6 +174,7 @@ pub(crate) async fn resolve_adjacent_playback_source(
                 &resource_url,
                 &parent_path,
                 direction,
+                include_images,
             )
             .await?
         }
@@ -181,6 +193,7 @@ pub(crate) async fn resolve_adjacent_playback_source(
                 &file_path,
                 &parent_path,
                 direction,
+                include_images,
             )
             .await?
         }

@@ -110,6 +110,7 @@ export const WINDOW_SIZE_LOCK_SETTING_LABEL = "WINDOW_SIZE_LOCK";
 export const SEEK_THUMBNAILS_ENABLED_SETTING_LABEL = "SEEK_THUMBNAILS_ENABLED";
 export const SEEK_THUMB_INTERVAL_SETTING_LABEL = "SEEK_THUMB_INTERVAL";
 export const AUTOLOAD_FOLDER_SETTING_LABEL = "AUTOLOAD_FOLDER";
+export const PLAYLIST_INCLUDE_IMAGES_SETTING_LABEL = "PLAYLIST_INCLUDE_IMAGES";
 export const SCREENSHOT_DIR_SETTING_LABEL = "SCREENSHOT_DIR";
 export const FFMPEG_PATH_SETTING_LABEL = "FFMPEG_PATH";
 export const OPENSUBTITLES_ENABLED_SETTING_LABEL = "OPENSUBTITLES_ENABLED";
@@ -233,6 +234,14 @@ export const defaultSettingGroups: SettingGroup[] = [
             {
                 label: AUTOLOAD_FOLDER_SETTING_LABEL,
                 displayLabel: "Auto-Load Folder to Playlist",
+                value: "Off",
+                type: "toggle",
+                onValue: "On",
+                offValue: "Off",
+            },
+            {
+                label: PLAYLIST_INCLUDE_IMAGES_SETTING_LABEL,
+                displayLabel: "Include Images in Playlist",
                 value: "Off",
                 type: "toggle",
                 onValue: "On",

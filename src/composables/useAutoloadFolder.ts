@@ -5,10 +5,13 @@ import {
 } from "../mock/settings";
 import { loadUiState } from "./useUiStateStore";
 import {
-    isMediaFilePath,
     listLocalSiblingFiles,
     normalizeLocalPathForCompare,
 } from "../utils/localMediaSiblings";
+import {
+    includeImagesInPlaylist,
+    isPlaylistFilePath,
+} from "./usePlaylistFileKinds";
 
 // Port of the mpv `autoload.lua` script: when a local file starts playing,
 // scan its folder for sibling media files and load them into the playlist so
@@ -69,12 +72,16 @@ export const useAutoloadFolder = ({ playlist }: AutoloadFolderOptions) => {
         applyStoredGroups(customEvent.detail?.groups);
     };
 
+    // Kept so a settings change can rescan the folder it is already showing.
+    let lastLoadedPath = "";
+
     const onFileLoaded = async (currentPath: string) => {
+        lastLoadedPath = currentPath;
         if (!enabled.value) return;
         if (!isLocalMediaSource(currentPath)) return;
 
         const siblings = await listLocalSiblingFiles(currentPath);
-        const mediaPaths = siblings.filter(isMediaFilePath);
+        const mediaPaths = siblings.filter(isPlaylistFilePath);
         if (mediaPaths.length <= 1) return;
 
         // Ensure the current file appears in the list with the exact string used
@@ -96,6 +103,12 @@ export const useAutoloadFolder = ({ playlist }: AutoloadFolderOptions) => {
         if (!isEnabled) {
             playlist.clearAutoloadFolder();
         }
+    });
+
+    // Whether images count changes what this folder holds. Rescan now — a
+    // setting that only takes effect at the next file looks broken.
+    watch(includeImagesInPlaylist, () => {
+        void onFileLoaded(lastLoadedPath);
     });
 
     onMounted(() => {

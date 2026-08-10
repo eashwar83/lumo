@@ -1,6 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { MEDIA_FILE_EXTENSIONS } from "../constants/media";
+import { IMAGE_FILE_EXTENSIONS } from "../constants/media";
+import {
+  includeImagesInPlaylist,
+  playlistFileExtensions,
+} from "./usePlaylistFileKinds";
 
 type PlayerEffectState = {
   media: {
@@ -60,12 +64,19 @@ export const usePlaybackCommands = (
   let volumeApplyQueue: Promise<void> = Promise.resolve();
   let volumeRequestId = 0;
 
-  const MEDIA_FILES_FILTER = [
-    {
-      name: "Media Files",
-      extensions: [...MEDIA_FILE_EXTENSIONS],
-    },
-  ];
+  // Built per call, not once: the Include Images setting can change while the
+  // app runs. When images are excluded they get their own entry rather than
+  // becoming unreachable — the setting is about what fills a playlist by
+  // itself, not about refusing to open a picture you asked for.
+  const mediaFilesFilter = () => {
+    const filters = [
+      { name: "Media Files", extensions: playlistFileExtensions() },
+    ];
+    if (!includeImagesInPlaylist.value) {
+      filters.push({ name: "Images", extensions: [...IMAGE_FILE_EXTENSIONS] });
+    }
+    return filters;
+  };
 
   const normalizeSelectedPaths = (selected: string | string[] | null): string[] => {
     if (!selected) return [];
@@ -76,7 +87,7 @@ export const usePlaybackCommands = (
     const selected = await open({
       multiple: true,
       directory: false,
-      filters: MEDIA_FILES_FILTER,
+      filters: mediaFilesFilter(),
     });
     return normalizeSelectedPaths(selected);
   };
