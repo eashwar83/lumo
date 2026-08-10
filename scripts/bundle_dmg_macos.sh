@@ -7,8 +7,8 @@ Usage:
   $0 <path-to-app> [output-dmg] [volume-name]
 
 Examples:
-  $0 src-tauri/target/release/bundle/macos/Soia.app
-  $0 src-tauri/target/release/bundle/macos/Soia.app src-tauri/target/release/bundle/dmg/Soia_0.1.0_aarch64.dmg Soia
+  $0 src-tauri/target/release/bundle/macos/Lumo.app
+  $0 src-tauri/target/release/bundle/macos/Lumo.app src-tauri/target/release/bundle/dmg/Lumo_0.1.0_aarch64.dmg Lumo
 EOF
 }
 

@@ -33,7 +33,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Build Soia Windows bundle (shared steps)
+      - name: Build Lumo Windows bundle (shared steps)
         uses: ./.github/actions/release-build-windows
         with:
           arch: x64
@@ -54,12 +54,12 @@ jobs:
             throw "Expected exactly one NSIS installer, found $($sources.Count):`n$names"
           }
           $source = $sources[0]
-          $target = "release/Soia-$label-Windows-$arch-setup.exe"
+          $target = "release/Lumo-$label-Windows-$arch-setup.exe"
           Copy-Item $source.FullName $target
           $hash = (Get-FileHash -Path $target -Algorithm SHA256).Hash.ToLower()
           "$hash  $([System.IO.Path]::GetFileName($target))" | Set-Content -Path "$target.sha256" -NoNewline
 
-          $portableTarget = "release/Soia-$label-Windows-$arch-portable.zip"
+          $portableTarget = "release/Lumo-$label-Windows-$arch-portable.zip"
           $portableStaging = "release/portable"
           if (Test-Path $portableStaging) {
             Remove-Item -Path $portableStaging -Recurse -Force
@@ -74,7 +74,7 @@ jobs:
 
           if ($portableCandidates.Count -gt 0) {
             $portableExe = $portableCandidates |
-              Sort-Object @{ Expression = { if ($_.Name -ieq "Soia.exe") { 0 } else { 1 } } }, FullName |
+              Sort-Object @{ Expression = { if ($_.Name -ieq "Lumo.exe") { 0 } else { 1 } } }, FullName |
               Select-Object -First 1
             $portableSourceDir = $portableExe.DirectoryName
             Get-ChildItem -Path $portableSourceDir | ForEach-Object {
@@ -91,7 +91,7 @@ jobs:
               Copy-Item -Path $_.FullName -Destination $portableStaging -Force
             }
           } else {
-            $portableExePath = "src-tauri/target/release/Soia.exe"
+            $portableExePath = "src-tauri/target/release/Lumo.exe"
             if (-not (Test-Path $portableExePath)) {
               throw "Portable executable not found at $portableExePath"
             }
@@ -109,7 +109,7 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: soia-manual-windows-x64-${{ github.run_number }}
+          name: lumo-manual-windows-x64-${{ github.run_number }}
           path: release/*
           compression-level: 0
 
@@ -125,7 +125,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Build Soia Windows bundle (shared steps)
+      - name: Build Lumo Windows bundle (shared steps)
         uses: ./.github/actions/release-build-windows
         with:
           arch: arm64
@@ -146,12 +146,12 @@ jobs:
             throw "Expected exactly one NSIS installer, found $($sources.Count):`n$names"
           }
           $source = $sources[0]
-          $target = "release/Soia-$label-Windows-$arch-setup.exe"
+          $target = "release/Lumo-$label-Windows-$arch-setup.exe"
           Copy-Item $source.FullName $target
           $hash = (Get-FileHash -Path $target -Algorithm SHA256).Hash.ToLower()
           "$hash  $([System.IO.Path]::GetFileName($target))" | Set-Content -Path "$target.sha256" -NoNewline
 
-          $portableTarget = "release/Soia-$label-Windows-$arch-portable.zip"
+          $portableTarget = "release/Lumo-$label-Windows-$arch-portable.zip"
           $portableStaging = "release/portable"
           if (Test-Path $portableStaging) {
             Remove-Item -Path $portableStaging -Recurse -Force
@@ -166,7 +166,7 @@ jobs:
 
           if ($portableCandidates.Count -gt 0) {
             $portableExe = $portableCandidates |
-              Sort-Object @{ Expression = { if ($_.Name -ieq "Soia.exe") { 0 } else { 1 } } }, FullName |
+              Sort-Object @{ Expression = { if ($_.Name -ieq "Lumo.exe") { 0 } else { 1 } } }, FullName |
               Select-Object -First 1
             $portableSourceDir = $portableExe.DirectoryName
             Get-ChildItem -Path $portableSourceDir | ForEach-Object {
@@ -183,7 +183,7 @@ jobs:
               Copy-Item -Path $_.FullName -Destination $portableStaging -Force
             }
           } else {
-            $portableExePath = "src-tauri/target/release/Soia.exe"
+            $portableExePath = "src-tauri/target/release/Lumo.exe"
             if (-not (Test-Path $portableExePath)) {
               throw "Portable executable not found at $portableExePath"
             }
@@ -201,6 +201,6 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: soia-manual-windows-arm64-${{ github.run_number }}
+          name: lumo-manual-windows-arm64-${{ github.run_number }}
           path: release/*
           compression-level: 0

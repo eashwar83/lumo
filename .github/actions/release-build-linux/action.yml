@@ -1,4 +1,4 @@
-name: "Build Soia Linux Bundles"
+name: "Build Lumo Linux Bundles"
 description: "Shared Linux release build steps"
 
 inputs:
@@ -90,11 +90,11 @@ runs:
 
         if [ "$status" -ne 0 ]; then
           echo "Bundle failed with status=$status, dumping linuxdeploy diagnostics..."
-          if [ -f "src-tauri/target/release/soia" ]; then
-            echo "== ldd src-tauri/target/release/soia =="
-            ldd "src-tauri/target/release/soia" || true
-            echo "== readelf -d src-tauri/target/release/soia =="
-            readelf -d "src-tauri/target/release/soia" || true
+          if [ -f "src-tauri/target/release/lumo" ]; then
+            echo "== ldd src-tauri/target/release/lumo =="
+            ldd "src-tauri/target/release/lumo" || true
+            echo "== readelf -d src-tauri/target/release/lumo =="
+            readelf -d "src-tauri/target/release/lumo" || true
           fi
           if [ -d "${HOME}/.cache/tauri" ]; then
             ls -lah "${HOME}/.cache/tauri" || true

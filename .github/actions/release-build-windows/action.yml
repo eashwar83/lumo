@@ -1,4 +1,4 @@
-name: "Build Soia Windows NSIS"
+name: "Build Lumo Windows NSIS"
 description: "Shared Windows release build steps"
 
 inputs:

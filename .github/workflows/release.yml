@@ -41,7 +41,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Build Soia App (shared steps)
+      - name: Build Lumo App (shared steps)
         uses: ./.github/actions/release-build-macos
         with:
           arch: ${{ matrix.arch }}
@@ -69,18 +69,18 @@ jobs:
             exit 1
           fi
           DMG_SOURCE="$(find src-tauri/target/release/bundle/dmg -maxdepth 1 -type f -name '*.dmg' | sort | head -n 1)"
-          DMG_TARGET="release/Soia-${TAG}-${{ matrix.package_suffix }}.dmg"
+          DMG_TARGET="release/Lumo-${TAG}-${{ matrix.package_suffix }}.dmg"
           cp "$DMG_SOURCE" "$DMG_TARGET"
           shasum -a 256 "$DMG_TARGET" > "${DMG_TARGET}.sha256"
 
-          APP_TAR_TARGET="release/Soia-${TAG}-${{ matrix.package_suffix }}.app.tar.gz"
-          tar -C src-tauri/target/release/bundle/macos -czf "$APP_TAR_TARGET" Soia.app
+          APP_TAR_TARGET="release/Lumo-${TAG}-${{ matrix.package_suffix }}.app.tar.gz"
+          tar -C src-tauri/target/release/bundle/macos -czf "$APP_TAR_TARGET" Lumo.app
           pnpm tauri signer sign "$APP_TAR_TARGET"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: soia-release-${{ github.ref_name }}-${{ matrix.arch }}
+          name: lumo-release-${{ github.ref_name }}-${{ matrix.arch }}
           path: release/*
           compression-level: 0
 
@@ -105,7 +105,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Build Soia Windows bundle (shared steps)
+      - name: Build Lumo Windows bundle (shared steps)
         uses: ./.github/actions/release-build-windows
         with:
           arch: ${{ matrix.package_arch }}
@@ -132,13 +132,13 @@ jobs:
             throw "Expected exactly one NSIS installer, found $($sources.Count):`n$names"
           }
           $source = $sources[0]
-          $target = "release/Soia-$tag-Windows-$arch-setup.exe"
+          $target = "release/Lumo-$tag-Windows-$arch-setup.exe"
           Copy-Item $source.FullName $target
           $hash = (Get-FileHash -Path $target -Algorithm SHA256).Hash.ToLower()
           "$hash  $([System.IO.Path]::GetFileName($target))" | Set-Content -Path "$target.sha256" -NoNewline
           pnpm tauri signer sign $target
 
-          $portableTarget = "release/Soia-$tag-Windows-$arch-portable.zip"
+          $portableTarget = "release/Lumo-$tag-Windows-$arch-portable.zip"
           $portableStaging = "release/portable"
           if (Test-Path $portableStaging) {
             Remove-Item -Path $portableStaging -Recurse -Force
@@ -153,7 +153,7 @@ jobs:
 
           if ($portableCandidates.Count -gt 0) {
             $portableExe = $portableCandidates |
-              Sort-Object @{ Expression = { if ($_.Name -ieq "Soia.exe") { 0 } else { 1 } } }, FullName |
+              Sort-Object @{ Expression = { if ($_.Name -ieq "Lumo.exe") { 0 } else { 1 } } }, FullName |
               Select-Object -First 1
             $portableSourceDir = $portableExe.DirectoryName
             Get-ChildItem -Path $portableSourceDir | ForEach-Object {
@@ -170,7 +170,7 @@ jobs:
               Copy-Item -Path $_.FullName -Destination $portableStaging -Force
             }
           } else {
-            $portableExePath = "src-tauri/target/release/Soia.exe"
+            $portableExePath = "src-tauri/target/release/Lumo.exe"
             if (-not (Test-Path $portableExePath)) {
               throw "Portable executable not found at $portableExePath"
             }
@@ -189,7 +189,7 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: soia-release-${{ github.ref_name }}-windows-${{ matrix.package_arch }}
+          name: lumo-release-${{ github.ref_name }}-windows-${{ matrix.package_arch }}
           path: release/*
           compression-level: 0
 
@@ -214,7 +214,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Build Soia Linux bundles (shared steps)
+      - name: Build Lumo Linux bundles (shared steps)
         uses: ./.github/actions/release-build-linux
         with:
           github_token: ${{ github.token }}
@@ -240,7 +240,7 @@ jobs:
             exit 1
           fi
           DEB_SOURCE="$(find src-tauri/target/release/bundle/deb -maxdepth 1 -type f -name '*.deb' | sort | head -n 1)"
-          DEB_TARGET="release/Soia-${TAG}-Linux-${{ matrix.package_arch }}-wayland.deb"
+          DEB_TARGET="release/Lumo-${TAG}-Linux-${{ matrix.package_arch }}-wayland.deb"
           cp "$DEB_SOURCE" "$DEB_TARGET"
           shasum -a 256 "$DEB_TARGET" > "${DEB_TARGET}.sha256"
           pnpm tauri signer sign "$DEB_TARGET"
@@ -256,7 +256,7 @@ jobs:
             exit 1
           fi
           APPIMAGE_SOURCE="$(find src-tauri/target/release/bundle/appimage -maxdepth 1 -type f \( -name '*.AppImage' -o -name '*.appimage' \) | sort | head -n 1)"
-          APPIMAGE_TARGET="release/Soia-${TAG}-Linux-${{ matrix.package_arch }}-wayland.AppImage"
+          APPIMAGE_TARGET="release/Lumo-${TAG}-Linux-${{ matrix.package_arch }}-wayland.AppImage"
           cp "$APPIMAGE_SOURCE" "$APPIMAGE_TARGET"
           shasum -a 256 "$APPIMAGE_TARGET" > "${APPIMAGE_TARGET}.sha256"
           pnpm tauri signer sign "$APPIMAGE_TARGET"
@@ -264,7 +264,7 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: soia-release-${{ github.ref_name }}-linux-${{ matrix.package_arch }}-wayland
+          name: lumo-release-${{ github.ref_name }}-linux-${{ matrix.package_arch }}-wayland
           path: release/*
           compression-level: 0
 
@@ -286,7 +286,7 @@ jobs:
       - name: Download release artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: soia-release-${{ github.ref_name }}-*
+          pattern: lumo-release-${{ github.ref_name }}-*
           merge-multiple: true
           path: release
 
@@ -298,12 +298,12 @@ jobs:
           BASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
           PUB_DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
-          MAC_ARM_FILE="Soia-${TAG}-macOS-arm64.app.tar.gz"
-          MAC_X64_FILE="Soia-${TAG}-macOS-x64.app.tar.gz"
-          WIN_X64_FILE="Soia-${TAG}-Windows-x64-setup.exe"
-          WIN_ARM_FILE="Soia-${TAG}-Windows-arm64-setup.exe"
-          LINUX_X64_FILE="Soia-${TAG}-Linux-x64-wayland.deb"
-          LINUX_ARM_FILE="Soia-${TAG}-Linux-arm64-wayland.deb"
+          MAC_ARM_FILE="Lumo-${TAG}-macOS-arm64.app.tar.gz"
+          MAC_X64_FILE="Lumo-${TAG}-macOS-x64.app.tar.gz"
+          WIN_X64_FILE="Lumo-${TAG}-Windows-x64-setup.exe"
+          WIN_ARM_FILE="Lumo-${TAG}-Windows-arm64-setup.exe"
+          LINUX_X64_FILE="Lumo-${TAG}-Linux-x64-wayland.deb"
+          LINUX_ARM_FILE="Lumo-${TAG}-Linux-arm64-wayland.deb"
           NOTES="$(awk -v version="$VERSION" '
             $0 ~ "^## \\[" version "\\] - " {
               capture = 1
@@ -366,16 +366,16 @@ jobs:
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
           BASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
-          MAC_ARM_DMG="Soia-${TAG}-macOS-arm64.dmg"
-          MAC_X64_DMG="Soia-${TAG}-macOS-x64.dmg"
-          WIN_X64_SETUP="Soia-${TAG}-Windows-x64-setup.exe"
-          WIN_X64_PORTABLE="Soia-${TAG}-Windows-x64-portable.zip"
-          WIN_ARM_SETUP="Soia-${TAG}-Windows-arm64-setup.exe"
-          WIN_ARM_PORTABLE="Soia-${TAG}-Windows-arm64-portable.zip"
-          LINUX_X64_DEB="Soia-${TAG}-Linux-x64-wayland.deb"
-          LINUX_X64_APPIMAGE="Soia-${TAG}-Linux-x64-wayland.AppImage"
-          LINUX_ARM_DEB="Soia-${TAG}-Linux-arm64-wayland.deb"
-          LINUX_ARM_APPIMAGE="Soia-${TAG}-Linux-arm64-wayland.AppImage"
+          MAC_ARM_DMG="Lumo-${TAG}-macOS-arm64.dmg"
+          MAC_X64_DMG="Lumo-${TAG}-macOS-x64.dmg"
+          WIN_X64_SETUP="Lumo-${TAG}-Windows-x64-setup.exe"
+          WIN_X64_PORTABLE="Lumo-${TAG}-Windows-x64-portable.zip"
+          WIN_ARM_SETUP="Lumo-${TAG}-Windows-arm64-setup.exe"
+          WIN_ARM_PORTABLE="Lumo-${TAG}-Windows-arm64-portable.zip"
+          LINUX_X64_DEB="Lumo-${TAG}-Linux-x64-wayland.deb"
+          LINUX_X64_APPIMAGE="Lumo-${TAG}-Linux-x64-wayland.AppImage"
+          LINUX_ARM_DEB="Lumo-${TAG}-Linux-arm64-wayland.deb"
+          LINUX_ARM_APPIMAGE="Lumo-${TAG}-Linux-arm64-wayland.AppImage"
 
           : > release/RELEASE_BODY.md
 

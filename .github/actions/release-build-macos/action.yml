@@ -1,4 +1,4 @@
-name: "Build Soia macOS Bundle"
+name: "Build Lumo macOS Bundle"
 description: "Shared macOS build steps for CI and release workflows"
 
 inputs:
@@ -55,7 +55,7 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: pnpm setup:libs
 
-    - name: Build Soia App
+    - name: Build Lumo App
       shell: bash
       env:
         MACOSX_DEPLOYMENT_TARGET: ${{ inputs.deployment_target }}
@@ -63,8 +63,8 @@ runs:
         set -euo pipefail
         if [ "${{ inputs.arch }}" = "x64" ]; then
           MPV_TARGET_ARCH=x86_64 pnpm tauri build --target x86_64-apple-darwin --bundles app
-          ./scripts/bundle_runtime_libs_macos.sh ./src-tauri/target/x86_64-apple-darwin/release/bundle/macos/Soia.app
-          ./scripts/bundle_dmg_macos.sh ./src-tauri/target/x86_64-apple-darwin/release/bundle/macos/Soia.app
+          ./scripts/bundle_runtime_libs_macos.sh ./src-tauri/target/x86_64-apple-darwin/release/bundle/macos/Lumo.app
+          ./scripts/bundle_dmg_macos.sh ./src-tauri/target/x86_64-apple-darwin/release/bundle/macos/Lumo.app
 
           mkdir -p src-tauri/target/release/bundle
           rm -rf src-tauri/target/release/bundle/macos src-tauri/target/release/bundle/dmg

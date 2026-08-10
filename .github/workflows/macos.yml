@@ -34,7 +34,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Build Soia App (shared steps)
+      - name: Build Lumo App (shared steps)
         uses: ./.github/actions/release-build-macos
         with:
           arch: arm64
@@ -55,18 +55,18 @@ jobs:
           fi
 
           DMG_SOURCE="$(find src-tauri/target/release/bundle/dmg -maxdepth 1 -type f -name '*.dmg' | sort | head -n 1)"
-          DMG_TARGET="release/Soia-${LABEL}-macOS-arm64.dmg"
+          DMG_TARGET="release/Lumo-${LABEL}-macOS-arm64.dmg"
           cp "$DMG_SOURCE" "$DMG_TARGET"
           shasum -a 256 "$DMG_TARGET" > "${DMG_TARGET}.sha256"
 
-          APP_TAR_TARGET="release/Soia-${LABEL}-macOS-arm64.app.tar.gz"
-          tar -C src-tauri/target/release/bundle/macos -czf "$APP_TAR_TARGET" Soia.app
+          APP_TAR_TARGET="release/Lumo-${LABEL}-macOS-arm64.app.tar.gz"
+          tar -C src-tauri/target/release/bundle/macos -czf "$APP_TAR_TARGET" Lumo.app
           shasum -a 256 "$APP_TAR_TARGET" > "${APP_TAR_TARGET}.sha256"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: soia-manual-macos-arm64-${{ github.run_number }}
+          name: lumo-manual-macos-arm64-${{ github.run_number }}
           path: release/*
           compression-level: 0
 
@@ -83,7 +83,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Build Soia App (shared steps)
+      - name: Build Lumo App (shared steps)
         uses: ./.github/actions/release-build-macos
         with:
           arch: x64
@@ -104,17 +104,17 @@ jobs:
           fi
 
           DMG_SOURCE="$(find src-tauri/target/release/bundle/dmg -maxdepth 1 -type f -name '*.dmg' | sort | head -n 1)"
-          DMG_TARGET="release/Soia-${LABEL}-macOS-x64.dmg"
+          DMG_TARGET="release/Lumo-${LABEL}-macOS-x64.dmg"
           cp "$DMG_SOURCE" "$DMG_TARGET"
           shasum -a 256 "$DMG_TARGET" > "${DMG_TARGET}.sha256"
 
-          APP_TAR_TARGET="release/Soia-${LABEL}-macOS-x64.app.tar.gz"
-          tar -C src-tauri/target/release/bundle/macos -czf "$APP_TAR_TARGET" Soia.app
+          APP_TAR_TARGET="release/Lumo-${LABEL}-macOS-x64.app.tar.gz"
+          tar -C src-tauri/target/release/bundle/macos -czf "$APP_TAR_TARGET" Lumo.app
           shasum -a 256 "$APP_TAR_TARGET" > "${APP_TAR_TARGET}.sha256"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: soia-manual-macos-x64-${{ github.run_number }}
+          name: lumo-manual-macos-x64-${{ github.run_number }}
           path: release/*
           compression-level: 0

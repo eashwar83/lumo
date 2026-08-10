@@ -7,8 +7,8 @@ Usage:
   $0 <path-to-app> [--root-lib <name>] [--strict-deps] [--allow-unresolved] [--skip-sign] [--sign-identity <identity>]
 
 Examples:
-  $0 src-tauri/target/debug/bundle/macos/Soia.app
-  $0 src-tauri/target/release/bundle/macos/Soia.app --sign-identity "Developer ID Application: Your Name (TEAMID)"
+  $0 src-tauri/target/debug/bundle/macos/Lumo.app
+  $0 src-tauri/target/release/bundle/macos/Lumo.app --sign-identity "Developer ID Application: Your Name (TEAMID)"
 USAGE
 }
 

@@ -155,7 +155,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Build Soia App (shared steps)
+      - name: Build Lumo App (shared steps)
         uses: ./.github/actions/release-build-macos
         with:
           arch: ${{ matrix.arch }}
@@ -166,7 +166,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: soia-dmg-macos-${{ matrix.arch }}-smoke
+          name: lumo-dmg-macos-${{ matrix.arch }}-smoke
           path: src-tauri/target/release/bundle/dmg/*.dmg
           compression-level: 0
           if-no-files-found: ignore

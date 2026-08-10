@@ -33,7 +33,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Build Soia Linux bundles (shared steps)
+      - name: Build Lumo Linux bundles (shared steps)
         uses: ./.github/actions/release-build-linux
         with:
           github_token: ${{ github.token }}
@@ -51,7 +51,7 @@ jobs:
             exit 1
           fi
           DEB_SOURCE="$(find src-tauri/target/release/bundle/deb -maxdepth 1 -type f -name '*.deb' | sort | head -n 1)"
-          DEB_TARGET="release/Soia-${LABEL}-Linux-x64-wayland.deb"
+          DEB_TARGET="release/Lumo-${LABEL}-Linux-x64-wayland.deb"
           cp "$DEB_SOURCE" "$DEB_TARGET"
           shasum -a 256 "$DEB_TARGET" > "${DEB_TARGET}.sha256"
 
@@ -62,14 +62,14 @@ jobs:
             exit 1
           fi
           APPIMAGE_SOURCE="$(find src-tauri/target/release/bundle/appimage -maxdepth 1 -type f \( -name '*.AppImage' -o -name '*.appimage' \) | sort | head -n 1)"
-          APPIMAGE_TARGET="release/Soia-${LABEL}-Linux-x64-wayland.AppImage"
+          APPIMAGE_TARGET="release/Lumo-${LABEL}-Linux-x64-wayland.AppImage"
           cp "$APPIMAGE_SOURCE" "$APPIMAGE_TARGET"
           shasum -a 256 "$APPIMAGE_TARGET" > "${APPIMAGE_TARGET}.sha256"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: soia-manual-linux-x64-wayland-${{ github.run_number }}
+          name: lumo-manual-linux-x64-wayland-${{ github.run_number }}
           path: release/*
           compression-level: 0
 
@@ -85,7 +85,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Build Soia Linux bundles (shared steps)
+      - name: Build Lumo Linux bundles (shared steps)
         uses: ./.github/actions/release-build-linux
         with:
           github_token: ${{ github.token }}
@@ -103,7 +103,7 @@ jobs:
             exit 1
           fi
           DEB_SOURCE="$(find src-tauri/target/release/bundle/deb -maxdepth 1 -type f -name '*.deb' | sort | head -n 1)"
-          DEB_TARGET="release/Soia-${LABEL}-Linux-arm64-wayland.deb"
+          DEB_TARGET="release/Lumo-${LABEL}-Linux-arm64-wayland.deb"
           cp "$DEB_SOURCE" "$DEB_TARGET"
           shasum -a 256 "$DEB_TARGET" > "${DEB_TARGET}.sha256"
 
@@ -114,13 +114,13 @@ jobs:
             exit 1
           fi
           APPIMAGE_SOURCE="$(find src-tauri/target/release/bundle/appimage -maxdepth 1 -type f \( -name '*.AppImage' -o -name '*.appimage' \) | sort | head -n 1)"
-          APPIMAGE_TARGET="release/Soia-${LABEL}-Linux-arm64-wayland.AppImage"
+          APPIMAGE_TARGET="release/Lumo-${LABEL}-Linux-arm64-wayland.AppImage"
           cp "$APPIMAGE_SOURCE" "$APPIMAGE_TARGET"
           shasum -a 256 "$APPIMAGE_TARGET" > "${APPIMAGE_TARGET}.sha256"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: soia-manual-linux-arm64-wayland-${{ github.run_number }}
+          name: lumo-manual-linux-arm64-wayland-${{ github.run_number }}
           path: release/*
           compression-level: 0
