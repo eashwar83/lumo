@@ -386,16 +386,19 @@ pub(crate) async fn resolve(
     }
     .selector();
     let raw_url = raw_url.to_string();
-    let had_cookies = cookies.file.is_some() || cookies.browser.is_some();
+    let has_cookies = cookies.file.is_some() || cookies.browser.is_some();
     let proxy_clone = proxy_url.clone();
     let format_clone = format_selector.clone();
     let url_clone = raw_url.clone();
     let ytdl_clone = ytdl_path.clone();
+    // Anonymous first — see is_authentication_required_error for why signing
+    // in costs the DASH formats. Videos that genuinely need an account say so,
+    // and get the cookies on the second pass.
     let output = tauri::async_runtime::spawn_blocking(move || {
         run_ytdlp_command(
             &ytdl_path,
             proxy_url.as_deref(),
-            Some(&cookies),
+            None,
             &format_selector,
             &raw_url,
         )
@@ -403,23 +406,25 @@ pub(crate) async fn resolve(
     .await
     .map_err(|error| format!("yt-dlp worker failed: {error}"))??;
     let output = if !output.status.success()
-        && had_cookies
-        && is_cookie_permission_error(&output.stderr)
+        && has_cookies
+        && is_authentication_required_error(&output.stderr)
     {
-        warn!(
-            "yt-dlp: cookies-from-browser failed due to permission error, retrying without cookies"
-        );
-        tauri::async_runtime::spawn_blocking(move || {
+        info!("yt-dlp: the video needs an account, retrying with the saved cookies");
+        let retried = tauri::async_runtime::spawn_blocking(move || {
             run_ytdlp_command(
                 &ytdl_clone,
                 proxy_clone.as_deref(),
-                None,
+                Some(&cookies),
                 &format_clone,
                 &url_clone,
             )
         })
         .await
-        .map_err(|error| format!("yt-dlp worker failed: {error}"))??
+        .map_err(|error| format!("yt-dlp worker failed: {error}"))??;
+        if !retried.status.success() && is_cookie_permission_error(&retried.stderr) {
+            warn!("yt-dlp: the saved cookies could not be read");
+        }
+        retried
     } else {
         output
     };
@@ -958,6 +963,30 @@ fn is_likely_direct_stream_url(raw: &str) -> bool {
         .any(|extension| path.ends_with(&format!(".{extension}")))
 }
 
+/// Does this failure look like YouTube asking who you are?
+///
+/// Sending cookies is not free: yt-dlp can only use the player clients that
+/// accept them, and for some videos those clients return HLS only — no DASH
+/// at all. A signed-in resolve of one film offered 11 formats and zero DASH
+/// renditions, the same film anonymously offered 27 and eighteen. HLS then
+/// drags in the playlist-rewriting proxy, so cookies were quietly costing
+/// both quality and the code path that works. They are now a response to
+/// being asked for them rather than the opening move.
+fn is_authentication_required_error(stderr: &[u8]) -> bool {
+    let text = String::from_utf8_lossy(stderr).to_ascii_lowercase();
+    // yt-dlp's own advice to pass cookies, in whichever wording.
+    text.contains("--cookies")
+        || text.contains("sign in")
+        || text.contains("log in")
+        || text.contains("login required")
+        || text.contains("confirm your age")
+        || text.contains("age-restricted")
+        || text.contains("private video")
+        || text.contains("members-only")
+        || text.contains("members only")
+        || text.contains("this video is available to")
+}
+
 fn is_cookie_permission_error(stderr: &[u8]) -> bool {
     let text = String::from_utf8_lossy(stderr).to_ascii_lowercase();
     text.contains("could not copy cookies")
@@ -981,3 +1010,37 @@ fn redact_url(raw: &str) -> String {
     url.to_string()
 }
 
+
+#[cfg(test)]
+mod cookie_fallback_tests {
+    use super::*;
+
+    #[test]
+    fn asks_for_cookies_only_when_youtube_asks_for_an_account() {
+        // Verbatim from yt-dlp, curly apostrophe and all.
+        for message in [
+            "ERROR: [youtube] xxx: Sign in to confirm you\u{2019}re not a bot. Use --cookies-from-browser or --cookies for the authentication.",
+            "ERROR: [youtube] xxx: Sign in to confirm your age. This video may be inappropriate for some users.",
+            "ERROR: [youtube] xxx: Private video. Sign in if you've been granted access to this video",
+            "ERROR: [youtube] xxx: Join this channel to get access to members-only content",
+        ] {
+            assert!(
+                is_authentication_required_error(message.as_bytes()),
+                "should have retried with cookies: {message}"
+            );
+        }
+
+        // These must NOT trigger a signed-in retry: cookies would not help,
+        // and buying a second yt-dlp run costs seconds on every failure.
+        for message in [
+            "ERROR: [youtube] xxx: Requested format is not available. Use --list-formats for a list of available formats",
+            "ERROR: [youtube] xxx: Video unavailable. This video is no longer available due to a copyright claim",
+            "ERROR: unable to download video data: HTTP Error 403: Forbidden",
+        ] {
+            assert!(
+                !is_authentication_required_error(message.as_bytes()),
+                "should not have retried with cookies: {message}"
+            );
+        }
+    }
+}
