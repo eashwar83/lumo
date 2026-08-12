@@ -45,12 +45,13 @@ runs:
         MPV_TARGET_ARCH: ${{ inputs.arch }}
       run: pnpm setup:libs
 
-    # The Windows bundle lists this zip as a resource and the build refuses
-    # to start without it, but it is 11 MB of third-party build output kept
-    # out of git, so a checkout never has one.
-    - name: Build the PO-token provider server
+    # yt-dlp.exe and the PO-token server zip are bundle resources kept out of
+    # git for their size, so a checkout has neither and the build refuses to
+    # start. This fetches or builds both, then checks every declared resource
+    # rather than letting the bundler find them missing one per attempt.
+    - name: Prepare the bundled Windows binaries
       shell: pwsh
-      run: node ./scripts/build_pot_server.mjs
+      run: node ./scripts/prepare_windows_binaries.mjs
 
     - name: Build Windows NSIS bundle
       shell: pwsh
