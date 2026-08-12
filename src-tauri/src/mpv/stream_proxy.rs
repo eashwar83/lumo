@@ -7,7 +7,7 @@ use reqwest::header::{
 use futures_util::future::BoxFuture;
 use futures_util::stream::{FuturesUnordered, StreamExt};
 use reqwest::{Client, RequestBuilder, Response, StatusCode};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::TcpListener as StdTcpListener;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -51,9 +51,12 @@ static STREAM_PROXY_PARALLEL_RANGE_ENABLED: AtomicBool = AtomicBool::new(false);
 static STREAM_PROXY_BACKENDS: OnceLock<Mutex<StreamBackendRegistry>> =
     OnceLock::new();
 /// Segment URLs per rewritten playlist, addressed by index.
-static STREAM_PROXY_SEGMENT_SETS: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
-/// How many playlists' segment lists to keep at once.
-const SEGMENT_SET_MAX: usize = 6;
+static STREAM_PROXY_SEGMENT_SETS: OnceLock<Mutex<HashMap<String, SegmentEntry>>> = OnceLock::new();
+/// How many playlists' segment lists to keep at once. One YouTube video
+/// costs eight — two master playlists and the six renditions ffmpeg probes
+/// before it settles — so anything near that has no room for the next
+/// video's masters to arrive before the last one's are done with.
+const SEGMENT_SET_MAX: usize = 16;
 
 struct CachedClient {
     proxy_key: Option<String>,
@@ -656,6 +659,10 @@ fn lookup_stream_backend(target: &str) -> Option<Arc<dyn StreamBackend>> {
     if let Some(url) = segment_set_url(path) {
         return Some(Arc::new(HttpStreamBackend::new(url)));
     }
+    if path.starts_with("/seg/") {
+        warn_segment_miss_once(path);
+        return None;
+    }
     let token = path.strip_prefix("/stream/")?.trim();
     if token.is_empty() {
         return None;
@@ -786,6 +793,32 @@ async fn handle_http_stream_source(
     if should_rewrite_playlist(remote_url, &response) {
         let content_type = content_type(&response);
         let bytes = response.bytes().await.map_err(|error| error.to_string())?;
+        if !body_is_playlist(&bytes) {
+            // Guessed wrong. Pass it through untouched rather than mangle
+            // media into text — the failure that costs is the silent one.
+            debug!(
+                "stream proxy: not a playlist after all, passing {} bytes through from {}",
+                bytes.len(),
+                redact_url(remote_url)
+            );
+            write_response(
+                stream,
+                200,
+                "OK",
+                &content_type,
+                Some(bytes.len() as u64),
+                None,
+                None,
+            )
+            .await?;
+            if method != "HEAD" {
+                stream
+                    .write_all(&bytes)
+                    .await
+                    .map_err(|error| error.to_string())?;
+            }
+            return Ok(());
+        }
         let text = String::from_utf8_lossy(&bytes);
         let inherited_headers = lookup_headers(remote_url);
         let body = rewrite_playlist(remote_url, &text, inherited_headers.as_deref()).into_bytes();
@@ -1229,9 +1262,36 @@ fn register_host_headers(url: &str, headers: &[(String, String)]) {
     }
 }
 
+/// Does the URL name a playlist?
+///
+/// Only the last path component may answer. YouTube's HLS *segment* URLs
+/// carry the playlist's name as an interior component and end in the real
+/// one — `…/playlist/index.m3u8/govp/…/gosq/0/file/seg.ts` is a quarter
+/// megabyte of MPEG-TS, not a playlist. A substring test called every one
+/// of them a playlist and rewrote the video as if it were text.
+fn looks_like_playlist_url(remote_url: &str) -> bool {
+    let path = remote_url
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(remote_url)
+        .trim_end_matches('/');
+    path.rsplit('/')
+        .next()
+        .is_some_and(|last| last.to_ascii_lowercase().ends_with(".m3u8"))
+}
+
 fn should_rewrite_playlist(remote_url: &str, response: &Response) -> bool {
-    remote_url.to_ascii_lowercase().contains(".m3u8")
-        || content_type(response).to_ascii_lowercase().contains("mpegurl")
+    content_type(response).to_ascii_lowercase().contains("mpegurl")
+        || looks_like_playlist_url(remote_url)
+}
+
+/// Confirms a body really is a playlist before rewriting it as text. The
+/// URL and the content type are both guesses; `#EXTM3U` is the format's own
+/// answer, and mistaking media for text corrupts it beyond recognition.
+fn body_is_playlist(bytes: &[u8]) -> bool {
+    let head = &bytes[..bytes.len().min(64)];
+    let text = String::from_utf8_lossy(head);
+    text.trim_start_matches('\u{feff}').trim_start().starts_with("#EXTM3U")
 }
 
 fn content_type(response: &Response) -> String {
@@ -1254,6 +1314,13 @@ fn rewrite_playlist(
     // ~1.4 KB, so inlining them turned a 90 KB playlist into 2.3 MB and
     // made mpv re-read megabytes of text on every refresh.
     let set = SegmentSet::new();
+    // Which playlist produced which set: a master and its audio rendition
+    // are rewritten separately, and a miss needs to name the one it lost.
+    info!(
+        "stream proxy: rewriting playlist into set {} from {}",
+        set.token,
+        redact_url(base_url)
+    );
     let body = text
         .lines()
         .map(|line| rewrite_playlist_line(base.as_ref(), line, inherited_headers, &set))
@@ -1294,32 +1361,123 @@ impl SegmentSet {
             return;
         }
         let count = urls.len();
+        let mut evicted: Vec<String> = Vec::new();
+        let mut live = 0usize;
         if let Ok(mut sets) = segment_sets().lock() {
-            sets.insert(self.token.clone(), urls);
-            // Keep only the newest few playlists: a live stream rewrites
-            // its playlist repeatedly, and each pass is a fresh set.
-            if sets.len() > SEGMENT_SET_MAX {
-                let mut tokens: Vec<String> = sets.keys().cloned().collect();
-                // UUIDv7 sorts by creation time, so the oldest sort first.
-                tokens.sort();
-                for token in tokens.into_iter().take(sets.len() - SEGMENT_SET_MAX) {
-                    sets.remove(&token);
-                }
+            sets.insert(self.token.clone(), SegmentEntry::new(urls));
+            // Drop the least recently *read*, not the oldest created. One
+            // YouTube video rewrites the master plus every rendition ffmpeg
+            // probes — eight sets for one film — and the set being played is
+            // always the oldest of them, so evicting by age threw away the
+            // one in use and 400'd every segment after it. A live stream's
+            // superseded passes stop being read, so they still go first.
+            while sets.len() > SEGMENT_SET_MAX {
+                let Some(token) = sets
+                    .iter()
+                    .min_by_key(|(_, entry)| entry.last_used)
+                    .map(|(token, _)| token.clone())
+                else {
+                    break;
+                };
+                sets.remove(&token);
+                evicted.push(token);
             }
+            live = sets.len();
+        } else {
+            warn!(
+                "stream proxy: segment set {} lost — the registry lock is poisoned",
+                self.token
+            );
         }
-        debug!("stream proxy: playlist set {} holds {count} segments", self.token);
+        info!(
+            "stream proxy: playlist set {} holds {count} segments ({live} live)",
+            self.token
+        );
+        if !evicted.is_empty() {
+            info!("stream proxy: evicted segment sets {}", evicted.join(", "));
+        }
     }
 }
 
-fn segment_sets() -> &'static Mutex<HashMap<String, Vec<String>>> {
+/// A rewritten playlist's segment URLs, with the last time one was served.
+/// The timestamp is what keeps the playing set alive: it is read on every
+/// segment, while a rendition ffmpeg only probed is never read again.
+struct SegmentEntry {
+    urls: Vec<String>,
+    last_used: Instant,
+}
+
+impl SegmentEntry {
+    fn new(urls: Vec<String>) -> Self {
+        Self {
+            urls,
+            last_used: Instant::now(),
+        }
+    }
+}
+
+fn segment_sets() -> &'static Mutex<HashMap<String, SegmentEntry>> {
     STREAM_PROXY_SEGMENT_SETS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Resolves `/seg/<playlist>/<index>` back to the segment's real URL.
+/// Resolves `/seg/<playlist>/<index>` back to the segment's real URL, and
+/// marks the set as in use so it outlives the renditions nobody is reading.
 fn segment_set_url(path: &str) -> Option<String> {
     let (token, index) = path.strip_prefix("/seg/")?.split_once('/')?;
     let index: usize = index.trim().parse().ok()?;
-    segment_sets().lock().ok()?.get(token)?.get(index).cloned()
+    let mut sets = segment_sets().lock().ok()?;
+    let entry = sets.get_mut(token)?;
+    let url = entry.urls.get(index).cloned()?;
+    entry.last_used = Instant::now();
+    Some(url)
+}
+
+/// Says why a `/seg/` lookup missed, so a 400 storm names its own cause.
+/// Kept separate from the hot path: only a failed lookup pays for it.
+fn segment_set_miss_reason(path: &str) -> String {
+    let Some(rest) = path.strip_prefix("/seg/") else {
+        return "not a segment path".to_string();
+    };
+    let Some((token, index)) = rest.split_once('/') else {
+        return format!("malformed segment path {rest}");
+    };
+    let Ok(sets) = segment_sets().lock() else {
+        return "segment registry lock is poisoned".to_string();
+    };
+    let known: Vec<&String> = sets.keys().collect();
+    match sets.get(token) {
+        None => format!(
+            "unknown set {token}; {} live: {}",
+            known.len(),
+            known
+                .iter()
+                .map(|value| value.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Some(entry) => format!(
+            "set {token} holds {} segments, index {index} is out of range",
+            entry.urls.len()
+        ),
+    }
+}
+
+/// One warning per set, not per segment: a failed playlist misses on every
+/// one of its ~1400 entries, and that much noise buries the reason.
+fn warn_segment_miss_once(path: &str) {
+    static WARNED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    let token = path
+        .strip_prefix("/seg/")
+        .and_then(|rest| rest.split_once('/'))
+        .map(|(token, _)| token.to_string())
+        .unwrap_or_else(|| path.to_string());
+    let warned = WARNED.get_or_init(|| Mutex::new(HashSet::new()));
+    if let Ok(mut seen) = warned.lock() {
+        if !seen.insert(token) {
+            return;
+        }
+    }
+    warn!("stream proxy: segment miss — {}", segment_set_miss_reason(path));
 }
 
 fn rewrite_playlist_line(
@@ -1881,6 +2039,64 @@ mod segment_set_tests {
         );
         assert_eq!(segment_set_url(&format!("/seg/{token}/9")), None);
         assert_eq!(segment_set_url("/seg/unknown/0"), None);
+    }
+
+    /// Real URLs from a YouTube HLS stream. The segment carries the
+    /// playlist's name mid-path and ends in the one that counts.
+    #[test]
+    fn tells_a_playlist_url_from_a_segment_that_mentions_one() {
+        assert!(looks_like_playlist_url(
+            "https://manifest.googlevideo.com/api/manifest/hls_playlist/expire/1786/playlist/index.m3u8"
+        ));
+        assert!(looks_like_playlist_url("https://host/path/index.m3u8?token=abc"));
+
+        assert!(!looks_like_playlist_url(
+            "https://rr1---sn-gwpa.googlevideo.com/videoplayback/id/2c4d/itag/94/playlist/index.m3u8/govp/slices%3D0-454798/begin/0/len/5200/gosq/0/file/seg.ts"
+        ));
+        assert!(!looks_like_playlist_url("https://host/video.mp4"));
+    }
+
+    #[test]
+    fn only_rewrites_a_body_that_says_it_is_a_playlist() {
+        assert!(body_is_playlist(b"#EXTM3U\n#EXT-X-VERSION:3\n"));
+        assert!(body_is_playlist("\u{feff}#EXTM3U\n".as_bytes()));
+        // An MPEG-TS packet opens with the 0x47 sync byte, not text.
+        assert!(!body_is_playlist(&[0x47, 0x40, 0x00, 0x30, 0xff, 0xff]));
+        assert!(!body_is_playlist(b""));
+    }
+
+    /// The bug this guards: one YouTube video publishes the master playlist
+    /// and then every rendition ffmpeg probes. Evicting by age dropped the
+    /// master — the only one being read — and mpv got HTTP 400 for all
+    /// fourteen hundred of its segments.
+    #[test]
+    fn keeps_the_playlist_being_read_and_drops_the_idle_ones() {
+        let _ = STREAM_PROXY_BASE_URL.set("http://127.0.0.1:3243".to_string());
+        if let Ok(mut sets) = segment_sets().lock() {
+            sets.clear();
+        }
+
+        let playing = SegmentSet::new();
+        let playing_token = playing.token.clone();
+        playing.reference("https://host/playing.ts").unwrap();
+        playing.publish();
+
+        // Enough idle renditions to overflow the cap twice over, with the
+        // playing set read between each — as mpv does while it streams.
+        for index in 0..(SEGMENT_SET_MAX * 2) {
+            let idle = SegmentSet::new();
+            idle.reference(&format!("https://host/idle{index}.ts")).unwrap();
+            idle.publish();
+            assert_eq!(
+                segment_set_url(&format!("/seg/{playing_token}/0")).as_deref(),
+                Some("https://host/playing.ts"),
+                "the set being read was evicted after {} idle playlists",
+                index + 1
+            );
+        }
+
+        let live = segment_sets().lock().map(|sets| sets.len()).unwrap_or(0);
+        assert!(live <= SEGMENT_SET_MAX, "cap not enforced: {live} live");
     }
 }
 
