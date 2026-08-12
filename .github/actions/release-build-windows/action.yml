@@ -45,6 +45,13 @@ runs:
         MPV_TARGET_ARCH: ${{ inputs.arch }}
       run: pnpm setup:libs
 
+    # The Windows bundle lists this zip as a resource and the build refuses
+    # to start without it, but it is 11 MB of third-party build output kept
+    # out of git, so a checkout never has one.
+    - name: Build the PO-token provider server
+      shell: pwsh
+      run: node ./scripts/build_pot_server.mjs
+
     - name: Build Windows NSIS bundle
       shell: pwsh
       run: pnpm tauri build --bundles nsis
