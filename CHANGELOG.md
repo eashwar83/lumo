@@ -1,5 +1,48 @@
 # Changelog
 
+## [1.4.0] - 2026-08-12 — Lumo
+
+YouTube playback works again. Three faults in the stream proxy and the
+format selection had been compounding since the cookies setting arrived;
+between them they took the good video streams away and then broke the
+ones that were left.
+
+### YouTube playback
+
+- **Videos play again.** Lumo's stream proxy decided what was a playlist
+  by looking for `.m3u8` anywhere in the URL. A YouTube segment URL
+  carries the playlist's name mid-path and the real one at the end
+  (`…/playlist/index.m3u8/…/file/seg.ts`), so every segment matched: a
+  quarter megabyte of video was converted to text and rewritten line by
+  line before being handed to the decoder. Only the last part of the path
+  answers that question now, and a body has to open with `#EXTM3U` before
+  any of it is rewritten.
+- **Full quality is back.** Sending cookies restricts yt-dlp to the
+  player clients that accept them, and for many videos those return no
+  DASH streams at all — one film offered 27 formats anonymously and 11
+  signed in, none of them DASH. Lumo now resolves anonymously and signs
+  in only when YouTube asks for an account, so ordinary videos get their
+  full range of qualities back. Age-restricted videos still play.
+- **Long videos no longer stall partway.** The proxy keeps a limited
+  number of playlists and dropped the oldest, which is always the one
+  being played. It now drops the least recently read.
+
+### Playlist
+
+- **Images stay out of the playlist.** A folder of films usually has
+  cover art beside it, and those posters were becoming playlist entries.
+  Video and audio only, by default, everywhere a file can enter a
+  playlist — including Previous/Next walking a folder. Settings →
+  General → **Include Images in Playlist** brings them back.
+
+### Menu bar
+
+- **The title of what is playing** sits in the menu bar, where a title
+  bar would put it.
+- **Menus that no longer fit** collect into a » popup instead of being
+  clipped off the edge, so every menu and the window buttons stay
+  reachable at any width.
+
 ## [1.3.0] - 2026-08-06 — Lumo
 
 Headline release: YouTube is built into Lumo. Search it, play it, download

@@ -28,50 +28,28 @@ You can verify what you downloaded against the `.sha256` file published beside e
 
 The app is open-source and its code is publicly available for anyone to inspect.
 
-## [1.3.0] - 2026-08-06
+## [1.4.0] - 2026-08-12
 
-Headline release: YouTube is built into Lumo. Search it, play it, download it,
-read and translate its comments — without a browser.
+**YouTube playback works again.** Three separate faults had been compounding, and between them they took away the good video streams and then broke the ones that were left.
 
-### YouTube
+### YouTube playback
 
-* **Search and browse**
-  Search with sort, duration, upload-date, type and HD filters. Open a channel or a playlist and browse it in place, with the same sort options the website offers. Recent and saved searches live in the search box itself and filter as you type.
+* **Videos play again.**
+  Lumo's stream proxy decided what was a playlist by looking for `.m3u8` anywhere in the URL. A YouTube segment URL carries the playlist's name in the middle of its path and the real one at the end — `…/playlist/index.m3u8/…/file/seg.ts` — so every segment matched. A quarter megabyte of video was converted to text and rewritten line by line before being handed to the decoder, which understandably made nothing of it. Only the last part of the path answers that question now, and a body has to begin with `#EXTM3U` before a byte of it is rewritten.
 
-* **Play in Lumo**
-  Results play directly in the player at your chosen quality, with a per-video override. yt-dlp ships with the app, so there is nothing to install.
+* **Full quality is back.**
+  Sending cookies restricts yt-dlp to the player clients that accept them, and for many videos those clients return no DASH streams at all. One film offered 27 formats anonymously and 11 while signed in, none of them DASH — so Lumo fell back to a low-quality stream and the fragile code path above. It now resolves anonymously and signs in only when YouTube actually asks for an account. Age-restricted videos still play; they take a moment longer.
 
-* **Up next, chapters and SponsorBlock**
-  Related videos queue up and auto-advance, chapters appear as scene markers on the seek bar, and sponsor segments are skipped with an undo prompt — all in the **Extras** drawer beside the player.
+* **Long videos no longer stall partway through.**
+  The proxy keeps a limited number of playlists in memory and used to discard the oldest — which is always the one you are watching, since it was loaded first. It now discards the least recently used.
 
-* **Downloads**
-  A queue with progress, speed and ETA; pause, resume, cancel and reorder. Choose quality, container, audio-only, subtitles, thumbnails and chapters.
+### Playlist
 
-* **Subtitles from YouTube**
-  Pick any caption track the video offers, straight from the Subtitle menu, with a filter box for the long language list.
+* **Images stay out of the playlist.**
+  A folder of films usually has cover art sitting beside it, and those posters were becoming playlist entries. Playlists are video and audio only by default, everywhere a file can enter one — including Previous and Next walking a folder. Settings → General → **Include Images in Playlist** brings them back if you want them.
 
-* **Comments**
-  Read them in the drawer, sorted by Top or Newest, with replies expandable inline. Search every comment, including the ones not yet loaded. Export to PDF — all or selected, with original and translation side by side.
+### Menu bar
 
-* **AI comment translation**
-  Translate all comments or just the ones you tick, with your own choice of provider and model, and a refresh button that asks the provider what models it currently offers.
+* **The title of what is playing** now sits in the menu bar, where a title bar would put it.
 
-### Subtitles and AI
-
-* **Subtitle sync** — quick offset nudging plus Smart AI re-timing for subtitles that drift.
-
-* **Describe A–B Clip (AI)** — a vision-model summary of the marked range.
-
-* AI subtitle jobs now ride out provider rate limits with a countdown and adaptive pacing instead of giving up.
-
-### Video
-
-* **Deblock filter** and a stronger **Old Film Restore** preset.
-
-### Fixes
-
-* Playback failures now report what actually went wrong instead of a generic message. The app writes its own diagnostic log to `logs/lumo.log`, beside mpv's.
-
-* Fixed several stream-proxy faults found while making YouTube play: HLS playlists exhausting the backend registry, a URL being proxied twice, oversized rewritten playlists, and a malformed `206` response.
-
-* YouTube streams that die with a `403` are now re-resolved automatically.
+* **Menus that no longer fit** collect into a » popup instead of being clipped off the edge, so every menu and the window buttons stay reachable however narrow the window gets.
