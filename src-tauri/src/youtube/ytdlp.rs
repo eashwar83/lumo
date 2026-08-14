@@ -3,7 +3,7 @@
 //! `mpv::ytdlp_resolver`: hidden console window, piped output drained on
 //! reader threads, hard deadline with kill.
 
-use log::info;
+use log::{info, warn};
 use serde_json::Value;
 use std::io::Read;
 use std::process::{Command, Stdio};
@@ -229,11 +229,15 @@ fn run_json(
                 .map_err(|error| format!("yt-dlp stderr read failed: {error}"))?;
             if !status.success() {
                 let stderr = String::from_utf8_lossy(&stderr);
-                return Err(format!(
+                let message = format!(
                     "yt-dlp exited with status {}: {}",
                     status,
                     stderr.trim().chars().take(300).collect::<String>()
-                ));
+                );
+                // Callers surface this as an empty list, so the log is the
+                // only place the cause survives.
+                warn!("youtube: {message}");
+                return Err(message);
             }
             return serde_json::from_slice(&stdout)
                 .map_err(|error| format!("yt-dlp returned invalid JSON: {error}"));
@@ -243,6 +247,10 @@ fn run_json(
             let _ = child.wait();
             let _ = stdout_reader.join();
             let _ = stderr_reader.join();
+            warn!(
+                "youtube: yt-dlp timed out after {}s for {target}",
+                YTDLP_JSON_TIMEOUT.as_secs()
+            );
             return Err(format!(
                 "yt-dlp timed out after {}s",
                 YTDLP_JSON_TIMEOUT.as_secs()

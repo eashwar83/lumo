@@ -277,8 +277,6 @@ fn run_download(app: &AppHandle, id: &str) {
         .arg("5")
         .arg("--fragment-retries")
         .arg("10")
-        .arg("--js-runtimes")
-        .arg("node")
         .arg("--embed-metadata")
         .arg("-o")
         .arg(build_output(&item));
@@ -631,8 +629,6 @@ fn fetch_subtitles(app: &AppHandle, item: &DownloadItem, video_path: &str) {
         .arg("5")
         .arg("--retry-sleep")
         .arg("5")
-        .arg("--js-runtimes")
-        .arg("node")
         .arg("-o")
         .arg(output)
         .arg(&item.url)

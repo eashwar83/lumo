@@ -65,10 +65,17 @@ pub(crate) async fn youtube_caption_tracks(
     let cached_id = video_id.clone();
     let tracks = tauri::async_runtime::spawn_blocking(move || {
         // The metadata dump carries both caption maps without downloading.
+        // --dump-single-json still runs format selection, and this call
+        // wants none of it: a video whose formats are all unavailable can
+        // still have its 157 caption tracks, and without the override the
+        // whole dump exits 1 and the menu reads "no subtitles".
         let value = ytdlp::run_json_with(
             &app,
             &watch_url(&video_id),
-            &["--skip-download".to_string()],
+            &[
+                "--skip-download".to_string(),
+                "--ignore-no-formats-error".to_string(),
+            ],
         )?;
         let mut tracks = Vec::new();
         collect_tracks(value.get("subtitles"), false, &mut tracks);
@@ -186,8 +193,6 @@ pub(crate) async fn youtube_caption_file(
                 .arg("5")
                 .arg("--retry-sleep")
                 .arg("5")
-                .arg("--js-runtimes")
-                .arg("node")
                 .arg("-o")
                 .arg(&output)
                 .arg(&url)

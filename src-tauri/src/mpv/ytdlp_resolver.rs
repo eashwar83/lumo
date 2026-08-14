@@ -40,6 +40,13 @@ pub(crate) fn ytdlp_base_command(ytdl_path: &str) -> Command {
     if supports_remote_components(ytdl_path) {
         command.arg("--remote-components").arg("ejs:github");
     }
+    // The solver needs a runtime to run in, and yt-dlp's default is deno,
+    // which this machine doesn't have; node must be opted into. These two
+    // flags only work as a pair, and a call site that had one without the
+    // other failed even for metadata: --dump-single-json still selects a
+    // format, so the caption list came back "no subtitles" for every video.
+    // A warning-level no-op when node is absent.
+    command.arg("--js-runtimes").arg("node");
     command
 }
 
@@ -501,11 +508,6 @@ fn run_ytdlp_command(
     let mut log_args = vec![
         "--dump-single-json".to_string(),
         "--no-playlist".to_string(),
-        // Lets yt-dlp solve JS challenges with the system Node (deno is its
-        // only default), unlocking token-attested formats; a warning-level
-        // no-op when Node is absent.
-        "--js-runtimes".to_string(),
-        "node".to_string(),
         "-f".to_string(),
         format_selector.to_string(),
         redact_url(raw_url),
@@ -513,8 +515,6 @@ fn run_ytdlp_command(
     command
         .arg("--dump-single-json")
         .arg("--no-playlist")
-        .arg("--js-runtimes")
-        .arg("node")
         .arg("-f")
         .arg(format_selector)
         .arg(raw_url)
