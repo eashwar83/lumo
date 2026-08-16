@@ -333,6 +333,13 @@ fn generate_frames_inner(
     set_opt(ctx, "vo-image-jpeg-quality", "80");
     set_opt(ctx, "vo-image-outdir", &outdir_str);
     set_opt(ctx, "sstep", &format!("{step}"));
+    // Hard ceiling on output. sstep advances by keyframe-seeking, and on a
+    // file with a broken keyframe index every seek snaps back to the same
+    // keyframe — end-of-file never comes, and this loop's only other exit is
+    // app shutdown. Three such files once wrote 3.4 million JPEGs each
+    // (35 GB) before the app was closed. `frames` makes mpv quit after
+    // exactly the frames we asked for, however seeking behaves.
+    set_opt(ctx, "frames", &format!("{count}"));
     set_opt(ctx, "vf", &format!("scale={}:-2", width.max(16)));
     if exact {
         // Decode to each requested time rather than snapping to a keyframe.
