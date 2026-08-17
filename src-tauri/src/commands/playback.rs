@@ -609,6 +609,18 @@ fn seek_thumbnails_enabled(app: &tauri::AppHandle) -> bool {
         .unwrap_or(true)
 }
 
+/// Settings → Advanced → Video Artwork Thumbnail. Governs every artwork
+/// extracted from a video's frames — the playlist posters, their hover
+/// storyboards, and the media-overlay capture. Off stops new generation
+/// only: artwork already cached keeps being served, and nothing is deleted.
+pub(crate) fn video_artwork_enabled(app: &tauri::AppHandle) -> bool {
+    crate::store::ui_state_store::load_setting_value(app, "VIDEO_ARTWORK_THUMBNAIL")
+        .ok()
+        .flatten()
+        .map(|v| v.trim() != "Off")
+        .unwrap_or(true)
+}
+
 // Cache dir keyed by path + interval, so changing the interval regenerates.
 fn seek_thumb_cache_dir(
     app: &tauri::AppHandle,
@@ -891,6 +903,9 @@ pub(crate) async fn get_media_poster(
     let cached = root.join(format!("{key}.jpg"));
 
     if !cached.exists() {
+        if !video_artwork_enabled(&app) {
+            return Ok(None);
+        }
         let work = root.join(format!("{key}.work"));
         let input = path.clone();
         let target = cached.clone();
@@ -977,6 +992,9 @@ pub(crate) async fn get_media_storyboard(
     prune_cache_dirs(&root, STORYBOARD_MAX_CACHES);
 
     if read_sorted_jpgs(&dir).is_empty() {
+        if !video_artwork_enabled(&app) {
+            return Ok(vec![]);
+        }
         let input = path.clone();
         let out = dir.clone();
         tauri::async_runtime::spawn_blocking(move || {
