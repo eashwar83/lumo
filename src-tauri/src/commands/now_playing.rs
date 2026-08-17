@@ -61,6 +61,17 @@ pub(crate) async fn capture_now_playing_artwork(
     if url.is_empty() {
         return Ok(None);
     }
+    // Settings → Advanced → Video Artwork Thumbnail. Off stops new captures;
+    // the media overlay falls back to a generic icon, and already-captured
+    // artwork on disk stays usable.
+    let enabled = crate::store::ui_state_store::load_setting_value(&app, "VIDEO_ARTWORK_THUMBNAIL")
+        .ok()
+        .flatten()
+        .map(|value| value.trim() != "Off")
+        .unwrap_or(true);
+    if !enabled {
+        return Ok(None);
+    }
 
     let artwork_dir = storage_paths::thumbnails_dir(&app)?;
     let file_path = artwork_dir.join(build_artwork_file_name(&url));

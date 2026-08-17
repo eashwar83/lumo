@@ -109,6 +109,7 @@ export const AUTO_CROP_LIMIT_SETTING_LABEL = "AUTO_CROP_LIMIT";
 export const WINDOW_SIZE_LOCK_SETTING_LABEL = "WINDOW_SIZE_LOCK";
 export const SEEK_THUMBNAILS_ENABLED_SETTING_LABEL = "SEEK_THUMBNAILS_ENABLED";
 export const SEEK_THUMB_INTERVAL_SETTING_LABEL = "SEEK_THUMB_INTERVAL";
+export const VIDEO_ARTWORK_THUMBNAIL_SETTING_LABEL = "VIDEO_ARTWORK_THUMBNAIL";
 export const AUTOLOAD_FOLDER_SETTING_LABEL = "AUTOLOAD_FOLDER";
 export const PLAYLIST_INCLUDE_IMAGES_SETTING_LABEL = "PLAYLIST_INCLUDE_IMAGES";
 export const SCREENSHOT_DIR_SETTING_LABEL = "SCREENSHOT_DIR";
@@ -633,6 +634,14 @@ export const defaultSettingGroups: SettingGroup[] = [
                 max: 120,
                 step: 5,
                 unit: "s",
+            },
+            {
+                label: VIDEO_ARTWORK_THUMBNAIL_SETTING_LABEL,
+                displayLabel: "Video Artwork Thumbnail",
+                value: "On",
+                type: "toggle",
+                onValue: "On",
+                offValue: "Off",
             },
             {
                 label: FFMPEG_PATH_SETTING_LABEL,
