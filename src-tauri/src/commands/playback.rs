@@ -625,10 +625,16 @@ fn seek_thumb_cache_dir(
 
 // Evict oldest per-file caches once we exceed the cap (by directory mtime).
 fn prune_seek_thumb_caches(app: &tauri::AppHandle) {
-    let Ok(root) = seek_thumb_root(app) else {
-        return;
-    };
-    let Ok(entries) = std::fs::read_dir(&root) else {
+    if let Ok(root) = seek_thumb_root(app) {
+        prune_cache_dirs(&root, SEEK_THUMB_MAX_CACHES);
+    }
+}
+
+/// Keeps at most `max` per-file cache directories under `root`, dropping the
+/// oldest by mtime. Shared by the seek thumbnails and the storyboards — the
+/// storyboards went without and collected directories forever.
+fn prune_cache_dirs(root: &Path, max: usize) {
+    let Ok(entries) = std::fs::read_dir(root) else {
         return;
     };
     let mut dirs: Vec<(std::time::SystemTime, PathBuf)> = entries
@@ -642,14 +648,22 @@ fn prune_seek_thumb_caches(app: &tauri::AppHandle) {
             (mtime, e.path())
         })
         .collect();
-    if dirs.len() <= SEEK_THUMB_MAX_CACHES {
+    if dirs.len() <= max {
         return;
     }
     dirs.sort_by_key(|(mtime, _)| *mtime);
-    let remove = dirs.len() - SEEK_THUMB_MAX_CACHES;
+    let remove = dirs.len() - max;
     for (_, path) in dirs.into_iter().take(remove) {
         let _ = std::fs::remove_dir_all(&path);
     }
+}
+
+/// True when `dir` holds more files than `limit` — counted lazily, so a
+/// directory with half a million entries answers without listing them all.
+fn dir_has_more_files_than(dir: &Path, limit: usize) -> bool {
+    std::fs::read_dir(dir)
+        .map(|entries| entries.take(limit + 1).count() > limit)
+        .unwrap_or(false)
 }
 
 static SEEK_THUMB_INFLIGHT: std::sync::Mutex<Option<std::collections::HashSet<String>>> =
@@ -903,6 +917,9 @@ pub(crate) async fn get_media_poster(
 /// file, generated once and cached, then cycled by the playlist drawer.
 const STORYBOARD_COUNT: u32 = 12;
 const STORYBOARD_WIDTH: u32 = 320;
+// One directory per video and each holds ~1 MB, so this cap is generous;
+// what matters is that one exists — without it they collected forever.
+const STORYBOARD_MAX_CACHES: usize = 100;
 /// Below this length, use exact seeking for distinct frames (cheap on a short
 /// clip); above it, fast keyframe seeking (frames are already far apart).
 const STORYBOARD_EXACT_SEEK_MAX_SECS: f64 = 120.0;
@@ -943,12 +960,21 @@ pub(crate) async fn get_media_storyboard(
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     path.hash(&mut hasher);
     let key = format!("{:016x}", hasher.finish());
-    let dir = app
+    let root = app
         .path()
         .app_cache_dir()
         .map_err(|error| format!("Failed to resolve cache directory: {error}"))?
-        .join("storyboards")
-        .join(&key);
+        .join("storyboards");
+    let dir = root.join(&key);
+
+    // A storyboard is STORYBOARD_COUNT frames. A directory holding many times
+    // that is a runaway from a build without the frame cap — one held 454
+    // thousand copies of a single frame, and reading it here would base64 all
+    // 5.3 GB into memory. Regenerate it instead of loading it.
+    if dir_has_more_files_than(&dir, STORYBOARD_COUNT as usize * 4) {
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    prune_cache_dirs(&root, STORYBOARD_MAX_CACHES);
 
     if read_sorted_jpgs(&dir).is_empty() {
         let input = path.clone();
