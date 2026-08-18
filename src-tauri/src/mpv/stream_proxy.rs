@@ -14,6 +14,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt as _;
 use tokio::net::{TcpListener, TcpStream};
 use url::Url;
 
@@ -847,6 +849,95 @@ fn is_googlevideo_media(remote_url: &str) -> bool {
         && url.path().starts_with("/videoplayback")
 }
 
+/// One bounded chunk, fetched through the system curl.
+///
+/// The day this earns its keep: googlevideo answers a bare 403 (empty body,
+/// no reason) to this app's own fetches of its own freshly minted URLs,
+/// while the byte-identical request from curl gets 206 — reproduced with
+/// every controllable variable held equal: URL, headers, header shape,
+/// range, HTTP version, TLS backend (rustls and schannel both refused), IP
+/// family, proxy config and environment. Whatever the gate keys on, curl is
+/// on the right side of it, so the media chunks go through curl. A spawn
+/// per 4 MB chunk costs milliseconds against the network transfer.
+async fn curl_fetch_range(
+    remote_url: &str,
+    range: &str,
+) -> Result<(u16, Option<String>, String, Vec<u8>), String> {
+    let url = remote_url.to_string();
+    let range_spec = range.trim_start_matches("bytes=").to_string();
+    let output = tauri::async_runtime::spawn_blocking(move || {
+        let mut command = std::process::Command::new("curl");
+        #[cfg(windows)]
+        {
+            // CREATE_NO_WINDOW: curl is a console program and would flash a
+            // window over the player on every chunk.
+            command.creation_flags(0x0800_0000);
+        }
+        command
+            .arg("-s")
+            .arg("-S")
+            .arg("--max-time")
+            .arg("45")
+            .arg("-L")
+            .arg("-A")
+            .arg(HTTP_USER_AGENT)
+            .arg("-r")
+            .arg(&range_spec)
+            .arg("-D")
+            .arg("-")
+            .arg(&url)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output()
+    })
+    .await
+    .map_err(|error| format!("curl worker failed: {error}"))?
+    .map_err(|error| format!("curl spawn failed: {error}"))?;
+    if !output.status.success() && output.stdout.is_empty() {
+        return Err(format!(
+            "curl failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    // stdout = one or more header blocks (redirects) then the body.
+    let mut bytes = output.stdout;
+    let mut status = 0u16;
+    let mut content_range = None;
+    let mut content_type = "application/octet-stream".to_string();
+    loop {
+        let Some(end) = bytes.windows(4).position(|w| w == b"\r\n\r\n") else {
+            return Err("curl output held no header block".to_string());
+        };
+        let head = String::from_utf8_lossy(&bytes[..end]).to_string();
+        bytes.drain(..end + 4);
+        let mut lines = head.lines();
+        status = lines
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .and_then(|code| code.parse::<u16>().ok())
+            .unwrap_or(0);
+        for line in lines {
+            let Some((name, value)) = line.split_once(':') else {
+                continue;
+            };
+            let name = name.trim().to_ascii_lowercase();
+            let value = value.trim();
+            if name == "content-range" {
+                content_range = Some(value.to_string());
+            } else if name == "content-type" {
+                content_type = value.to_string();
+            }
+        }
+        // 1xx/3xx blocks are followed by another block.
+        if !(status >= 100 && status < 200 || status >= 300 && status < 400) {
+            break;
+        }
+    }
+    Ok((status, content_range, content_type, bytes))
+}
+
 /// Serves an unbounded read of a googlevideo URL as a sequence of bounded
 /// chunk fetches, streamed back as one continuous response. The client sees
 /// exactly what a direct fetch would have given it; the upstream only ever
@@ -876,36 +967,20 @@ async fn serve_chunked_media(
             tokio::time::sleep(Duration::from_secs(pause)).await;
         }
         for candidate in &candidates {
-            match fetch_remote(app_handle, candidate, Some(&first_range)).await {
-                Ok(response) if response.status().is_success() => {
-                    first_response = Some((candidate.clone(), response));
+            match curl_fetch_range(candidate, &first_range).await {
+                Ok((status, content_range, content_type, bytes)) if (200..300).contains(&status) => {
+                    first_response = Some((candidate.clone(), content_range, content_type, bytes));
                     break 'outer;
                 }
-                Ok(response) => {
-                    // The refusal itself is the best witness left: status
-                    // line, the interesting headers, and the body's first
-                    // bytes, which googlevideo uses to name its reason.
-                    let status = response.status();
-                    let headers = response
-                        .headers()
-                        .iter()
-                        .filter(|(name, _)| {
-                            let n = name.as_str();
-                            n.starts_with("x-") || n == "www-authenticate" || n == "retry-after" || n == "server"
-                        })
-                        .map(|(name, value)| {
-                            format!("{}={}", name, value.to_str().unwrap_or("?"))
-                        })
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    let body = response.bytes().await.ok().unwrap_or_default();
-                    let body_head: String = String::from_utf8_lossy(&body[..body.len().min(200)])
-                        .chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+                Ok((status, _, _, body)) => {
+                    let body_head: String = String::from_utf8_lossy(&body[..body.len().min(160)])
+                        .chars()
+                        .map(|c| if c.is_control() { ' ' } else { c })
+                        .collect();
                     info!(
-                        "stream proxy: probe refused {} on {} [{}] body: {}",
+                        "stream proxy: curl probe refused {} on {} body: {}",
                         status,
                         redact_url(candidate),
-                        headers,
                         body_head
                     );
                 }
@@ -915,7 +990,8 @@ async fn serve_chunked_media(
             }
         }
     }
-    let Some((active_url, first)) = first_response else {
+    let Some((active_url, first_content_range, first_content_type, first_bytes)) = first_response
+    else {
         warn!(
             "stream proxy: bounded reads refused on every host url={} [{}]",
             redact_url(remote_url),
@@ -941,36 +1017,29 @@ async fn serve_chunked_media(
         return Ok(());
     };
 
-    let content_type = content_type(&first);
+    let content_type = first_content_type;
     // "bytes <a>-<b>/<total>" — the total is the whole point of the probe.
-    let total = first
-        .headers()
-        .get(CONTENT_RANGE)
-        .and_then(|value| value.to_str().ok())
+    let total = first_content_range
+        .as_deref()
         .and_then(|value| value.rsplit('/').next())
         .and_then(|value| value.trim().parse::<u64>().ok());
 
     let Some(total) = total else {
         // No Content-Range means the server ignored the bounded request and
-        // is sending the whole body — relay it as-is.
-        let status = first.status();
+        // sent the whole body — relay what curl captured as-is.
         write_response(
             stream,
-            status.as_u16(),
-            status.canonical_reason().unwrap_or("OK"),
+            200,
+            "OK",
             &content_type,
-            first.content_length(),
+            Some(first_bytes.len() as u64),
             None,
             Some("bytes"),
         )
         .await?;
-        if method == "HEAD" {
-            return Ok(());
-        }
-        let mut body = first;
-        while let Some(chunk) = body.chunk().await.map_err(|error| error.to_string())? {
+        if method != "HEAD" {
             stream
-                .write_all(&chunk)
+                .write_all(&first_bytes)
                 .await
                 .map_err(|error| error.to_string())?;
         }
@@ -993,9 +1062,9 @@ async fn serve_chunked_media(
     }
 
     let mut next = start;
-    let mut response = Some(first);
+    let mut pending = Some(first_bytes);
     loop {
-        let mut body = match response.take() {
+        let body = match pending.take() {
             Some(body) => body,
             None => {
                 let chunk_range = format!(
@@ -1006,21 +1075,21 @@ async fn serve_chunked_media(
                 let mut fetched = None;
                 // The host that served the last chunk first, then mirrors.
                 for candidate in std::iter::once(&active_url).chain(candidates.iter()) {
-                    match fetch_remote(app_handle, candidate, Some(&chunk_range)).await {
-                        Ok(response) if response.status().is_success() => {
-                            fetched = Some(response);
+                    match curl_fetch_range(candidate, &chunk_range).await {
+                        Ok((status, _, _, bytes)) if (200..300).contains(&status) => {
+                            fetched = Some(bytes);
                             break;
                         }
-                        Ok(response) => debug!(
+                        Ok((status, _, _, _)) => debug!(
                             "stream proxy: chunk {} on {}",
-                            response.status(),
+                            status,
                             redact_url(candidate)
                         ),
                         Err(error) => debug!("stream proxy: chunk fetch failed: {error}"),
                     }
                 }
                 match fetched {
-                    Some(response) => response,
+                    Some(bytes) => bytes,
                     None => {
                         // Cut the connection; the player re-requests from the
                         // failure offset and lands back in this function.
@@ -1034,14 +1103,12 @@ async fn serve_chunked_media(
                 }
             }
         };
-        while let Some(chunk) = body.chunk().await.map_err(|error| error.to_string())? {
-            next = next.saturating_add(chunk.len() as u64);
-            stream
-                .write_all(&chunk)
-                .await
-                .map_err(|error| error.to_string())?;
-        }
-        if next >= total {
+        next = next.saturating_add(body.len() as u64);
+        stream
+            .write_all(&body)
+            .await
+            .map_err(|error| error.to_string())?;
+        if next >= total || body.is_empty() {
             return Ok(());
         }
     }
