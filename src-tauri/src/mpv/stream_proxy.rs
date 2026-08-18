@@ -835,6 +835,176 @@ fn with_mirror_hosts(remote_url: &str) -> Vec<String> {
     candidates
 }
 
+/// A googlevideo media URL — the only host family that refuses unbounded
+/// reads. Matches both URL shapes: DASH (`/videoplayback?...`) and the
+/// HLS path-style (`/videoplayback/id/.../file/seg.ts`).
+fn is_googlevideo_media(remote_url: &str) -> bool {
+    let Ok(url) = Url::parse(remote_url) else {
+        return false;
+    };
+    url.host_str()
+        .is_some_and(|host| host.ends_with(".googlevideo.com"))
+        && url.path().starts_with("/videoplayback")
+}
+
+/// Serves an unbounded read of a googlevideo URL as a sequence of bounded
+/// chunk fetches, streamed back as one continuous response. The client sees
+/// exactly what a direct fetch would have given it; the upstream only ever
+/// sees the bounded requests it is willing to answer.
+async fn serve_chunked_media(
+    app_handle: &AppHandle,
+    stream: &mut TcpStream,
+    method: &str,
+    remote_url: &str,
+    start: u64,
+    ranged: bool,
+) -> Result<(), String> {
+    const CHUNK_BYTES: u64 = 10 * 1024 * 1024;
+
+    let candidates = with_mirror_hosts(remote_url);
+    let first_range = format!("bytes={}-{}", start, start.saturating_add(CHUNK_BYTES - 1));
+
+    // Bounded reads are accepted immediately when the URL is good, so one
+    // quick pass over the mirrors plus one short retry cycle is plenty.
+    let mut first_response = None;
+    'outer: for pause in [0u64, 3] {
+        if pause > 0 {
+            tokio::time::sleep(Duration::from_secs(pause)).await;
+        }
+        for candidate in &candidates {
+            match fetch_remote(app_handle, candidate, Some(&first_range)).await {
+                Ok(response) if response.status().is_success() => {
+                    first_response = Some((candidate.clone(), response));
+                    break 'outer;
+                }
+                Ok(response) => {
+                    debug!(
+                        "stream proxy: chunk probe {} on {}",
+                        response.status(),
+                        redact_url(candidate)
+                    );
+                }
+                Err(error) => {
+                    debug!("stream proxy: chunk probe failed: {error}");
+                }
+            }
+        }
+    }
+    let Some((active_url, first)) = first_response else {
+        warn!(
+            "stream proxy: bounded reads refused on every host url={}",
+            redact_url(remote_url)
+        );
+        write_status(stream, 403, "Forbidden", b"upstream refused all hosts").await?;
+        return Ok(());
+    };
+
+    let content_type = content_type(&first);
+    // "bytes <a>-<b>/<total>" — the total is the whole point of the probe.
+    let total = first
+        .headers()
+        .get(CONTENT_RANGE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.rsplit('/').next())
+        .and_then(|value| value.trim().parse::<u64>().ok());
+
+    let Some(total) = total else {
+        // No Content-Range means the server ignored the bounded request and
+        // is sending the whole body — relay it as-is.
+        let status = first.status();
+        write_response(
+            stream,
+            status.as_u16(),
+            status.canonical_reason().unwrap_or("OK"),
+            &content_type,
+            first.content_length(),
+            None,
+            Some("bytes"),
+        )
+        .await?;
+        if method == "HEAD" {
+            return Ok(());
+        }
+        let mut body = first;
+        while let Some(chunk) = body.chunk().await.map_err(|error| error.to_string())? {
+            stream
+                .write_all(&chunk)
+                .await
+                .map_err(|error| error.to_string())?;
+        }
+        return Ok(());
+    };
+
+    let content_range = format!("bytes {}-{}/{}", start, total.saturating_sub(1), total);
+    write_response(
+        stream,
+        if ranged { 206 } else { 200 },
+        if ranged { "Partial Content" } else { "OK" },
+        &content_type,
+        Some(total.saturating_sub(start)),
+        if ranged { Some(content_range.as_str()) } else { None },
+        Some("bytes"),
+    )
+    .await?;
+    if method == "HEAD" {
+        return Ok(());
+    }
+
+    let mut next = start;
+    let mut response = Some(first);
+    loop {
+        let mut body = match response.take() {
+            Some(body) => body,
+            None => {
+                let chunk_range = format!(
+                    "bytes={}-{}",
+                    next,
+                    next.saturating_add(CHUNK_BYTES - 1).min(total - 1)
+                );
+                let mut fetched = None;
+                // The host that served the last chunk first, then mirrors.
+                for candidate in std::iter::once(&active_url).chain(candidates.iter()) {
+                    match fetch_remote(app_handle, candidate, Some(&chunk_range)).await {
+                        Ok(response) if response.status().is_success() => {
+                            fetched = Some(response);
+                            break;
+                        }
+                        Ok(response) => debug!(
+                            "stream proxy: chunk {} on {}",
+                            response.status(),
+                            redact_url(candidate)
+                        ),
+                        Err(error) => debug!("stream proxy: chunk fetch failed: {error}"),
+                    }
+                }
+                match fetched {
+                    Some(response) => response,
+                    None => {
+                        // Cut the connection; the player re-requests from the
+                        // failure offset and lands back in this function.
+                        warn!(
+                            "stream proxy: chunk at {} lost on every host url={}",
+                            next,
+                            redact_url(remote_url)
+                        );
+                        return Err("chunk fetch failed on every host".to_string());
+                    }
+                }
+            }
+        };
+        while let Some(chunk) = body.chunk().await.map_err(|error| error.to_string())? {
+            next = next.saturating_add(chunk.len() as u64);
+            stream
+                .write_all(&chunk)
+                .await
+                .map_err(|error| error.to_string())?;
+        }
+        if next >= total {
+            return Ok(());
+        }
+    }
+}
+
 async fn handle_http_stream_source(
     app_handle: &AppHandle,
     stream: &mut TcpStream,
@@ -859,6 +1029,22 @@ async fn handle_http_stream_source(
     // ramp varies, so the tail keeps polling to about three minutes rather
     // than being cut to fit one sample.
     const NOT_READY_BACKOFF_SECS: [u64; 8] = [2, 4, 8, 15, 30, 45, 30, 30];
+
+    // YouTube refuses UNBOUNDED reads of un-attested media URLs — measured on
+    // one URL in one second: `bytes=0-1023` answers 206, `bytes=0-` and no
+    // Range answer 403. mpv opens with an open-ended range, so its reads must
+    // be translated into bounded chunks and streamed back as one response.
+    // (This also explains why yt-dlp downloads always worked: it chunks.)
+    let unbounded_start = match range {
+        None => Some((0u64, false)),
+        Some(value) => parse_open_ended_range(Some(value)).map(|start| (start, true)),
+    };
+    if let Some((start, ranged)) = unbounded_start {
+        if is_googlevideo_media(remote_url) {
+            return serve_chunked_media(app_handle, stream, method, remote_url, start, ranged)
+                .await;
+        }
+    }
 
     let candidates = with_mirror_hosts(remote_url);
     let mut cycle = 0usize;
