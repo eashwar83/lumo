@@ -859,7 +859,11 @@ async fn serve_chunked_media(
     start: u64,
     ranged: bool,
 ) -> Result<(), String> {
-    const CHUNK_BYTES: u64 = 10 * 1024 * 1024;
+    // The bound has a ceiling too, measured on one URL in one minute:
+    // a 5 MB range answered 206 and a 10 MB range answered 403. Four
+    // megabytes sits well inside the limit; the cost is a request per
+    // 4 MB of video, a few per minute of playback.
+    const CHUNK_BYTES: u64 = 4 * 1024 * 1024;
 
     let candidates = with_mirror_hosts(remote_url);
     let first_range = format!("bytes={}-{}", start, start.saturating_add(CHUNK_BYTES - 1));
