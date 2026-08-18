@@ -899,9 +899,8 @@ async fn serve_chunked_media(
                         .collect::<Vec<_>>()
                         .join(" ");
                     let body = response.bytes().await.ok().unwrap_or_default();
-                    let body_head = String::from_utf8_lossy(&body[..body.len().min(200)])
-                        .replace(['', '
-'], " ");
+                    let body_head: String = String::from_utf8_lossy(&body[..body.len().min(200)])
+                        .chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
                     info!(
                         "stream proxy: probe refused {} on {} [{}] body: {}",
                         status,
