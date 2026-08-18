@@ -770,6 +770,25 @@ async fn handle_connection(mut stream: TcpStream, app_handle: &AppHandle) -> Res
 /// assigned edge does not have to be the last word. Mirrors inherit the
 /// original host's registered headers, since the header registry is
 /// keyed by host.
+/// The full URL with signature values replaced. The sig is the URL's whole
+/// authority — masked, the rest is diagnostic data: which client minted it,
+/// what it is bound to, which knobs are set.
+fn mask_url_signatures(remote_url: &str) -> String {
+    let Ok(url) = Url::parse(remote_url) else {
+        return redact_url(remote_url);
+    };
+    let mut masked = url.clone();
+    let pairs: Vec<(String, String)> = url
+        .query_pairs()
+        .map(|(k, v)| {
+            let hide = matches!(k.as_ref(), "sig" | "lsig" | "signature" | "pot" | "n");
+            (k.into_owned(), if hide { "<masked>".to_string() } else { v.into_owned() })
+        })
+        .collect();
+    masked.query_pairs_mut().clear().extend_pairs(pairs);
+    masked.to_string()
+}
+
 fn with_mirror_hosts(remote_url: &str) -> Vec<String> {
     let mut candidates = vec![remote_url.to_string()];
     let Ok(url) = Url::parse(remote_url) else {
@@ -872,6 +891,18 @@ async fn handle_http_stream_source(
         }
         let wait = NOT_READY_BACKOFF_SECS[cycle];
         cycle += 1;
+        if cycle == 1 {
+            // One shell-minted URL fetched 206 from the same host, video and
+            // address whose Lumo-minted twin was refused for minutes — the
+            // difference lives in the URL parameters, and the redacted log
+            // hid them. Log the refused URL once, signatures masked: they
+            // are the only capability in it, everything else is comparison
+            // material.
+            info!(
+                "stream proxy: refused url (sig masked): {}",
+                mask_url_signatures(remote_url)
+            );
+        }
         info!(
             "stream proxy: all {} host(s) answered 403 — retrying in {wait}s ({cycle}/{}) url={} [{}]",
             candidates.len(),
