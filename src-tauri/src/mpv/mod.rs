@@ -5,6 +5,7 @@ mod handle;
 mod thumbnails;
 mod ytdlp_resolver;
 mod ytdlp_settings;
+mod ytdlp_updater;
 mod stream_https;
 mod stream_proxy;
 
@@ -27,6 +28,7 @@ pub(crate) use ytdlp_resolver::try_resolve_reporting as try_resolve_with_ytdlp_r
 pub(crate) use ytdlp_resolver::ytdlp_base_command;
 pub(crate) use ytdlp_resolver::resolve_playlist as resolve_ytdlp_playlist;
 pub(crate) use ytdlp_settings::resolve as resolve_ytdlp_settings;
+pub(crate) use ytdlp_updater::spawn as spawn_ytdlp_updater;
 pub(crate) use ytdlp_settings::store_runtime_settings as store_runtime_ytdlp_settings;
 pub(crate) use ytdlp_settings::YtdlpFormatSettings;
 pub(crate) use ytdlp_settings::YtdlpSettings;

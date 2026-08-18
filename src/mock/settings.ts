@@ -159,6 +159,8 @@ export const YOUTUBE_SPONSORBLOCK_CATEGORIES_SETTING_LABEL =
     "YOUTUBE_SPONSORBLOCK_CATEGORIES";
 export const YOUTUBE_CHAPTERS_TO_SCENES_SETTING_LABEL =
     "YOUTUBE_CHAPTERS_TO_SCENES";
+export const YTDLP_UPDATE_CHANNEL_SETTING_LABEL = "YTDLP_UPDATE_CHANNEL";
+export const YTDLP_UPDATE_CHANNEL_OPTIONS = ["Nightly", "Stable", "Off"] as const;
 export const SETTINGS_UPDATED_EVENT = "soia:settings-updated";
 
 export type PlaybackTitleMode = "Show" | "Editable" | "Hidden";
@@ -480,6 +482,13 @@ export const defaultSettingGroups: SettingGroup[] = [
                 value: "1080p",
                 type: "select",
                 options: [...YOUTUBE_QUALITY_OPTIONS],
+            },
+            {
+                label: YTDLP_UPDATE_CHANNEL_SETTING_LABEL,
+                displayLabel: "yt-dlp Auto-Update",
+                value: "Nightly",
+                type: "select",
+                options: [...YTDLP_UPDATE_CHANNEL_OPTIONS],
             },
             {
                 label: YOUTUBE_AUTOPLAY_SETTING_LABEL,

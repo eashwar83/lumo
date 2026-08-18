@@ -45,6 +45,11 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<(), Box<dyn Error>> {
     #[cfg(not(target_os = "macos"))]
     let auth_token: Option<crate::check_update::SoiaAuthToken> = None;
 
+    // Keep yt-dlp itself fresh: extractor fixes for YouTube breakage land
+    // in yt-dlp within days, and a stale extractor is a player that cannot
+    // play. Runs once a day, off the startup path.
+    crate::mpv::spawn_ytdlp_updater(app_handle.clone());
+
     tauri::async_runtime::spawn(async move {
         // On non-macOS the initial check was skipped above; run it once now,
         // in the background, before entering the periodic poll loop.
