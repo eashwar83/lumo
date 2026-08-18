@@ -766,12 +766,53 @@ fn build_edl_url(candidates: &[Candidate]) -> String {
 
 fn log_selected_candidate(label: &str, candidate: &Candidate) {
     info!(
-        "yt-dlp: {label} format_id={} protocol={} resolution={} score={}",
+        "yt-dlp: {label} format_id={} protocol={} resolution={} score={} bound={}",
         candidate.format_id.as_deref().unwrap_or("<top-level>"),
         candidate.protocol.as_deref().unwrap_or("<unknown>"),
         candidate.resolution.as_deref().unwrap_or("<unknown>"),
-        candidate.score
+        candidate.score,
+        url_binding_summary(&candidate.url),
     );
+}
+
+/// The parameters that decide whether a fetch of this URL will be honoured:
+/// which client address it was minted for, when it dies, and whether it is
+/// PO-token attested. None of them are secrets — the signature is what
+/// guards the URL, and it is exactly what this leaves out. Diagnosing a 403
+/// needs these three visible; the full URL stays redacted.
+pub(crate) fn url_binding_summary(raw: &str) -> String {
+    let Ok(url) = Url::parse(raw) else {
+        return "<unparsable>".to_string();
+    };
+    let mut ip = None;
+    let mut expire = None;
+    let mut has_pot = false;
+    for (key, value) in url.query_pairs() {
+        match key.as_ref() {
+            "ip" => ip = Some(value.into_owned()),
+            "expire" => expire = Some(value.into_owned()),
+            "pot" => has_pot = true,
+            _ => {}
+        }
+    }
+    // The HLS shape carries them as path segments instead.
+    if ip.is_none() {
+        let mut segments = url.path().split('/');
+        while let Some(segment) = segments.next() {
+            match segment {
+                "ip" => ip = segments.next().map(str::to_string),
+                "expire" => expire = segments.next().map(str::to_string),
+                "pot" => has_pot = true,
+                _ => {}
+            }
+        }
+    }
+    format!(
+        "ip={} expire={} pot={}",
+        ip.as_deref().unwrap_or("?"),
+        expire.as_deref().unwrap_or("?"),
+        has_pot
+    )
 }
 
 /// Liveness from yt-dlp's own metadata - protocol is no longer a proxy for

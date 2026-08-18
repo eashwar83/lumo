@@ -869,10 +869,11 @@ async fn handle_http_stream_source(
         let wait = NOT_READY_BACKOFF_SECS[cycle];
         cycle += 1;
         info!(
-            "stream proxy: all {} host(s) answered 403 — retrying in {wait}s ({cycle}/{}) url={}",
+            "stream proxy: all {} host(s) answered 403 — retrying in {wait}s ({cycle}/{}) url={} [{}]",
             candidates.len(),
             NOT_READY_BACKOFF_SECS.len(),
-            redact_url(remote_url)
+            redact_url(remote_url),
+            super::ytdlp_resolver::url_binding_summary(remote_url)
         );
         tokio::time::sleep(Duration::from_secs(wait)).await;
     };
