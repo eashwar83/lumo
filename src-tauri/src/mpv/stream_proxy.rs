@@ -835,9 +835,11 @@ async fn handle_http_stream_source(
     // 403 first rotates through the mirrors, and only then waits — mpv sits
     // in its loading state through the waits, which turns this failure
     // class into a slower start instead of a dead video.
-    // Sized to the measured ramp: a URL minted at 09:16:42 was refused through
-    // 09:16:51 and served at 09:18:03 — roughly ninety seconds of "not yet".
-    const NOT_READY_BACKOFF_SECS: [u64; 6] = [2, 4, 8, 15, 30, 45];
+    // Sized to the measured ramps, plural: one URL came alive at ~81s, the
+    // next at ~116s — five seconds after a six-step schedule gave up. The
+    // ramp varies, so the tail keeps polling to about three minutes rather
+    // than being cut to fit one sample.
+    const NOT_READY_BACKOFF_SECS: [u64; 8] = [2, 4, 8, 15, 30, 45, 30, 30];
 
     let candidates = with_mirror_hosts(remote_url);
     let mut cycle = 0usize;

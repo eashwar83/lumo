@@ -314,7 +314,7 @@ fn configure_mpv_startup(app: &tauri::App) -> Result<(), Box<dyn Error>> {
     // The stream proxy holds a connection for up to ~104s while it waits out
     // YouTube's availability ramp; mpv's default 60s network timeout would
     // abandon the socket first and turn that patience into a dead video.
-    mpv_guard.set_option_string("network-timeout", "150");
+    mpv_guard.set_option_string("network-timeout", "240");
 
     mpv_guard.set_option_string("hwdec", "auto");
 
