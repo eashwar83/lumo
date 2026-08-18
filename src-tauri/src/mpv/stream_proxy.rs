@@ -882,10 +882,32 @@ async fn serve_chunked_media(
                     break 'outer;
                 }
                 Ok(response) => {
-                    debug!(
-                        "stream proxy: chunk probe {} on {}",
-                        response.status(),
-                        redact_url(candidate)
+                    // The refusal itself is the best witness left: status
+                    // line, the interesting headers, and the body's first
+                    // bytes, which googlevideo uses to name its reason.
+                    let status = response.status();
+                    let headers = response
+                        .headers()
+                        .iter()
+                        .filter(|(name, _)| {
+                            let n = name.as_str();
+                            n.starts_with("x-") || n == "www-authenticate" || n == "retry-after" || n == "server"
+                        })
+                        .map(|(name, value)| {
+                            format!("{}={}", name, value.to_str().unwrap_or("?"))
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    let body = response.bytes().await.ok().unwrap_or_default();
+                    let body_head = String::from_utf8_lossy(&body[..body.len().min(200)])
+                        .replace(['', '
+'], " ");
+                    info!(
+                        "stream proxy: probe refused {} on {} [{}] body: {}",
+                        status,
+                        redact_url(candidate),
+                        headers,
+                        body_head
                     );
                 }
                 Err(error) => {
