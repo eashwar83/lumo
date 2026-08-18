@@ -761,6 +761,61 @@ async fn handle_connection(mut stream: TcpStream, app_handle: &AppHandle) -> Res
         .await
 }
 
+/// The URL first, then the same URL on each mirror edge it names.
+///
+/// A googlevideo host reads `rr3---sn-h557sn6l.googlevideo.com`, and the
+/// URL carries `mn=sn-h5576nsr,sn-h557sn6l` — the edges serving this
+/// content. The signature stays valid across them (verified live: one
+/// answered 206 at the moment the other said 403), so a refusal on the
+/// assigned edge does not have to be the last word. Mirrors inherit the
+/// original host's registered headers, since the header registry is
+/// keyed by host.
+fn with_mirror_hosts(remote_url: &str) -> Vec<String> {
+    let mut candidates = vec![remote_url.to_string()];
+    let Ok(url) = Url::parse(remote_url) else {
+        return candidates;
+    };
+    let Some(host) = url.host_str() else {
+        return candidates;
+    };
+    if !host.ends_with(".googlevideo.com") {
+        return candidates;
+    }
+    let Some((prefix, rest)) = host.split_once("---") else {
+        return candidates;
+    };
+    let Some((current_sn, domain)) = rest.split_once('.') else {
+        return candidates;
+    };
+
+    // `mn` is a query parameter on DASH URLs and a path segment on the
+    // HLS-style ones (`…/mn/sn-a,sn-b/…`).
+    let mirrors = url
+        .query_pairs()
+        .find(|(key, _)| key == "mn")
+        .map(|(_, value)| value.into_owned())
+        .or_else(|| {
+            let path = url.path();
+            let start = path.find("/mn/")? + "/mn/".len();
+            Some(path[start..].split('/').next()?.to_string())
+        })
+        .unwrap_or_default();
+
+    let inherited = lookup_headers(remote_url);
+    for mirror in mirrors.split(',').map(str::trim) {
+        if mirror.is_empty() || mirror == current_sn {
+            continue;
+        }
+        let mirror_host = format!("{prefix}---{mirror}.{domain}");
+        let swapped = remote_url.replacen(host, &mirror_host, 1);
+        if let Some(headers) = inherited.as_deref() {
+            register_host_headers(&swapped, headers);
+        }
+        candidates.push(swapped);
+    }
+    candidates
+}
+
 async fn handle_http_stream_source(
     app_handle: &AppHandle,
     stream: &mut TcpStream,
@@ -772,39 +827,56 @@ async fn handle_http_stream_source(
 
     // YouTube withholds a freshly issued stream URL for a while — 403 until
     // the CDN edge is ready. Its `available_at` field is supposed to say how
-    // long, but it has claimed zero while the edge went on refusing for
-    // minutes, and a re-resolve only mints another URL with the same problem.
-    // So a 403 is treated as "not ready yet" a few times before it is
-    // believed: mpv sits in its loading state during the waits, which turns
-    // this whole failure class into a slower start instead of a dead video.
+    // long, but it has claimed zero while an edge went on refusing for
+    // minutes, and a re-resolve only mints another URL on the same edge.
+    // The URL itself names the way out: `mn=` lists mirror hosts carrying
+    // the same content, the signature is honoured on any of them, and one
+    // mirror has answered 206 at the very moment the other refused. So a
+    // 403 first rotates through the mirrors, and only then waits — mpv sits
+    // in its loading state through the waits, which turns this failure
+    // class into a slower start instead of a dead video.
     const NOT_READY_BACKOFF_SECS: [u64; 3] = [2, 4, 8];
 
-    let mut attempt = 0usize;
-    let response = loop {
-        let response = match fetch_remote(app_handle, remote_url, range).await {
-            Ok(response) => response,
-            Err(error) => {
-                warn!(
-                    "stream proxy: upstream fetch failed url={} error={error}",
-                    redact_url(remote_url)
-                );
-                write_status(stream, 502, "Bad Gateway", error.as_bytes()).await?;
-                return Ok(());
+    let candidates = with_mirror_hosts(remote_url);
+    let mut cycle = 0usize;
+    let (active_url, response) = 'found: loop {
+        for candidate in &candidates {
+            let response = match fetch_remote(app_handle, candidate, range).await {
+                Ok(response) => response,
+                Err(error) => {
+                    warn!(
+                        "stream proxy: upstream fetch failed url={} error={error}",
+                        redact_url(candidate)
+                    );
+                    write_status(stream, 502, "Bad Gateway", error.as_bytes()).await?;
+                    return Ok(());
+                }
+            };
+            if response.status().as_u16() != 403 {
+                if candidate != remote_url {
+                    info!(
+                        "stream proxy: mirror host answered where {} refused",
+                        redact_url(remote_url)
+                    );
+                }
+                break 'found (candidate.clone(), response);
             }
-        };
-        if response.status().as_u16() == 403 && attempt < NOT_READY_BACKOFF_SECS.len() {
-            let wait = NOT_READY_BACKOFF_SECS[attempt];
-            attempt += 1;
-            info!(
-                "stream proxy: upstream 403 — retrying in {wait}s ({attempt}/{}) url={}",
-                NOT_READY_BACKOFF_SECS.len(),
-                redact_url(remote_url)
-            );
-            tokio::time::sleep(Duration::from_secs(wait)).await;
-            continue;
+            if cycle == NOT_READY_BACKOFF_SECS.len() {
+                // Out of patience: relay the last refusal as-is.
+                break 'found (candidate.clone(), response);
+            }
         }
-        break response;
+        let wait = NOT_READY_BACKOFF_SECS[cycle];
+        cycle += 1;
+        info!(
+            "stream proxy: all {} host(s) answered 403 — retrying in {wait}s ({cycle}/{}) url={}",
+            candidates.len(),
+            NOT_READY_BACKOFF_SECS.len(),
+            redact_url(remote_url)
+        );
+        tokio::time::sleep(Duration::from_secs(wait)).await;
     };
+    let remote_url = active_url.as_str();
     let status = response.status();
     if !status.is_success() {
         let code = status.as_u16();
@@ -2078,6 +2150,29 @@ mod segment_set_tests {
             "https://rr1---sn-gwpa.googlevideo.com/videoplayback/id/2c4d/itag/94/playlist/index.m3u8/govp/slices%3D0-454798/begin/0/len/5200/gosq/0/file/seg.ts"
         ));
         assert!(!looks_like_playlist_url("https://host/video.mp4"));
+    }
+
+    #[test]
+    fn derives_mirror_hosts_from_both_url_shapes() {
+        // DASH: mn is a query parameter.
+        let dash = "https://rr4---sn-h5576nsr.googlevideo.com/videoplayback?id=abc&mn=sn-h5576nsr%2Csn-h557sn6l&mvi=4";
+        let candidates = with_mirror_hosts(dash);
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0], dash);
+        assert!(candidates[1].starts_with("https://rr4---sn-h557sn6l.googlevideo.com/"));
+
+        // HLS: mn is a path segment.
+        let hls = "https://rr1---sn-npoldn7e.googlevideo.com/videoplayback/id/x/mn/sn-npoldn7e,sn-npoe7nz7/mm/31,29/file/seg.ts";
+        let candidates = with_mirror_hosts(hls);
+        assert_eq!(candidates.len(), 2);
+        assert!(candidates[1].starts_with("https://rr1---sn-npoe7nz7.googlevideo.com/"));
+
+        // Anything else passes through untouched.
+        assert_eq!(with_mirror_hosts("https://example.com/video.mp4").len(), 1);
+        assert_eq!(
+            with_mirror_hosts("https://rr1---sn-abc.googlevideo.com/videoplayback?id=x").len(),
+            1
+        );
     }
 
     #[test]
