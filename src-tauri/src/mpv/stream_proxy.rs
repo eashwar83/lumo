@@ -12,7 +12,7 @@ use std::net::TcpListener as StdTcpListener;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use url::Url;
@@ -896,9 +896,26 @@ async fn serve_chunked_media(
     }
     let Some((active_url, first)) = first_response else {
         warn!(
-            "stream proxy: bounded reads refused on every host url={}",
-            redact_url(remote_url)
+            "stream proxy: bounded reads refused on every host url={} [{}]",
+            redact_url(remote_url),
+            super::ytdlp_resolver::url_binding_summary(remote_url)
         );
+        // Diagnostic breadcrumb for the live investigation: the exact URL,
+        // written beside the logs so a shell can fetch the same byte string
+        // seconds later. Local file on the user's own machine, holding the
+        // user's own short-lived stream URL.
+        if let Ok(dir) = app_handle.path().app_log_dir() {
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let _ = std::fs::write(
+                dir.join("refused_url.txt"),
+                format!("{stamp}
+{remote_url}
+"),
+            );
+        }
         write_status(stream, 403, "Forbidden", b"upstream refused all hosts").await?;
         return Ok(());
     };
