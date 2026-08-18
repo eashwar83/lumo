@@ -770,16 +770,40 @@ async fn handle_http_stream_source(
 ) -> Result<(), String> {
     debug!("stream proxy: fetch {}", redact_url(remote_url));
 
-    let response = match fetch_remote(app_handle, remote_url, range).await {
-        Ok(response) => response,
-        Err(error) => {
-            warn!(
-                "stream proxy: upstream fetch failed url={} error={error}",
+    // YouTube withholds a freshly issued stream URL for a while — 403 until
+    // the CDN edge is ready. Its `available_at` field is supposed to say how
+    // long, but it has claimed zero while the edge went on refusing for
+    // minutes, and a re-resolve only mints another URL with the same problem.
+    // So a 403 is treated as "not ready yet" a few times before it is
+    // believed: mpv sits in its loading state during the waits, which turns
+    // this whole failure class into a slower start instead of a dead video.
+    const NOT_READY_BACKOFF_SECS: [u64; 3] = [2, 4, 8];
+
+    let mut attempt = 0usize;
+    let response = loop {
+        let response = match fetch_remote(app_handle, remote_url, range).await {
+            Ok(response) => response,
+            Err(error) => {
+                warn!(
+                    "stream proxy: upstream fetch failed url={} error={error}",
+                    redact_url(remote_url)
+                );
+                write_status(stream, 502, "Bad Gateway", error.as_bytes()).await?;
+                return Ok(());
+            }
+        };
+        if response.status().as_u16() == 403 && attempt < NOT_READY_BACKOFF_SECS.len() {
+            let wait = NOT_READY_BACKOFF_SECS[attempt];
+            attempt += 1;
+            info!(
+                "stream proxy: upstream 403 — retrying in {wait}s ({attempt}/{}) url={}",
+                NOT_READY_BACKOFF_SECS.len(),
                 redact_url(remote_url)
             );
-            write_status(stream, 502, "Bad Gateway", error.as_bytes()).await?;
-            return Ok(());
+            tokio::time::sleep(Duration::from_secs(wait)).await;
+            continue;
         }
+        break response;
     };
     let status = response.status();
     if !status.is_success() {
