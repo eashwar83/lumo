@@ -34,11 +34,16 @@ const onToggle = () => {
 </template>
 
 <style scoped>
+/* Only the middle third of the edge is live. The strip used to run the
+   whole right edge, which made it own both corners: it sat over the
+   top-right Open File button and answered with its own "Playlist" tooltip
+   when the user was aiming at the folder. The arrow renders mid-edge, so
+   the active zone now matches what the eye is told. */
 .playlist-peek-area {
     position: fixed;
-    top: var(--top-bar-height);
+    top: 33%;
     right: 0;
-    bottom: var(--controls-bar-height);
+    bottom: 33%;
     width: var(--playlist-peek-reveal-width);
     display: flex;
     align-items: center;
@@ -73,7 +78,9 @@ const onToggle = () => {
     align-items: center;
     justify-content: center;
     opacity: 0;
-    transform: translateX(12px) translateY(var(--playlist-peek-offset-y));
+    /* The band is window-centred now; the old offset-y compensated for
+       the unequal top/controls bars and would push the arrow off centre. */
+    transform: translateX(12px);
     transition:
         opacity 0.2s ease,
         transform 0.2s ease,
@@ -89,7 +96,7 @@ const onToggle = () => {
 .playlist-peek-area:hover .playlist-peek,
 .playlist-peek-area:focus-visible .playlist-peek {
     opacity: 1;
-    transform: translateX(0) translateY(var(--playlist-peek-offset-y));
+    transform: translateX(0);
 }
 
 .playlist-peek-area:hover .playlist-peek {
