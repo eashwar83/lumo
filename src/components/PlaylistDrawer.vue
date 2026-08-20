@@ -191,13 +191,23 @@ const isRemotePath = (path: string): boolean =>
 const MAX_CONCURRENT_POSTERS = 3;
 const wantedPosters = new Set<string>();
 const inFlightPosters = new Set<string>();
+// Paths that have answered — with art, with nothing (artwork toggle off,
+// broken file), or with an error. Without this memory the pump re-asked the
+// same path the moment its null came back, and three of those chains
+// spinning at IPC speed pegged a WebView core whether the video played or
+// sat paused. Ask once per session; the answer stands.
+const settledPosters = new Set<string>();
 
 const pumpPosters = () => {
     if (disposed) return;
     while (inFlightPosters.size < MAX_CONCURRENT_POSTERS) {
         let next: string | undefined;
         for (const path of wantedPosters) {
-            if (!thumbs.value[path] && !inFlightPosters.has(path)) {
+            if (
+                !thumbs.value[path] &&
+                !inFlightPosters.has(path) &&
+                !settledPosters.has(path)
+            ) {
                 next = path;
                 break;
             }
@@ -208,6 +218,7 @@ const pumpPosters = () => {
         invoke<string | null>("get_media_poster", { path })
             .then((url) => {
                 inFlightPosters.delete(path);
+                settledPosters.add(path);
                 if (url && !disposed) {
                     thumbs.value = { ...thumbs.value, [path]: url };
                 }
@@ -215,6 +226,7 @@ const pumpPosters = () => {
             })
             .catch(() => {
                 inFlightPosters.delete(path);
+                settledPosters.add(path);
                 pumpPosters();
             });
     }
@@ -226,7 +238,11 @@ const refreshWantedPosters = () => {
     if (viewMode.value === "thumbnails") {
         for (const row of virtualRows.value) {
             const path = row.entry.path;
-            if (!thumbs.value[path] && !isRemotePath(path)) {
+            if (
+                !thumbs.value[path] &&
+                !isRemotePath(path) &&
+                !settledPosters.has(path)
+            ) {
                 wantedPosters.add(path);
             }
         }
