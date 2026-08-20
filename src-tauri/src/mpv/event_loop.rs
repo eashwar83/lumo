@@ -9,6 +9,7 @@ use std::ffi::{c_void, CStr, CString};
 use std::os::raw::c_int;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -495,6 +496,14 @@ pub(super) fn mpv_event_loop(
     const PAUSED_FOR_CACHE_ID: u64 = 12;
     const HWDEC_CURRENT_ID: u64 = 13;
 
+    // The UI does not need a re-render per decoded frame. time-pos alone
+    // ticks tens of times a second, and every tick used to cross the IPC
+    // boundary and re-render the seek bar — the WebView burned more CPU
+    // than the player while "idle". Progress emits are rate-limited here;
+    // state changes (pause, buffering) bypass the limit so they stay
+    // instant, and seeks already re-emit via MPV_EVENT_PLAYBACK_RESTART.
+    const PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(250);
+    let mut last_progress_emit = Instant::now() - PROGRESS_EMIT_INTERVAL;
     let mut last_time_pos: f64 = 0.0;
     let mut last_duration: f64 = 0.0;
     let mut last_is_paused: bool = false;
@@ -712,6 +721,7 @@ pub(super) fn mpv_event_loop(
                     if !prop_event.is_null() {
                         let value_ptr = (*prop_event).data;
                         let mut should_emit_progress = true;
+                        let mut force_progress = false;
 
                         match (*event).reply_usrdata {
                             TIME_POS_ID => {
@@ -793,6 +803,9 @@ pub(super) fn mpv_event_loop(
                                     let is_paused_int = *(value_ptr as *mut c_int);
                                     let was_paused = last_is_paused;
                                     last_is_paused = is_paused_int != 0;
+                                    if was_paused != last_is_paused {
+                                        force_progress = true;
+                                    }
                                     #[cfg(any(target_os = "macos", target_os = "windows"))]
                                     {
                                         emit_pip_state_on_pause_change(
@@ -992,7 +1005,11 @@ pub(super) fn mpv_event_loop(
                                 if (*prop_event).format == mpv_format::MPV_FORMAT_FLAG
                                     && !value_ptr.is_null()
                                 {
+                                    let was_buffering = last_is_buffering;
                                     last_is_buffering = *(value_ptr as *mut c_int) != 0;
+                                    if was_buffering != last_is_buffering {
+                                        force_progress = true;
+                                    }
                                 }
                             }
                             WIDTH_ID => {
@@ -1137,7 +1154,11 @@ pub(super) fn mpv_event_loop(
                             _ => {}
                         }
 
-                        if should_emit_progress {
+                        if should_emit_progress
+                            && (force_progress
+                                || last_progress_emit.elapsed() >= PROGRESS_EMIT_INTERVAL)
+                        {
+                            last_progress_emit = Instant::now();
                             emit_progress(
                                 &app_handle,
                                 last_time_pos,
