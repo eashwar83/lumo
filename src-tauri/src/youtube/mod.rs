@@ -15,6 +15,7 @@ mod data;
 mod downloads;
 mod innertube;
 mod pot;
+mod ranges;
 mod sponsorblock;
 mod thumbs;
 mod watch;
@@ -24,6 +25,7 @@ pub(crate) use browse::{
     __cmd__youtube_channel, __cmd__youtube_playlist, __cmd__youtube_trending,
     youtube_channel, youtube_playlist, youtube_trending,
 };
+pub(crate) use ranges::{__cmd__youtube_fetch_range, youtube_fetch_range};
 pub(crate) use captions::{
     __cmd__youtube_caption_file, __cmd__youtube_caption_tracks, youtube_caption_file,
     youtube_caption_tracks,

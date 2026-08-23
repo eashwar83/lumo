@@ -592,6 +592,7 @@ pub fn run() {
             youtube::youtube_ytdlp_status,
             youtube::youtube_ytdlp_update,
             youtube::youtube_caption_tracks,
+            youtube::youtube_fetch_range,
             youtube::youtube_caption_file,
             youtube::youtube_comments,
             youtube::youtube_comment_replies,

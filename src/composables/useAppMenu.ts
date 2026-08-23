@@ -48,6 +48,8 @@ export type AppMenuOptions = {
     playbackRates: () => number[];
     aspectLabel: () => string;
     hasAbRange: () => boolean;
+    /** Range exports: local files, and YouTube (the range is fetched first). */
+    canExportRange: () => boolean;
     clipExportAvailable: () => boolean;
     describeClip: () => void;
     /** Formatted accelerator for a rebindable action. */
@@ -181,6 +183,7 @@ export const useAppMenu = (options: AppMenuOptions) => {
         const loaded = options.isFileLoaded();
         const local = options.isLocalMedia();
         const hasRange = options.hasAbRange();
+        const rangeOk = hasRange && options.canExportRange();
         return [
             {
                 kind: "action",
@@ -246,14 +249,14 @@ export const useAppMenu = (options: AppMenuOptions) => {
                 kind: "action",
                 label: "Export Clip",
                 shortcut: key("exportClip"),
-                disabled: !local || !hasRange || !options.clipExportAvailable(),
+                disabled: !rangeOk || !options.clipExportAvailable(),
                 run: () => options.exportClip(false),
             },
             {
                 kind: "action",
                 label: "Export GIF",
                 shortcut: key("exportGif"),
-                disabled: !local || !hasRange,
+                disabled: !rangeOk,
                 run: () => options.exportClip(true),
             },
             {

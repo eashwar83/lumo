@@ -1067,7 +1067,7 @@ const { onKeydown, onKeyup, onDoubleClick, bindings: shortcutBindings } = usePla
         undoEnhancement: () => void enhancementHistory.undo(),
         redoEnhancement: () => void enhancementHistory.redo(),
         runCustomShortcut: (chord) => customShortcuts.runChord(chord),
-        canExportRange: () => abRange.hasRange.value && isLocalMediaPath.value,
+        canExportRange: () => abRange.hasRange.value && canExportRange.value,
         canExportClip: () => isClipExportAvailable.value,
         isLocalMedia: () => isLocalMediaPath.value,
     },
@@ -1112,6 +1112,42 @@ const isLocalMediaPath = computed(
         !/^(https?|rtsp|rtmp|smb|webdav):\/\//i.test(player.state.media.url),
 );
 const isExportingClip = ref(false);
+// Range exports need a real file. A YouTube stream is two URLs stitched
+// live by the player, so the marked range is first fetched as a file — at
+// the quality being played — and then handed to the same export code local
+// files use. Resolves to the media path unchanged for local files.
+const youtubeExportHeight = () =>
+    ytQualityOverride.value ?? youtubeSettings.qualityMaxHeight ?? 2160;
+const canExportRange = computed(
+    () => isLocalMediaPath.value || isYoutubePlayback.value,
+);
+type RangeExportSource = { path: string; start: number; end: number };
+const resolveRangeExportSource = async (
+    start: number,
+    end: number,
+): Promise<RangeExportSource | null> => {
+    const url = player.state.media.url.trim();
+    if (!url) return null;
+    if (isLocalMediaPath.value) return { path: url, start, end };
+    if (!isYoutubePlayback.value) return null;
+    showMessageOverlay("Fetching range from YouTube…", 120000);
+    try {
+        const path = await invoke<string>("youtube_fetch_range", {
+            url,
+            start,
+            end,
+            maxHeight: youtubeExportHeight(),
+        });
+        // The cut file's timeline starts at A.
+        return { path, start: 0, end: end - start };
+    } catch (error) {
+        console.warn("[clip] youtube range fetch failed", error);
+        showMessageOverlay(`Could not fetch the range: ${error}`, 4000);
+        return null;
+    }
+};
+// The file the Describe Clip dialog reads — the fetched range for YouTube.
+const describeClipPath = ref("");
 // Video clips are re-encoded by a full ffmpeg; the bundled playback ffmpeg has
 // no muxers or encoders. GIF export is in-process and always available.
 const isClipExportAvailable = ref(false);
@@ -1133,14 +1169,16 @@ watch(
 const onExportClip = async (payload: { asGif: boolean; gifWidth: number }) => {
     if (isExportingClip.value) return;
     const { asGif, gifWidth } = payload;
-    const path = player.state.media.url.trim();
-    const start = abRange.pointA.value;
-    const end = abRange.pointB.value;
-    if (!path || start === null || end === null) return;
+    const pointA = abRange.pointA.value;
+    const pointB = abRange.pointB.value;
+    if (pointA === null || pointB === null) return;
     isExportingClip.value = true;
-    // A full-resolution GIF can take a while to quantize, so keep the notice up.
-    showMessageOverlay(asGif ? "Rendering GIF…" : "Exporting clip…", 20000);
     try {
+        const source = await resolveRangeExportSource(pointA, pointB);
+        if (!source) return;
+        const { path, start, end } = source;
+        // A full-resolution GIF can take a while to quantize, so keep the notice up.
+        showMessageOverlay(asGif ? "Rendering GIF…" : "Exporting clip…", 20000);
         const result = await invoke<{ path: string; fileName: string }>(
             "export_clip",
             {
@@ -1490,13 +1528,18 @@ const onDescribeClip = () => {
         showMessageOverlay("Mark an A–B range first (press K twice)", 3000);
         return;
     }
-    if (!isLocalMediaPath.value) {
-        showMessageOverlay("Clip description needs a local video file", 3000);
+    if (!canExportRange.value) {
+        showMessageOverlay("Clip description needs a local or YouTube video", 3000);
         return;
     }
-    describeClipStart.value = a;
-    describeClipEnd.value = b;
-    describeClipOpen.value = true;
+    void (async () => {
+        const source = await resolveRangeExportSource(a, b);
+        if (!source) return;
+        describeClipPath.value = source.path;
+        describeClipStart.value = source.start;
+        describeClipEnd.value = source.end;
+        describeClipOpen.value = true;
+    })();
 };
 const onAiSubtitlesLoaded = async (payload: {
     path: string;
@@ -2268,6 +2311,7 @@ const { menus: appMenus } = useAppMenu({
     playbackRates: () => [...speed.playbackRates],
     aspectLabel: () => geometry.currentAspectLabel.value,
     hasAbRange: () => abRange.hasRange.value,
+    canExportRange: () => canExportRange.value,
     clipExportAvailable: () => isClipExportAvailable.value,
     keyFor: (id) => menuShortcut(shortcutBindings.value[id]),
 
@@ -2922,7 +2966,7 @@ useAppStartupBindings({
 
         <ClipDescribeDialog
             :open="describeClipOpen"
-            :path="player.state.media.url"
+            :path="describeClipPath || player.state.media.url"
             :start="describeClipStart"
             :end="describeClipEnd"
             @close="describeClipOpen = false"
@@ -3139,7 +3183,7 @@ useAppStartupBindings({
                     :format-time="player.formatTime"
                     :exporting="isExportingClip"
                     :gif-max-seconds="GIF_MAX_SECONDS"
-                    :can-export="isLocalMediaPath"
+                    :can-export="canExportRange"
                     :clip-available="isClipExportAvailable"
                     @export="onExportClip"
                     @describe="onDescribeClip"
