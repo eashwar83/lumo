@@ -1035,13 +1035,18 @@ export const usePlaylistState = () => {
         }
 
         // Idempotent: same folder already loaded — just ensure it's active.
+        // Set membership, not entries.some(): with the quadratic form a
+        // 29k-file USB folder cost ~841 million string comparisons on every
+        // next-click, which was the entire 3–4 s "loading" pause.
         const existing = findPlaylistById(AUTOLOAD_PLAYLIST_ID);
+        const existingPaths = existing
+            ? new Set(existing.entries.map((entry) => entry.path))
+            : null;
         if (
             existing &&
+            existingPaths &&
             existing.entries.length === paths.length &&
-            paths.every((path) =>
-                existing.entries.some((entry) => entry.path === path),
-            )
+            paths.every((path) => existingPaths.has(path))
         ) {
             activateAutoloadPlaylist();
             return;

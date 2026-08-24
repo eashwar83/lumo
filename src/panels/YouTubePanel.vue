@@ -182,9 +182,9 @@ watch(
             warmedUp = true;
             invoke("youtube_warmup").catch(() => {});
         }
-        if (!yt.hasSearched.value) {
-            requestAnimationFrame(() => searchInputRef.value?.focus());
-        }
+        // No autofocus on tab entry: focusing the box popped the search
+        // history over the page before the user asked for anything. The
+        // box focuses when clicked, like any input.
     },
     { immediate: true },
 );
