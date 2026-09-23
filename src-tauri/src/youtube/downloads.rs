@@ -430,7 +430,9 @@ fn run_download(app: &AppHandle, id: &str) {
     ]
     .into_iter()
     .flatten()
-    .find(|path| std::path::Path::new(path).is_file());
+    .find(|path| {
+        std::path::Path::new(path).is_file() && is_downloaded_media_file(path)
+    });
     // The finished file on disk is the only real proof of success: a
     // non-zero exit often just means an optional extra (usually subtitles,
     // rate-limited) failed.
@@ -519,6 +521,18 @@ fn run_download(app: &AppHandle, id: &str) {
 
 /// The output template ends with "[<video id>].<ext>", so a finished file
 /// can always be found by id even when yt-dlp reported nothing.
+/// Success means a *media* file. `--embed-thumbnail` drops the cover art
+/// next to the video with the same `[id]` name in its first seconds, so a
+/// job that dies early would otherwise "prove" itself with the thumbnail
+/// and be filed as done — the user gets cover art and a green checkmark.
+fn is_downloaded_media_file(path: &str) -> bool {
+    std::path::Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| crate::media_extensions::contains_extension_of_kind(ext, false))
+        .unwrap_or(false)
+}
+
 fn find_by_video_id(dest_dir: &str, url: &str) -> Option<String> {
     let id = url
         .split(|c| c == '?' || c == '&')
@@ -536,10 +550,9 @@ fn find_by_video_id(dest_dir: &str, url: &str) -> Option<String> {
         .find(|entry| {
             let name = entry.file_name().to_string_lossy().to_string();
             name.contains(&marker)
+                && is_downloaded_media_file(&name)
                 && !name.ends_with(".part")
                 && !name.ends_with(".ytdl")
-                && !name.ends_with(".srt")
-                && !name.ends_with(".vtt")
                 // Stream fragments carry a ".fNNN." marker.
                 && !name.contains("].f")
         })
