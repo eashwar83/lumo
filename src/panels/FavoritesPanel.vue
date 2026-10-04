@@ -4,8 +4,10 @@ import { invoke } from "@tauri-apps/api/core";
 import {
     DEFAULT_FAVORITE_FOLDER_ID,
     type FavoriteFolder,
+    type FavoriteSortMode,
     type PlaylistEntry,
 } from "../types/playlist";
+import { formatTime } from "../utils/formatTime";
 import { getPathDisplayName } from "../utils/getPathDisplayName";
 import { readImageDataUrl } from "../utils/readImageDataUrl";
 
@@ -15,6 +17,9 @@ const props = defineProps<{
     favoritesByFolder: Record<string, PlaylistEntry[]>;
     folderCounts: Record<string, number>;
     activeFolderId: string | null;
+    sortMode: FavoriteSortMode;
+    /** path -> length in seconds, for the favourites whose length is known. */
+    durations: Record<string, number>;
 }>();
 
 const emit = defineEmits<{
@@ -30,7 +35,21 @@ const emit = defineEmits<{
     (e: "remove-many", paths: string[]): void;
     (e: "export"): void;
     (e: "import"): void;
+    (e: "update:sort", mode: FavoriteSortMode): void;
+    (e: "duration", payload: { path: string; seconds: number }): void;
 }>();
+
+const SORT_OPTIONS: { value: FavoriteSortMode; label: string }[] = [
+    { value: "date-desc", label: "Date added · newest" },
+    { value: "date-asc", label: "Date added · oldest" },
+    { value: "name-asc", label: "Name · A to Z" },
+    { value: "name-desc", label: "Name · Z to A" },
+    { value: "length-asc", label: "Length · shortest" },
+    { value: "length-desc", label: "Length · longest" },
+];
+const onSortChange = (event: Event) => {
+    emit("update:sort", (event.target as HTMLSelectElement).value as FavoriteSortMode);
+};
 
 // Entries shown in the grid: the selected folder, or all favourites for "All".
 const displayedFavorites = computed<PlaylistEntry[]>(() =>
@@ -238,9 +257,63 @@ watch(
     { immediate: true, deep: true },
 );
 
+// Sorting by length needs every favourite's length, and most have never
+// reported one. Local files are measured on demand, one at a time (each probe
+// is a headless mpv), and only while a length sort is selected. Each path is
+// asked once per session whatever the answer — a file that cannot be measured
+// must not be asked again in a loop. Remote entries learn their length when
+// they are played.
+const durationPending: string[] = [];
+const durationRequested = new Set<string>();
+let durationDraining = false;
+
+const drainDurations = async () => {
+    if (durationDraining) return;
+    durationDraining = true;
+    while (durationPending.length && !disposed) {
+        const path = durationPending.shift();
+        if (!path || props.durations[path] !== undefined) continue;
+        try {
+            const seconds = await invoke<number | null>("get_media_duration", {
+                path,
+            });
+            if (seconds && !disposed) emit("duration", { path, seconds });
+        } catch {
+            // Missing or unreadable file: it sorts last, with the unknowns.
+        }
+    }
+    durationDraining = false;
+};
+
+watch(
+    [() => props.sortMode, () => props.favorites],
+    ([mode, entries]) => {
+        if (!mode.startsWith("length")) return;
+        for (const entry of entries) {
+            if (
+                props.durations[entry.path] !== undefined ||
+                durationRequested.has(entry.path) ||
+                isRemotePath(entry.path)
+            ) {
+                continue;
+            }
+            durationRequested.add(entry.path);
+            durationPending.push(entry.path);
+        }
+        void drainDurations();
+    },
+    { immediate: true },
+);
+
+const durationLabel = (entry: PlaylistEntry): string | null => {
+    const seconds = props.durations[entry.path];
+    return seconds ? formatTime(seconds) : null;
+};
+
 onBeforeUnmount(() => {
     disposed = true;
     pending.length = 0;
+    durationPending.length = 0;
     window.removeEventListener("click", closeMoveMenu);
     window.removeEventListener("scroll", closeMoveMenu, true);
 });
@@ -262,6 +335,27 @@ const thumbFor = (entry: PlaylistEntry): string | null =>
                 </span>
             </div>
             <div class="favorites__header-actions">
+                <label
+                    v-if="props.favorites.length > 1"
+                    class="favorites__sort"
+                    title="Sort favourites. Playing a favourite continues through them in this order."
+                >
+                    <span class="favorites__sort-label">Sort</span>
+                    <select
+                        class="favorites__sort-select"
+                        :value="props.sortMode"
+                        @change="onSortChange"
+                        @click.stop
+                    >
+                        <option
+                            v-for="option in SORT_OPTIONS"
+                            :key="option.value"
+                            :value="option.value"
+                        >
+                            {{ option.label }}
+                        </option>
+                    </select>
+                </label>
                 <button
                     class="favorites__hbtn"
                     type="button"
@@ -492,6 +586,9 @@ const thumbFor = (entry: PlaylistEntry): string | null =>
                                 <path d="M8 5v14l11-7z" />
                             </svg>
                         </div>
+                        <span v-if="durationLabel(entry)" class="favorites__duration">
+                            {{ durationLabel(entry) }}
+                        </span>
                         <button
                             class="favorites__select"
                             :class="{
@@ -639,6 +736,48 @@ const thumbFor = (entry: PlaylistEntry): string | null =>
 }
 .favorites__hbtn:hover {
     background: rgba(0, 0, 0, 0.08);
+}
+
+.favorites__sort {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.favorites__sort-label {
+    opacity: 0.65;
+}
+
+.favorites__sort-select {
+    padding: 4px 8px;
+    border: 1px solid var(--glass-border, rgba(0, 0, 0, 0.12));
+    border-radius: 7px;
+    background: rgba(0, 0, 0, 0.04);
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+/* The native option list ignores the translucent control background. */
+.favorites__sort-select option {
+    background-color: #1a1c21;
+    color: #f2f2f2;
+}
+
+.favorites__duration {
+    position: absolute;
+    right: 6px;
+    bottom: 6px;
+    padding: 1px 6px;
+    border-radius: 5px;
+    background: rgba(0, 0, 0, 0.72);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    pointer-events: none;
 }
 
 /* --- folder bar --- */

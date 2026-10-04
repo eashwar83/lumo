@@ -492,6 +492,7 @@ pub fn run() {
             commands::playback::clip_export_available,
             commands::playback::open_export_folder,
             commands::playback::get_media_poster,
+            commands::playback::get_media_duration,
             commands::playback::get_media_storyboard,
             commands::playback::clear_preview_cache,
             commands::playback::get_scene_index,

@@ -32,7 +32,22 @@ export const DEFAULT_FAVORITE_FOLDER_NAME = "General";
 export type FavoritesMeta = {
     folders: FavoriteFolder[];
     assignments: Record<string, string>;
+    sort?: FavoriteSortMode;
+    /** path -> length in seconds, where known. Feeds the length sort. */
+    durations?: Record<string, number>;
 };
+
+export const FAVORITE_SORT_MODES = [
+    "date-desc",
+    "date-asc",
+    "name-asc",
+    "name-desc",
+    "length-asc",
+    "length-desc",
+] as const;
+export type FavoriteSortMode = (typeof FAVORITE_SORT_MODES)[number];
+// Newest first: the order the tab had before sorting was configurable.
+export const DEFAULT_FAVORITE_SORT_MODE: FavoriteSortMode = "date-desc";
 
 export type PlaylistLoopMode = "list" | "shuffle";
 

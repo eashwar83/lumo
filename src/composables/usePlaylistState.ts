@@ -2,10 +2,13 @@ import { computed, ref, watch } from "vue";
 import {
     DEFAULT_FAVORITE_FOLDER_ID,
     DEFAULT_FAVORITE_FOLDER_NAME,
+    DEFAULT_FAVORITE_SORT_MODE,
+    FAVORITE_SORT_MODES,
     FAVORITES_PLAYLIST_ID,
     FAVORITES_PLAYLIST_NAME,
     LEGACY_FAVOURITE_PLAYLIST_ID,
     type FavoriteFolder,
+    type FavoriteSortMode,
     type FavoritesMeta,
     type Playlist,
     type PlaylistEntry,
@@ -44,6 +47,11 @@ export const AUTOLOAD_PLAYLIST_ID = "pl_autoload_folder";
 // Reserved id for the transient YouTube "Up next" queue. Session-only,
 // never persisted; Previous/Next and auto-advance walk it like any playlist.
 export const YT_UPNEXT_PLAYLIST_ID = "pl_youtube_upnext";
+
+// Reserved id for the transient "playing from Favourites" queue: what the
+// Favourites tab was showing when a video was started from it, in the tab's
+// sort order. Session-only, never persisted.
+export const FAVORITES_QUEUE_PLAYLIST_ID = "pl_favorites_queue";
 
 const isValidSortMode = (value: unknown): value is PlaylistSortMode =>
     value === "name" || value === "added";
@@ -97,7 +105,24 @@ const normalizeFavoritesMeta = (raw: unknown): FavoritesMeta => {
             }
         }
     }
-    return { folders, assignments };
+    const durations: Record<string, number> = {};
+    if (value.durations && typeof value.durations === "object") {
+        for (const [path, seconds] of Object.entries(value.durations)) {
+            const key = path.trim();
+            if (
+                key &&
+                typeof seconds === "number" &&
+                Number.isFinite(seconds) &&
+                seconds > 0
+            ) {
+                durations[key] = seconds;
+            }
+        }
+    }
+    const sort = FAVORITE_SORT_MODES.includes(value.sort as FavoriteSortMode)
+        ? (value.sort as FavoriteSortMode)
+        : DEFAULT_FAVORITE_SORT_MODE;
+    return { folders, assignments, sort, durations };
 };
 
 const isFavoritesPlaylist = (playlistId: string | null) =>
@@ -247,6 +272,50 @@ const sortEntries = (
     return list;
 };
 
+const favoriteDisplayName = (entry: PlaylistEntry): string =>
+    entry.title?.trim() || getPathDisplayName(entry.path);
+
+const compareFavoriteNames = (a: PlaylistEntry, b: PlaylistEntry): number =>
+    favoriteDisplayName(a).localeCompare(favoriteDisplayName(b), undefined, {
+        numeric: true,
+        sensitivity: "base",
+    });
+
+const sortFavoriteEntries = (
+    entries: PlaylistEntry[],
+    mode: FavoriteSortMode,
+    durations: Record<string, number>,
+): PlaylistEntry[] => {
+    const list = [...entries];
+    switch (mode) {
+        case "name-asc":
+            return list.sort(compareFavoriteNames);
+        case "name-desc":
+            return list.sort((a, b) => compareFavoriteNames(b, a));
+        case "date-asc":
+            return list.sort((a, b) => a.addedAt - b.addedAt);
+        case "length-asc":
+        case "length-desc": {
+            const direction = mode === "length-asc" ? 1 : -1;
+            return list.sort((a, b) => {
+                const lengthA = durations[a.path];
+                const lengthB = durations[b.path];
+                // A length not known yet sorts last in both directions,
+                // rather than posing as the shortest video.
+                if (lengthA === undefined || lengthB === undefined) {
+                    if (lengthA === lengthB) return compareFavoriteNames(a, b);
+                    return lengthA === undefined ? 1 : -1;
+                }
+                return (
+                    (lengthA - lengthB) * direction || compareFavoriteNames(a, b)
+                );
+            });
+        }
+        default:
+            return list.sort((a, b) => b.addedAt - a.addedAt);
+    }
+};
+
 export const usePlaylistState = () => {
     const playlists = ref<Playlist[]>([createFavoritesPlaylist()]);
     const activePlaylistId = ref<string | null>(null);
@@ -264,6 +333,11 @@ export const usePlaylistState = () => {
 
     // Self-contained persistence of the opaque `favoritesMeta` ui-state slice,
     // independent of the playlist persistence path.
+    // How the Favourites tab orders its videos, and the lengths the length
+    // sort needs (the entries themselves carry no duration).
+    const favoriteSortMode = ref<FavoriteSortMode>(DEFAULT_FAVORITE_SORT_MODE);
+    const favoriteDurations = ref<Record<string, number>>({});
+
     let favoritesMetaReady = false;
     const favoritesMetaSaver = createDebouncedUiStateSaver(300);
     const persistFavoritesMeta = () => {
@@ -272,6 +346,8 @@ export const usePlaylistState = () => {
             favoritesMeta: {
                 folders: favoriteFolders.value,
                 assignments: favoriteAssignments.value,
+                sort: favoriteSortMode.value,
+                durations: favoriteDurations.value,
             } satisfies FavoritesMeta,
         });
     };
@@ -280,11 +356,19 @@ export const usePlaylistState = () => {
         const meta = normalizeFavoritesMeta(stored?.favoritesMeta);
         favoriteFolders.value = meta.folders;
         favoriteAssignments.value = meta.assignments;
+        favoriteSortMode.value = meta.sort ?? DEFAULT_FAVORITE_SORT_MODE;
+        // Lengths learned before the stored ones arrived win: they are newer.
+        favoriteDurations.value = {
+            ...(meta.durations ?? {}),
+            ...favoriteDurations.value,
+        };
         favoritesMetaReady = true;
     })();
-    watch([favoriteFolders, favoriteAssignments], persistFavoritesMeta, {
-        deep: true,
-    });
+    watch(
+        [favoriteFolders, favoriteAssignments, favoriteSortMode, favoriteDurations],
+        persistFavoritesMeta,
+        { deep: true },
+    );
 
     const activePlaylist = computed<Playlist | null>(
         () =>
@@ -292,8 +376,12 @@ export const usePlaylistState = () => {
             null,
     );
     const playlist = computed<PlaylistEntry[]>(() => activePlaylist.value?.entries ?? []);
+    // The favourites queue carries its own order (the Favourites tab's
+    // sort); the drawer's name/added toggle must not reshuffle it.
     const orderedPlaylist = computed(() =>
-        sortEntries(playlist.value, sortMode.value),
+        activePlaylist.value?.id === FAVORITES_QUEUE_PLAYLIST_ID
+            ? playlist.value
+            : sortEntries(playlist.value, sortMode.value),
     );
 
     const hasPlaylist = (playlistId: string | null) =>
@@ -307,6 +395,7 @@ export const usePlaylistState = () => {
     const getOrderedEntriesByPlaylistId = (playlistId: string | null) => {
         const target = findPlaylistById(playlistId);
         if (!target) return [];
+        if (target.id === FAVORITES_QUEUE_PLAYLIST_ID) return target.entries;
         return sortEntries(target.entries, sortMode.value);
     };
 
@@ -417,10 +506,12 @@ export const usePlaylistState = () => {
         findPlaylistById(FAVORITES_PLAYLIST_ID),
     );
 
-    // Favourited videos, newest first.
+    // Favourited videos, in the order the Favourites tab shows them.
     const favorites = computed<PlaylistEntry[]>(() =>
-        [...(favoritesPlaylist.value?.entries ?? [])].sort(
-            (a, b) => b.addedAt - a.addedAt,
+        sortFavoriteEntries(
+            favoritesPlaylist.value?.entries ?? [],
+            favoriteSortMode.value,
+            favoriteDurations.value,
         ),
     );
 
@@ -453,6 +544,11 @@ export const usePlaylistState = () => {
             delete nextAssignments[normalized];
             favoriteAssignments.value = nextAssignments;
         }
+        if (normalized in favoriteDurations.value) {
+            const nextDurations = { ...favoriteDurations.value };
+            delete nextDurations[normalized];
+            favoriteDurations.value = nextDurations;
+        }
     };
 
     // Make the drawer show the Favourites list, creating the playlist if it is
@@ -474,6 +570,21 @@ export const usePlaylistState = () => {
         const nextPlaylists = [...playlists.value];
         nextPlaylists[index] = { ...nextPlaylists[index], entries: [] };
         playlists.value = nextPlaylists;
+        favoriteDurations.value = {};
+    };
+
+    const setFavoriteSortMode = (mode: FavoriteSortMode) => {
+        if (FAVORITE_SORT_MODES.includes(mode)) favoriteSortMode.value = mode;
+    };
+
+    /** Records a favourite's length (seconds) once something has measured it. */
+    const setFavoriteDuration = (path: string, seconds: number) => {
+        const key = path.trim();
+        if (!key || !Number.isFinite(seconds) || seconds <= 0) return;
+        if (!isFavorite(key)) return;
+        const rounded = Math.round(seconds * 10) / 10;
+        if (favoriteDurations.value[key] === rounded) return;
+        favoriteDurations.value = { ...favoriteDurations.value, [key]: rounded };
     };
 
     // Returns the new state: true if now favourited, false if removed.
@@ -756,13 +867,15 @@ export const usePlaylistState = () => {
         playlists: playlists.value.filter(
             (item) =>
                 item.id !== AUTOLOAD_PLAYLIST_ID &&
-                item.id !== YT_UPNEXT_PLAYLIST_ID,
+                item.id !== YT_UPNEXT_PLAYLIST_ID &&
+                item.id !== FAVORITES_QUEUE_PLAYLIST_ID,
         ),
         playlistLoopMode: loopMode.value,
         playlistSortMode: sortMode.value,
         activePlaylistId:
             activePlaylistId.value === AUTOLOAD_PLAYLIST_ID ||
-            activePlaylistId.value === YT_UPNEXT_PLAYLIST_ID
+            activePlaylistId.value === YT_UPNEXT_PLAYLIST_ID ||
+            activePlaylistId.value === FAVORITES_QUEUE_PLAYLIST_ID
                 ? null
                 : activePlaylistId.value,
     });
@@ -802,7 +915,11 @@ export const usePlaylistState = () => {
                 createdAt: timestamp,
             },
         ];
-        playbackPlaylistId.value = YT_UPNEXT_PLAYLIST_ID;
+        // A YouTube favourite started from the Favourites tab keeps walking
+        // the favourites; "Up next" is still there in the drawer.
+        if (playbackPlaylistId.value !== FAVORITES_QUEUE_PLAYLIST_ID) {
+            playbackPlaylistId.value = YT_UPNEXT_PLAYLIST_ID;
+        }
     };
 
     const addFromDrawerSelection = (paths: string[]) => {
@@ -978,6 +1095,121 @@ export const usePlaylistState = () => {
         playbackPlaylistId.value = activePlaylist.value.id;
     };
 
+    // --- "playing from Favourites" queue ------------------------------------
+    // Started from the Favourites tab, next/previous and auto-advance should
+    // walk the favourites the tab was showing, in its sort order — not the
+    // folder the current file happens to live in. The folder is remembered
+    // here because leaving the tab resets the tab's own folder selection.
+    let favoritesQueueFolderId: string | null = null;
+
+    const favoritesQueueSource = (): PlaylistEntry[] =>
+        favoritesQueueFolderId
+            ? favoritesByFolder.value[favoritesQueueFolderId] ?? []
+            : favorites.value;
+
+    const removeFavoritesQueue = () => {
+        if (!findPlaylistById(FAVORITES_QUEUE_PLAYLIST_ID)) return;
+        playlists.value = playlists.value.filter(
+            (item) => item.id !== FAVORITES_QUEUE_PLAYLIST_ID,
+        );
+        if (activePlaylistId.value === FAVORITES_QUEUE_PLAYLIST_ID) {
+            activePlaylistId.value = null;
+        }
+        if (playbackPlaylistId.value === FAVORITES_QUEUE_PLAYLIST_ID) {
+            playbackPlaylistId.value = null;
+        }
+    };
+
+    const writeFavoritesQueue = (entries: PlaylistEntry[]) => {
+        const existing = findPlaylistById(FAVORITES_QUEUE_PLAYLIST_ID);
+        const folderName = favoritesQueueFolderId
+            ? favoriteFolders.value.find(
+                  (folder) => folder.id === favoritesQueueFolderId,
+              )?.name
+            : undefined;
+        const name = `Favourites · ${folderName ?? "All"}`;
+        // Unchanged order and titles: leave the list alone, so the watcher
+        // below cannot feed itself.
+        if (
+            existing &&
+            existing.name === name &&
+            existing.entries.length === entries.length &&
+            existing.entries.every(
+                (entry, index) =>
+                    entry.path === entries[index].path &&
+                    entry.title === entries[index].title,
+            )
+        ) {
+            return;
+        }
+        playlists.value = [
+            ...playlists.value.filter(
+                (item) => item.id !== FAVORITES_QUEUE_PLAYLIST_ID,
+            ),
+            {
+                id: FAVORITES_QUEUE_PLAYLIST_ID,
+                name,
+                entries: entries.map((entry) => ({ ...entry })),
+                createdAt: existing?.createdAt ?? Date.now(),
+            },
+        ];
+    };
+
+    /** A video is being started from the Favourites tab. */
+    const startFavoritesQueue = (path: string) => {
+        const current = path.trim();
+        favoritesQueueFolderId = activeFavoriteFolderId.value;
+        const entries = favoritesQueueSource();
+        // A lone favourite has nothing to advance to; the folder it lives
+        // in is the more useful neighbourhood.
+        if (
+            entries.length <= 1 ||
+            !entries.some((entry) => entry.path === current)
+        ) {
+            removeFavoritesQueue();
+            return;
+        }
+        writeFavoritesQueue(entries);
+        if (
+            activePlaylistId.value === null ||
+            activePlaylistId.value === AUTOLOAD_PLAYLIST_ID ||
+            activePlaylistId.value === FAVORITES_QUEUE_PLAYLIST_ID
+        ) {
+            activePlaylistId.value = FAVORITES_QUEUE_PLAYLIST_ID;
+        }
+        playbackPlaylistId.value = FAVORITES_QUEUE_PLAYLIST_ID;
+    };
+
+    // Re-sorting the tab, removing a favourite or moving one between folders
+    // changes what "next" means for a queue that is already playing.
+    watch([favorites, favoritesByFolder], () => {
+        if (!findPlaylistById(FAVORITES_QUEUE_PLAYLIST_ID)) return;
+        const entries = favoritesQueueSource();
+        if (!entries.length) {
+            removeFavoritesQueue();
+            return;
+        }
+        writeFavoritesQueue(entries);
+    });
+
+    /**
+     * Called for every file that starts playing. The queue lasts only while
+     * playback stays inside it: a file from anywhere else means the user has
+     * left the favourites, and the folder playlist takes over again.
+     */
+    const noteLoadedPath = (path: string) => {
+        const current = path.trim();
+        if (!current) return;
+        const queue = findPlaylistById(FAVORITES_QUEUE_PLAYLIST_ID);
+        if (!queue) return;
+        if (
+            playbackPlaylistId.value !== FAVORITES_QUEUE_PLAYLIST_ID ||
+            !queue.entries.some((entry) => entry.path === current)
+        ) {
+            removeFavoritesQueue();
+        }
+    };
+
     const removeAutoloadPlaylist = () => {
         if (!playlists.value.some((item) => item.id === AUTOLOAD_PLAYLIST_ID)) {
             return;
@@ -1116,6 +1348,12 @@ export const usePlaylistState = () => {
         backToPlaylistList,
         markActivePlaylistAsPlayback,
         favorites,
+        favoriteSortMode,
+        favoriteDurations,
+        setFavoriteSortMode,
+        setFavoriteDuration,
+        startFavoritesQueue,
+        noteLoadedPath,
         isFavorite,
         toggleFavorite,
         removeFromFavorites,

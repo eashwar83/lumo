@@ -868,6 +868,20 @@ pub(crate) async fn get_scene_index(
     Ok(starts)
 }
 
+/// Length of a local media file in seconds, so a list can be sorted by
+/// length before its files have ever been played. Remote sources answer
+/// `None`: probing one means resolving a stream, which a sort must not do.
+#[tauri::command]
+pub(crate) async fn get_media_duration(path: String) -> Result<Option<f64>, String> {
+    if path.trim().is_empty() || !is_local_media(&path) || !Path::new(&path).is_file() {
+        return Ok(None);
+    }
+    let duration = tauri::async_runtime::spawn_blocking(move || crate::mpv::probe_duration(&path))
+        .await
+        .map_err(|error| format!("Duration probe failed: {error}"))?;
+    Ok(duration.filter(|seconds| seconds.is_finite() && *seconds > 0.0))
+}
+
 /// Poster width for the Favourites / History grids.
 const POSTER_WIDTH: u32 = 320;
 

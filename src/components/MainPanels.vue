@@ -2,7 +2,11 @@
 import { computed, ref } from "vue";
 import type { HistoryEntry } from "../types/history";
 import type { NetworkPlayRequest } from "../types/network";
-import type { FavoriteFolder, PlaylistEntry } from "../types/playlist";
+import type {
+    FavoriteFolder,
+    FavoriteSortMode,
+    PlaylistEntry,
+} from "../types/playlist";
 import HomePanel from "../panels/HomePanel.vue";
 import HistoryPanel from "../panels/HistoryPanel.vue";
 import FavoritesPanel from "../panels/FavoritesPanel.vue";
@@ -20,6 +24,8 @@ const props = defineProps<{
     favoritesByFolder: Record<string, PlaylistEntry[]>;
     favoriteFolderCounts: Record<string, number>;
     activeFavoriteFolderId: string | null;
+    favoriteSortMode: FavoriteSortMode;
+    favoriteDurations: Record<string, number>;
     mode: "home" | "history" | "favorites" | "youtube" | "network" | "settings";
     currentUrl: string;
 }>();
@@ -33,6 +39,8 @@ const emit = defineEmits<{
     (e: "remove-history", entry: HistoryEntry): void;
     (e: "toggle-pin-history", entry: HistoryEntry): void;
     (e: "play-favorite", entry: PlaylistEntry): void;
+    (e: "update:favorite-sort", mode: FavoriteSortMode): void;
+    (e: "favorite-duration", payload: { path: string; seconds: number }): void;
     (e: "remove-favorite", entry: PlaylistEntry): void;
     (e: "clear-favorites"): void;
     (e: "select-favorite-folder", id: string | null): void;
@@ -48,7 +56,12 @@ const emit = defineEmits<{
     (e: "youtube-notify", message: string): void;
     (
         e: "toggle-youtube-favorite",
-        payload: { url: string; title: string; thumbnailUrl?: string | null },
+        payload: {
+            url: string;
+            title: string;
+            thumbnailUrl?: string | null;
+            durationSeconds?: number | null;
+        },
     ): void;
     (e: "open-youtube-settings"): void;
 }>();
@@ -114,6 +127,10 @@ const showPanels = () => !props.isFileLoaded;
                 :favorites-by-folder="props.favoritesByFolder"
                 :folder-counts="props.favoriteFolderCounts"
                 :active-folder-id="props.activeFavoriteFolderId"
+                :sort-mode="props.favoriteSortMode"
+                :durations="props.favoriteDurations"
+                @update:sort="emit('update:favorite-sort', $event)"
+                @duration="emit('favorite-duration', $event)"
                 @play="emit('play-favorite', $event)"
                 @remove="emit('remove-favorite', $event)"
                 @clear="emit('clear-favorites')"

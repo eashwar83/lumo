@@ -530,18 +530,32 @@ const onToggleFavorite = async () => {
         title: player.state.media.title?.trim() || undefined,
         iconUrl: icon || undefined,
     });
+    playlistState.setFavoriteDuration(url, player.state.playback.duration);
     showMessageOverlay("Added to Favourites");
 };
 
 const onPlayFavorite = async (entry: PlaylistEntry) => {
     clearNavSelectionDuringLoad.value = false;
+    // Next/previous now walk the favourites the tab is showing, in its sort
+    // order, rather than the folder this file lives in.
+    playlistState.startFavoritesQueue(entry.path);
     await playPath(entry.path, entry.title?.trim() || undefined);
 };
+
+// A favourite's length is recorded whenever the player learns it, so the
+// length sort also covers entries that cannot be probed (YouTube, network).
+watch(
+    () => [player.state.media.url, player.state.playback.duration] as const,
+    ([url, duration]) => {
+        if (url && duration > 0) playlistState.setFavoriteDuration(url, duration);
+    },
+);
 
 const onToggleYoutubeFavorite = (payload: {
     url: string;
     title: string;
     thumbnailUrl?: string | null;
+    durationSeconds?: number | null;
 }) => {
     const wasFavorite = playlistState.isFavorite(payload.url);
     playlistState.toggleFavorite({
@@ -549,6 +563,9 @@ const onToggleYoutubeFavorite = (payload: {
         title: payload.title,
         iconUrl: payload.thumbnailUrl ?? undefined,
     });
+    if (!wasFavorite && payload.durationSeconds) {
+        playlistState.setFavoriteDuration(payload.url, payload.durationSeconds);
+    }
     showMessageOverlay(
         wasFavorite ? "Removed from Favourites" : "Added to Favourites",
     );
@@ -2611,6 +2628,9 @@ const onFileLoaded = async () => {
         }).catch(() => {});
     }
     void autoCrop.onFileLoaded();
+    // Before the folder scan: a file from outside the favourites queue ends
+    // the queue, and the folder playlist is free to take over.
+    playlistState.noteLoadedPath(player.state.media.url);
     void autoloadFolder.onFileLoaded(player.state.media.url);
 };
 
@@ -2843,6 +2863,12 @@ useAppStartupBindings({
             :favorites-by-folder="playlistState.favoritesByFolder.value"
             :favorite-folder-counts="playlistState.favoriteFolderCounts.value"
             :active-favorite-folder-id="playlistState.activeFavoriteFolderId.value"
+            :favorite-sort-mode="playlistState.favoriteSortMode.value"
+            :favorite-durations="playlistState.favoriteDurations.value"
+            @update:favorite-sort="playlistState.setFavoriteSortMode"
+            @favorite-duration="
+                playlistState.setFavoriteDuration($event.path, $event.seconds)
+            "
             :mode="activePanel"
             :current-url="currentOrLastPlaybackUrl"
             @update:hover="ui.hoverFilePicker.value = $event"

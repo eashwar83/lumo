@@ -49,7 +49,12 @@ const emit = defineEmits<{
     (e: "notify", message: string): void;
     (
         e: "toggle-youtube-favorite",
-        payload: { url: string; title: string; thumbnailUrl?: string | null },
+        payload: {
+            url: string;
+            title: string;
+            thumbnailUrl?: string | null;
+            durationSeconds?: number | null;
+        },
     ): void;
     (e: "open-youtube-settings"): void;
 }>();
@@ -564,6 +569,7 @@ const statusLabel = (item: {
                                 url: $event.url,
                                 title: $event.title,
                                 thumbnailUrl: $event.thumbnailUrl,
+                                durationSeconds: $event.durationSeconds,
                             })
                         "
                         @download="onDownloadRequest"
@@ -830,6 +836,7 @@ const statusLabel = (item: {
                                 url: $event.url,
                                 title: $event.title,
                                 thumbnailUrl: $event.thumbnailUrl,
+                                durationSeconds: $event.durationSeconds,
                             })
                         "
                         @download="onDownloadRequest"
@@ -970,6 +977,7 @@ const statusLabel = (item: {
                                 url: $event.url,
                                 title: $event.title,
                                 thumbnailUrl: $event.thumbnailUrl,
+                                durationSeconds: $event.durationSeconds,
                             })
                         "
                         @download="onDownloadRequest"
