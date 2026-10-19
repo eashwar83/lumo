@@ -33,6 +33,7 @@ import PlaylistCreationDialog from "./components/PlaylistCreationDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import ContextMenu from "./components/ContextMenu.vue";
 import OnlineSubtitleDialog from "./components/OnlineSubtitleDialog.vue";
+import ConvertDialog from "./components/ConvertDialog.vue";
 import MergeDialog from "./components/MergeDialog.vue";
 import SplitDialog from "./components/SplitDialog.vue";
 import SubtitleAiDialog from "./components/SubtitleAiDialog.vue";
@@ -1507,9 +1508,24 @@ type AiCurveResult = {
     grain: number;
     notes: string;
 };
-// Merge / split modals (file operations in the Media menu).
+// Convert / merge / split modals (file operations in the Media menu).
+const convertOpen = ref(false);
 const mergeOpen = ref(false);
 const splitOpen = ref(false);
+const onOpenConvertFile = () => {
+    if (!isLocalMediaPath.value) {
+        showMessageOverlay("Convert needs a local video file", 3000);
+        return;
+    }
+    if (!isClipExportAvailable.value) {
+        showMessageOverlay(
+            "Convert needs ffmpeg — install it or set its path in Settings → Advanced",
+            4000,
+        );
+        return;
+    }
+    convertOpen.value = true;
+};
 
 // AI subtitle generation modal.
 const subtitleAiOpen = ref(false);
@@ -2307,6 +2323,7 @@ const commandRegistry = useCommandRegistry({
     nextScene: () => void sceneIndex.next(player.state.playback.currentTime),
     previousScene: () => void sceneIndex.previous(player.state.playback.currentTime),
     rescanScenes: () => void sceneIndex.scan(true),
+    openConvertFile: onOpenConvertFile,
 });
 
 const customShortcuts = useCustomShortcuts({
@@ -2358,6 +2375,7 @@ const { menus: appMenus } = useAppMenu({
     exportContactSheet: onExportContactSheet,
     exportClip: exportClipFromRange,
     openExportFolder: () => void openExportFolder(),
+    openConvertFile: onOpenConvertFile,
     openMergeFiles: () => (mergeOpen.value = true),
     openSplitFile: () => (splitOpen.value = true),
     quit: quitApp,
@@ -2470,6 +2488,10 @@ const closeTopOverlay = (): boolean => {
     }
     if (settingsExportPrompt.value) {
         resolveSettingsExport(null);
+        return true;
+    }
+    if (convertOpen.value) {
+        convertOpen.value = false;
         return true;
     }
     if (mergeOpen.value) {
@@ -2946,6 +2968,14 @@ useAppStartupBindings({
             @close="tracks.closeOnlineSubtitleDialog"
             @provider-change="tracks.setOnlineSubtitleProvider"
             @select="tracks.addSelectedOnlineSubtitleTrack"
+        />
+
+        <ConvertDialog
+            :open="convertOpen"
+            :current-path="player.state.media.url"
+            :current-aspect-label="geometry.currentAspectLabel.value"
+            @close="convertOpen = false"
+            @notify="(msg: string) => showMessageOverlay(msg, 4000)"
         />
 
         <MergeDialog

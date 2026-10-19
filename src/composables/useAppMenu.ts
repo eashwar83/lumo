@@ -77,6 +77,7 @@ export type AppMenuOptions = {
     exportContactSheet: () => void;
     exportClip: (asGif: boolean) => void;
     openExportFolder: () => void;
+    openConvertFile: () => void;
     openMergeFiles: () => void;
     openSplitFile: () => void;
     quit: () => void;
@@ -266,6 +267,12 @@ export const useAppMenu = (options: AppMenuOptions) => {
                 run: options.openExportFolder,
             },
             sep,
+            {
+                kind: "action",
+                label: "Convert…",
+                disabled: !local || !options.clipExportAvailable(),
+                run: options.openConvertFile,
+            },
             {
                 kind: "action",
                 label: "Merge Files…",

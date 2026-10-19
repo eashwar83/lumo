@@ -64,6 +64,9 @@ struct MediaProbe {
     width: u32,
     height: u32,
     fps: f64,
+    vcodec: String,
+    acodec: String,
+    display_aspect_ratio: String,
     has_video: bool,
     has_audio: bool,
     /// Codec/resolution/pixfmt signature used to judge concat compatibility.
@@ -128,6 +131,12 @@ fn probe_media(ffprobe: &Path, path: &str) -> Result<MediaProbe, String> {
                         .and_then(Value::as_str)
                         .unwrap_or("")
                         .to_string();
+                    probe.vcodec = vcodec.clone();
+                    probe.display_aspect_ratio = stream
+                        .get("display_aspect_ratio")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
                     pix_fmt = stream
                         .get("pix_fmt")
                         .and_then(Value::as_str)
@@ -146,6 +155,7 @@ fn probe_media(ffprobe: &Path, path: &str) -> Result<MediaProbe, String> {
                         .and_then(Value::as_str)
                         .unwrap_or("")
                         .to_string();
+                    probe.acodec = acodec.clone();
                     sample_rate = stream
                         .get("sample_rate")
                         .and_then(Value::as_str)
@@ -228,6 +238,20 @@ pub(crate) struct MergeInspect {
     note: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ConvertInspect {
+    vcodec: String,
+    acodec: String,
+    width: u32,
+    height: u32,
+    display_aspect_ratio: String,
+    has_video: bool,
+    has_audio: bool,
+    /// True when ffprobe was available and the file could be read.
+    probed: bool,
+}
+
 // --- commands ---------------------------------------------------------------
 
 const FFMPEG_PATH_SETTING: &str = "FFMPEG_PATH";
@@ -265,6 +289,104 @@ pub(crate) async fn media_edit_info(
             has_audio: probe.has_audio,
             probed: true,
         })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Probe a single file's codecs, resolution and aspect ratio for the Convert dialog.
+#[tauri::command]
+pub(crate) async fn inspect_convert(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<ConvertInspect, String> {
+    let configured = configured_ffmpeg(&app);
+    tauri::async_runtime::spawn_blocking(move || {
+        let ffmpeg = resolve_ffmpeg(configured.as_deref())?;
+        let Some(ffprobe) = find_ffprobe(&ffmpeg) else {
+            return Ok(ConvertInspect {
+                vcodec: String::new(),
+                acodec: String::new(),
+                width: 0,
+                height: 0,
+                display_aspect_ratio: String::new(),
+                has_video: true,
+                has_audio: true,
+                probed: false,
+            });
+        };
+        let probe = probe_media(&ffprobe, &path)?;
+        Ok(ConvertInspect {
+            vcodec: probe.vcodec,
+            acodec: probe.acodec,
+            width: probe.width,
+            height: probe.height,
+            display_aspect_ratio: probe.display_aspect_ratio,
+            has_video: probe.has_video,
+            has_audio: probe.has_audio,
+            probed: true,
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Convert `path` into `output` (`format` is the target container extension, e.g.
+/// `"mp4"`, `"mkv"`, `"mov"`, `"webm"`, `"avi"`, `"ts"`). When `reencode` is false,
+/// streams are copied losslessly (`-c copy`); when true, video and audio are
+/// re-encoded to standard codecs for the container. When `aspect` is provided
+/// (e.g. `"16:9"`, `"4:3"`, `"21:9"`, `"2.35"`), the display aspect ratio is
+/// stretched to match.
+#[tauri::command]
+pub(crate) async fn convert_file(
+    app: tauri::AppHandle,
+    path: String,
+    output: String,
+    format: String,
+    reencode: bool,
+    aspect: Option<String>,
+) -> Result<String, String> {
+    let configured = configured_ffmpeg(&app);
+    tauri::async_runtime::spawn_blocking(move || {
+        let in_path = Path::new(&path);
+        let out_path = PathBuf::from(&output);
+        if is_same_file(in_path, &out_path) {
+            return Err(
+                "Cannot overwrite the source file while converting — choose a different file name."
+                    .to_string(),
+            );
+        }
+        let ffmpeg = resolve_ffmpeg(configured.as_deref())?;
+        let ffprobe = find_ffprobe(&ffmpeg);
+        let probe = ffprobe.as_deref().and_then(|fp| probe_media(fp, &path).ok());
+        let aspect_spec = parse_aspect_spec(aspect.as_deref());
+
+        if let Some(parent) = out_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create output folder: {e}"))?;
+        }
+        let _ = std::fs::remove_file(&out_path);
+
+        if reencode {
+            convert_reencode(
+                &ffmpeg,
+                &path,
+                &out_path,
+                &format,
+                probe.as_ref(),
+                aspect_spec.as_ref(),
+            )?;
+        } else {
+            convert_copy(
+                &ffmpeg,
+                &path,
+                &out_path,
+                probe.as_ref(),
+                aspect_spec.as_ref(),
+            )?;
+        }
+        confirm_output(&out_path)?;
+        Ok(output)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -622,6 +744,286 @@ fn split_segments(
         .collect())
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AspectSpec {
+    dar_num: u64,
+    dar_den: u64,
+    /// Rational string suitable for ffmpeg `-aspect` (e.g. "16:9" or "47:20").
+    ffmpeg_arg: String,
+}
+
+fn gcd(mut a: u64, mut b: u64) -> u64 {
+    while b != 0 {
+        let t = b;
+        b = a % b;
+        a = t;
+    }
+    a.max(1)
+}
+
+fn parse_aspect_spec(raw: Option<&str>) -> Option<AspectSpec> {
+    let text = raw?.trim();
+    if text.is_empty()
+        || text == "-1"
+        || text.eq_ignore_ascii_case("default")
+        || text.eq_ignore_ascii_case("keep")
+    {
+        return None;
+    }
+    if let Some((l, r)) = text.split_once(':') {
+        let num = l.trim().parse::<f64>().ok()?;
+        let den = r.trim().parse::<f64>().ok()?;
+        if !(num > 0.0 && den > 0.0) {
+            return None;
+        }
+        let scaled_num = (num * 1000.0).round() as u64;
+        let scaled_den = (den * 1000.0).round() as u64;
+        let g = gcd(scaled_num, scaled_den);
+        let dar_num = scaled_num / g;
+        let dar_den = scaled_den / g;
+        return Some(AspectSpec {
+            dar_num,
+            dar_den,
+            ffmpeg_arg: format!("{dar_num}:{dar_den}"),
+        });
+    }
+    let val = text.parse::<f64>().ok()?;
+    if !(val > 0.0) {
+        return None;
+    }
+    let scaled_num = (val * 1000.0).round() as u64;
+    let scaled_den = 1000u64;
+    let g = gcd(scaled_num, scaled_den);
+    let dar_num = scaled_num / g;
+    let dar_den = scaled_den / g;
+    Some(AspectSpec {
+        dar_num,
+        dar_den,
+        ffmpeg_arg: format!("{dar_num}:{dar_den}"),
+    })
+}
+
+/// Compute the sample aspect ratio (`SAR = DAR * height / width`) needed so a
+/// `width × height` frame displays at `spec` without changing pixel dimensions.
+fn compute_sar(spec: &AspectSpec, width: u32, height: u32) -> Option<(u64, u64)> {
+    if width == 0 || height == 0 {
+        return None;
+    }
+    let num = spec.dar_num.checked_mul(height as u64)?;
+    let den = spec.dar_den.checked_mul(width as u64)?;
+    if num == 0 || den == 0 {
+        return None;
+    }
+    let g = gcd(num, den);
+    let sar_num = num / g;
+    let sar_den = den / g;
+    // H.264 / HEVC VUI sar_width and sar_height are 16-bit unsigned integers.
+    if sar_num <= u16::MAX as u64 && sar_den <= u16::MAX as u64 {
+        Some((sar_num, sar_den))
+    } else {
+        None
+    }
+}
+
+fn is_same_file(a: &Path, b: &Path) -> bool {
+    if let (Ok(ca), Ok(cb)) = (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        return ca == cb;
+    }
+    let na = a.to_string_lossy().replace('/', "\\");
+    let nb = b.to_string_lossy().replace('/', "\\");
+    if cfg!(windows) {
+        na.eq_ignore_ascii_case(&nb)
+    } else {
+        na == nb
+    }
+}
+
+fn build_convert_copy_command(
+    ffmpeg: &Path,
+    input: &str,
+    output: &Path,
+    aspect: Option<&AspectSpec>,
+    bsf_v: Option<&str>,
+) -> Command {
+    let mut command = quiet_command(ffmpeg);
+    command
+        .arg("-hide_banner")
+        .arg("-loglevel")
+        .arg("error")
+        .arg("-y")
+        .arg("-fflags")
+        .arg("+genpts")
+        .arg("-i")
+        .arg(input)
+        .arg("-map")
+        .arg("0:v:0?")
+        .arg("-map")
+        .arg("0:a:0?")
+        .arg("-c")
+        .arg("copy")
+        .arg("-avoid_negative_ts")
+        .arg("make_zero");
+    if let Some(spec) = aspect {
+        command.arg("-aspect").arg(&spec.ffmpeg_arg);
+    }
+    if let Some(bsf) = bsf_v {
+        command.arg("-bsf:v").arg(bsf);
+    }
+    add_faststart_if_mp4(&mut command, output);
+    command.arg(output);
+    command
+}
+
+fn convert_copy(
+    ffmpeg: &Path,
+    input: &str,
+    output: &Path,
+    probe: Option<&MediaProbe>,
+    aspect: Option<&AspectSpec>,
+) -> Result<(), String> {
+    // When changing aspect ratio without re-encoding, set both container `-aspect`
+    // and (for H.264 / HEVC when dimensions are known) the bitstream VUI SAR via
+    // `h264_metadata` / `hevc_metadata` so players that prefer bitstream VUI over
+    // container headers still honour the new aspect ratio.
+    let bsf_v = match (aspect, probe) {
+        (Some(spec), Some(p)) => {
+            compute_sar(spec, p.width, p.height).and_then(|(sn, sd)| {
+                if p.vcodec.eq_ignore_ascii_case("h264") {
+                    Some(format!("h264_metadata=sample_aspect_ratio={sn}/{sd}"))
+                } else if p.vcodec.eq_ignore_ascii_case("hevc") {
+                    Some(format!("hevc_metadata=sample_aspect_ratio={sn}/{sd}"))
+                } else {
+                    None
+                }
+            })
+        }
+        _ => None,
+    };
+
+    let cmd = build_convert_copy_command(ffmpeg, input, output, aspect, bsf_v.as_deref());
+    let mut result = run(cmd)?;
+    if !result.0 && bsf_v.is_some() {
+        let _ = std::fs::remove_file(output);
+        let fallback = build_convert_copy_command(ffmpeg, input, output, aspect, None);
+        result = run(fallback)?;
+    }
+    if !result.0 {
+        return Err(format!(
+            "Lossless convert failed: {}. This format combination may require re-encoding — enable Re-encode and try again.",
+            result.1
+        ));
+    }
+    Ok(())
+}
+
+fn convert_reencode(
+    ffmpeg: &Path,
+    input: &str,
+    output: &Path,
+    format: &str,
+    probe: Option<&MediaProbe>,
+    aspect: Option<&AspectSpec>,
+) -> Result<(), String> {
+    let has_video = probe
+        .map(|p| p.has_video || p.signature.is_empty())
+        .unwrap_or(true);
+    let has_audio = probe
+        .map(|p| p.has_audio || p.signature.is_empty())
+        .unwrap_or(true);
+
+    let ext = if !format.trim().is_empty() {
+        format.trim().trim_start_matches('.').to_lowercase()
+    } else {
+        output
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("mp4")
+            .to_lowercase()
+    };
+
+    let mut command = quiet_command(ffmpeg);
+    command
+        .arg("-hide_banner")
+        .arg("-loglevel")
+        .arg("error")
+        .arg("-y")
+        .arg("-i")
+        .arg(input);
+
+    if has_video {
+        command.arg("-map").arg("0:v:0?");
+    }
+    if has_audio {
+        command.arg("-map").arg("0:a:0?");
+    }
+
+    if has_video {
+        let vf = match aspect {
+            Some(spec) => format!(
+                "scale=trunc(iw/2)*2:trunc(ih/2)*2,setdar={}/{}",
+                spec.dar_num, spec.dar_den
+            ),
+            None => "scale=trunc(iw/2)*2:trunc(ih/2)*2".to_string(),
+        };
+        command.arg("-vf").arg(&vf);
+        if let Some(spec) = aspect {
+            command.arg("-aspect").arg(&spec.ffmpeg_arg);
+        }
+
+        match ext.as_str() {
+            "webm" => {
+                command
+                    .arg("-c:v")
+                    .arg("libvpx-vp9")
+                    .arg("-crf")
+                    .arg("30")
+                    .arg("-b:v")
+                    .arg("0")
+                    .arg("-row-mt")
+                    .arg("1")
+                    .arg("-cpu-used")
+                    .arg("4")
+                    .arg("-pix_fmt")
+                    .arg("yuv420p");
+            }
+            _ => {
+                command
+                    .arg("-c:v")
+                    .arg("libx264")
+                    .arg("-crf")
+                    .arg("18")
+                    .arg("-preset")
+                    .arg("veryfast")
+                    .arg("-pix_fmt")
+                    .arg("yuv420p");
+            }
+        }
+    }
+
+    if has_audio {
+        match ext.as_str() {
+            "webm" => {
+                command.arg("-c:a").arg("libopus").arg("-b:a").arg("128k");
+            }
+            "avi" => {
+                command.arg("-c:a").arg("libmp3lame").arg("-b:a").arg("192k");
+            }
+            _ => {
+                command.arg("-c:a").arg("aac").arg("-b:a").arg("192k");
+            }
+        }
+    }
+
+    add_faststart_if_mp4(&mut command, output);
+    command.arg(output);
+
+    let result = run(command)?;
+    if !result.0 {
+        return Err(format!("Convert (re-encode) failed: {}", result.1));
+    }
+    Ok(())
+}
+
 fn add_faststart_if_mp4(command: &mut Command, output: &Path) {
     let ext = output
         .extension()
@@ -659,5 +1061,70 @@ fn confirm_output(output: &Path) -> Result<(), String> {
             let _ = std::fs::remove_file(output);
             Err("ffmpeg produced no output".to_string())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_aspect_presets_and_keeps_original_for_default() {
+        assert_eq!(parse_aspect_spec(None), None);
+        assert_eq!(parse_aspect_spec(Some("")), None);
+        assert_eq!(parse_aspect_spec(Some("-1")), None);
+        assert_eq!(parse_aspect_spec(Some("Default")), None);
+
+        assert_eq!(
+            parse_aspect_spec(Some("16:9")),
+            Some(AspectSpec {
+                dar_num: 16,
+                dar_den: 9,
+                ffmpeg_arg: "16:9".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_aspect_spec(Some("4:3")),
+            Some(AspectSpec {
+                dar_num: 4,
+                dar_den: 3,
+                ffmpeg_arg: "4:3".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_aspect_spec(Some("21:9")),
+            Some(AspectSpec {
+                dar_num: 7,
+                dar_den: 3,
+                ffmpeg_arg: "7:3".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_aspect_spec(Some("2.35")),
+            Some(AspectSpec {
+                dar_num: 47,
+                dar_den: 20,
+                ffmpeg_arg: "47:20".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_aspect_spec(Some("2.35:1")),
+            Some(AspectSpec {
+                dar_num: 47,
+                dar_den: 20,
+                ffmpeg_arg: "47:20".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn computes_reduced_sar_from_dar_and_dimensions() {
+        let widescreen = parse_aspect_spec(Some("16:9")).unwrap();
+        // 1440x1080 anamorphic HDV -> SAR 4:3 displays at 16:9.
+        assert_eq!(compute_sar(&widescreen, 1440, 1080), Some((4, 3)));
+        // 1920x1080 square pixels -> SAR 1:1.
+        assert_eq!(compute_sar(&widescreen, 1920, 1080), Some((1, 1)));
+        // 720x576 PAL -> SAR 64:45 displays at 16:9.
+        assert_eq!(compute_sar(&widescreen, 720, 576), Some((64, 45)));
     }
 }

@@ -507,6 +507,8 @@ pub fn run() {
             ai_subtitles::quick_sync_subtitle,
             ai_subtitles::smart_sync_subtitle,
             media_edit::media_edit_info,
+            media_edit::inspect_convert,
+            media_edit::convert_file,
             media_edit::inspect_merge,
             media_edit::merge_files,
             media_edit::split_file,

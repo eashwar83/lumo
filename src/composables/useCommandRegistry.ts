@@ -81,6 +81,7 @@ export type CommandRegistryOptions = {
     nextScene: () => void;
     previousScene: () => void;
     rescanScenes: () => void;
+    openConvertFile: () => void;
 };
 
 export const useCommandRegistry = (options: CommandRegistryOptions) => {
@@ -219,6 +220,7 @@ export const useCommandRegistry = (options: CommandRegistryOptions) => {
         action("scene.next", "Next scene", "Scenes", options.nextScene);
         action("scene.previous", "Previous scene", "Scenes", options.previousScene);
         action("scene.rescan", "Scan for scenes", "Scenes", options.rescanScenes);
+        action("media.convert", "Convert file…", "Media", options.openConvertFile);
 
         // --- Presets ----------------------------------------------------------
         (["fast", "balanced", "high"] as const).forEach((preset) =>

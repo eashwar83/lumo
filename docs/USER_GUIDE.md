@@ -363,6 +363,16 @@ no external tools). **Open Export Folder** (`Ctrl+Shift+E`) reveals the results.
 
 ![The clip / GIF export controls](images/31-clip-gif-export.png)
 
+### Convert file
+
+**Media → Convert…** converts the currently playing local file into another
+container format (**MP4**, **MKV**, **MOV**, **WEBM**, **AVI**, or **TS**),
+with or without re-encoding and with an optional display aspect ratio change
+(**Keep Original**, **16:9**, **4:3**, **21:9**, **2.35:1** — pre-selected if
+you already cycled aspect ratio while watching). When the source codecs fit the
+target container (for example, `.ts` → `.mp4` or `.mkv`), Lumo copies the audio
+and video streams **losslessly** without re-encoding.
+
 ### Merge files
 
 **Media → Merge Files…** combines several clips into one, in the order you set.
@@ -385,7 +395,7 @@ name, and Lumo produces `name-001`, `name-002`, …
 
 ![The Split File dialog](images/33-split-dialog.png)
 
-> **Merge and Split both need a full ffmpeg** (the bundled one is playback-only).
+> **Convert, Merge and Split all need a full ffmpeg** (the bundled one is playback-only).
 > Set its path in **Settings → Advanced** — see
 > [Troubleshooting](#14-troubleshooting).
 
@@ -408,8 +418,9 @@ playlist, and finally exits fullscreen.
 
 Open **Settings** (Tools → Preferences…). Highlights of **Advanced**:
 
-- **ffmpeg path** — point Lumo at a full ffmpeg (enables Clip export, Merge, and
-  Split). You can select either the `ffmpeg.exe` or the folder that contains it.
+- **ffmpeg path** — point Lumo at a full ffmpeg (enables Clip export, Convert,
+  Merge, and Split). You can select either the `ffmpeg.exe` or the folder that
+  contains it.
 - **Seek-bar thumbnails** — toggle hover previews and set the capture interval.
 - **AI Enhance** — providers, API keys, base URLs, and default model.
 - **Keyboard Shortcuts** — rebind any action.
@@ -420,7 +431,7 @@ Open **Settings** (Tools → Preferences…). Highlights of **Advanced**:
 
 ## 14. Troubleshooting
 
-**"Merge Files… / Split File… / Export Clip" are greyed out.**
+**"Convert… / Merge Files… / Split File… / Export Clip" are greyed out.**
 These need a *full* ffmpeg — the ffmpeg bundled with Lumo is playback-only (no
 muxers). Install ffmpeg (e.g. `winget install Gyan.FFmpeg`) so it's on your PATH,
 **or** set its path in **Settings → Advanced**. Lumo re-checks when you open a
