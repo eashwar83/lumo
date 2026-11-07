@@ -251,16 +251,23 @@ fn build_output(item: &DownloadItem) -> String {
     format!("{}/%(title)s [%(id)s].%(ext)s", item.dest_dir.replace('\\', "/"))
 }
 
-fn run_download(app: &AppHandle, id: &str) {
-    let Some(item) = item_snapshot(id) else { return };
-    let settings = crate::mpv::resolve_ytdlp_settings(app);
-    let Some(ytdl_path) = settings.binary.path else {
-        finish_failed(app, id, "yt-dlp is not available".to_string());
-        return;
-    };
-    let _ = std::fs::create_dir_all(&item.dest_dir);
+struct DownloadAttempt {
+    status: std::io::Result<std::process::ExitStatus>,
+    stderr_tail: String,
+    auth_required: bool,
+    resolved: Option<String>,
+    interrupted: bool,
+}
 
-    let mut command = crate::mpv::ytdlp_base_command(&ytdl_path);
+fn run_download_attempt(
+    app: &AppHandle,
+    id: &str,
+    item: &DownloadItem,
+    ytdl_path: &str,
+    settings: &crate::mpv::YtdlpSettings,
+    use_cookies: bool,
+) -> Result<DownloadAttempt, String> {
+    let mut command = crate::mpv::ytdlp_base_command(ytdl_path);
     command
         .arg("--no-playlist")
         .arg("--newline")
@@ -279,7 +286,7 @@ fn run_download(app: &AppHandle, id: &str) {
         .arg("10")
         .arg("--embed-metadata")
         .arg("-o")
-        .arg(build_output(&item));
+        .arg(build_output(item));
 
     if item.audio_only {
         command
@@ -305,7 +312,9 @@ fn run_download(app: &AppHandle, id: &str) {
     if item.embed_chapters {
         command.arg("--embed-chapters");
     }
-    settings.cookies.apply(&mut command);
+    if use_cookies {
+        settings.cookies.apply(&mut command);
+    }
     if let Some(limit) = rate_limit(app) {
         command.arg("--limit-rate").arg(limit);
     }
@@ -323,14 +332,14 @@ fn run_download(app: &AppHandle, id: &str) {
     command.arg(&item.url);
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
 
-    info!("youtube dl: starting {}", item.id);
-    let mut child = match command.spawn() {
-        Ok(child) => child,
-        Err(error) => {
-            finish_failed(app, id, format!("yt-dlp failed to start: {error}"));
-            return;
-        }
-    };
+    info!(
+        "youtube dl: starting {} ({})",
+        item.id,
+        if use_cookies { "with cookies" } else { "anonymous" }
+    );
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("yt-dlp failed to start: {error}"))?;
     if let Ok(mut pids) = running_pids().lock() {
         pids.insert(id.to_string(), child.id());
     }
@@ -343,11 +352,15 @@ fn run_download(app: &AppHandle, id: &str) {
     let stderr_reader = std::thread::spawn(move || {
         let mut error_line = String::new();
         let mut fallback = String::new();
+        let mut auth_required = false;
         if let Some(stderr) = stderr {
             for line in BufReader::new(stderr).lines().map_while(Result::ok) {
                 let trimmed = line.trim();
                 if trimmed.is_empty() {
                     continue;
+                }
+                if crate::mpv::is_authentication_required_error(trimmed.as_bytes()) {
+                    auth_required = true;
                 }
                 if trimmed.starts_with("ERROR") || trimmed.contains("ERROR:") {
                     error_line = trimmed.to_string();
@@ -356,11 +369,12 @@ fn run_download(app: &AppHandle, id: &str) {
                 }
             }
         }
-        if error_line.is_empty() {
+        let tail = if error_line.is_empty() {
             fallback
         } else {
             error_line
-        }
+        };
+        (tail, auth_required)
     });
 
     let mut last_emit = Instant::now() - Duration::from_secs(1);
@@ -409,14 +423,18 @@ fn run_download(app: &AppHandle, id: &str) {
     if let Ok(mut pids) = running_pids().lock() {
         pids.remove(id);
     }
-    let stderr_tail = stderr_reader.join().unwrap_or_default();
+    let (stderr_tail, auth_required) = stderr_reader.join().unwrap_or_default();
 
     // Pause/cancel kill the process; those statuses are already set.
     let current_status = item_snapshot(id).map(|item| item.status);
     if matches!(current_status.as_deref(), Some("paused") | Some("cancelled")) {
-        persist(app);
-        pump(app);
-        return;
+        return Ok(DownloadAttempt {
+            status,
+            stderr_tail,
+            auth_required,
+            resolved: None,
+            interrupted: true,
+        });
     }
 
     // Try every way of naming the finished file and keep the first that
@@ -424,8 +442,8 @@ fn run_download(app: &AppHandle, id: &str) {
     // the id lookup also covers "already downloaded" runs that print
     // nothing at all.
     let resolved = [
-        final_path.clone(),
-        last_filename.clone().and_then(|name| resolve_final_file(&name)),
+        final_path,
+        last_filename.and_then(|name| resolve_final_file(&name)),
         find_by_video_id(&item.dest_dir, &item.url),
     ]
     .into_iter()
@@ -433,6 +451,70 @@ fn run_download(app: &AppHandle, id: &str) {
     .find(|path| {
         std::path::Path::new(path).is_file() && is_downloaded_media_file(path)
     });
+
+    Ok(DownloadAttempt {
+        status,
+        stderr_tail,
+        auth_required,
+        resolved,
+        interrupted: false,
+    })
+}
+
+fn run_download(app: &AppHandle, id: &str) {
+    let Some(item) = item_snapshot(id) else { return };
+    let settings = crate::mpv::resolve_ytdlp_settings(app);
+    let Some(ytdl_path) = settings.binary.path.clone() else {
+        finish_failed(app, id, "yt-dlp is not available".to_string());
+        return;
+    };
+    let _ = std::fs::create_dir_all(&item.dest_dir);
+
+    // Anonymous first — matching `mpv::ytdlp_resolver`. Passing cookies forces
+    // yt-dlp off `visionos` and onto `web_embedded` + `tv_samsung`, where a
+    // rotated session triggers HTTP 403 Forbidden from YouTube's media CDN on
+    // ordinary public videos. Videos that genuinely need an account say so and
+    // get a second pass with the configured cookies.
+    let mut used_cookies = false;
+    let mut attempt = match run_download_attempt(app, id, &item, &ytdl_path, &settings, false) {
+        Ok(attempt) => attempt,
+        Err(error) => {
+            finish_failed(app, id, error);
+            return;
+        }
+    };
+    if attempt.interrupted {
+        persist(app);
+        pump(app);
+        return;
+    }
+
+    if attempt.resolved.is_none() && attempt.auth_required && settings.cookies.has_any() {
+        info!(
+            "youtube dl: {} needs an account, retrying with saved cookies",
+            item.id
+        );
+        used_cookies = true;
+        attempt = match run_download_attempt(app, id, &item, &ytdl_path, &settings, true) {
+            Ok(attempt) => attempt,
+            Err(error) => {
+                finish_failed(app, id, error);
+                return;
+            }
+        };
+        if attempt.interrupted {
+            persist(app);
+            pump(app);
+            return;
+        }
+    }
+
+    let DownloadAttempt {
+        status,
+        stderr_tail,
+        resolved,
+        ..
+    } = attempt;
     // The finished file on disk is the only real proof of success: a
     // non-zero exit often just means an optional extra (usually subtitles,
     // rate-limited) failed.
@@ -447,7 +529,7 @@ fn run_download(app: &AppHandle, id: &str) {
                     let app_subs = app.clone();
                     let item_subs = item.clone();
                     std::thread::spawn(move || {
-                        fetch_subtitles_with_retries(&app_subs, &item_subs, &path);
+                        fetch_subtitles_with_retries(&app_subs, &item_subs, &path, used_cookies);
                     });
                 }
             }
@@ -566,7 +648,12 @@ fn find_by_video_id(dest_dir: &str, url: &str) -> Option<String> {
 /// YouTube throttles caption requests far more aggressively than media, so
 /// a 429 is common and usually temporary — retry with growing gaps, then
 /// record the outcome on the item.
-fn fetch_subtitles_with_retries(app: &AppHandle, item: &DownloadItem, video_path: &str) {
+fn fetch_subtitles_with_retries(
+    app: &AppHandle,
+    item: &DownloadItem,
+    video_path: &str,
+    use_cookies: bool,
+) {
     const BACKOFFS: [u64; 3] = [0, 30, 120];
     for (attempt, wait) in BACKOFFS.iter().enumerate() {
         if *wait > 0 {
@@ -575,7 +662,7 @@ fn fetch_subtitles_with_retries(app: &AppHandle, item: &DownloadItem, video_path
         if subtitles_exist(video_path) {
             break;
         }
-        fetch_subtitles(app, item, video_path);
+        fetch_subtitles(app, item, video_path, use_cookies);
         if subtitles_exist(video_path) {
             update_item(app, &item.id, |entry| {
                 entry.subtitle_note = Some("subtitles saved".to_string());
@@ -614,7 +701,12 @@ fn subtitles_exist(video_path: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn fetch_subtitles(app: &AppHandle, item: &DownloadItem, video_path: &str) {
+fn fetch_subtitles(
+    app: &AppHandle,
+    item: &DownloadItem,
+    video_path: &str,
+    use_cookies: bool,
+) {
     let settings = crate::mpv::resolve_ytdlp_settings(app);
     let Some(ytdl_path) = settings.binary.path else {
         return;
@@ -647,7 +739,9 @@ fn fetch_subtitles(app: &AppHandle, item: &DownloadItem, video_path: &str) {
         .arg(&item.url)
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    settings.cookies.apply(&mut command);
+    if use_cookies {
+        settings.cookies.apply(&mut command);
+    }
     let _ = command.status();
 }
 

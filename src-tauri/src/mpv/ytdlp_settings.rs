@@ -25,6 +25,20 @@ pub(crate) struct YtdlpCookieSettings {
 }
 
 impl YtdlpCookieSettings {
+    /// True when at least one usable cookie source (an existing file or a
+    /// browser name) is configured.
+    pub(crate) fn has_any(&self) -> bool {
+        self.file
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|path| !path.is_empty() && std::path::Path::new(path).is_file())
+            || self
+                .browser
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|browser| !browser.is_empty())
+    }
+
     /// Appends whichever cookie source is configured, if any.
     pub(crate) fn apply(&self, command: &mut std::process::Command) {
         if let Some(file) = self
@@ -136,4 +150,30 @@ pub(crate) fn resolve(app: &AppHandle) -> YtdlpSettings {
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
     settings
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn has_any_checks_file_existence_and_browser_name() {
+        let empty = YtdlpCookieSettings {
+            browser: None,
+            file: None,
+        };
+        assert!(!empty.has_any());
+
+        let missing_file = YtdlpCookieSettings {
+            browser: None,
+            file: Some("C:/definitely/missing/cookies.txt".to_string()),
+        };
+        assert!(!missing_file.has_any());
+
+        let with_browser = YtdlpCookieSettings {
+            browser: Some("firefox".to_string()),
+            file: None,
+        };
+        assert!(with_browser.has_any());
+    }
 }

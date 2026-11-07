@@ -1,4 +1,4 @@
-﻿use log::{info, warn};
+use log::{info, warn};
 use serde_json::Value;
 use std::io::Read;
 use std::process::{Command, Stdio};
@@ -393,7 +393,7 @@ pub(crate) async fn resolve(
     }
     .selector();
     let raw_url = raw_url.to_string();
-    let has_cookies = cookies.file.is_some() || cookies.browser.is_some();
+    let has_cookies = cookies.has_any();
     let proxy_clone = proxy_url.clone();
     let format_clone = format_selector.clone();
     let url_clone = raw_url.clone();
@@ -1013,7 +1013,7 @@ fn is_likely_direct_stream_url(raw: &str) -> bool {
 /// drags in the playlist-rewriting proxy, so cookies were quietly costing
 /// both quality and the code path that works. They are now a response to
 /// being asked for them rather than the opening move.
-fn is_authentication_required_error(stderr: &[u8]) -> bool {
+pub(crate) fn is_authentication_required_error(stderr: &[u8]) -> bool {
     let text = String::from_utf8_lossy(stderr).to_ascii_lowercase();
     // yt-dlp's own advice to pass cookies, in whichever wording.
     text.contains("--cookies")

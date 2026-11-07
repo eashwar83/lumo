@@ -170,12 +170,50 @@ fn run_json(
     flat: bool,
 ) -> Result<Value, String> {
     let settings = crate::mpv::resolve_ytdlp_settings(app);
-    let Some(ytdl_path) = settings.binary.path else {
+    let Some(ytdl_path) = settings.binary.path.clone() else {
         return Err("yt-dlp is not available".to_string());
     };
     let proxy_url = crate::network::proxy::current_proxy_key(app)?;
 
-    let mut command = crate::mpv::ytdlp_base_command(&ytdl_path);
+    match run_json_once(
+        &ytdl_path,
+        proxy_url.as_deref(),
+        &settings,
+        target,
+        extra_args,
+        flat,
+        false,
+    ) {
+        Ok(value) => Ok(value),
+        Err(error)
+            if settings.cookies.has_any()
+                && crate::mpv::is_authentication_required_error(error.as_bytes()) =>
+        {
+            info!("youtube: {target} needs an account, retrying with saved cookies");
+            run_json_once(
+                &ytdl_path,
+                proxy_url.as_deref(),
+                &settings,
+                target,
+                extra_args,
+                flat,
+                true,
+            )
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn run_json_once(
+    ytdl_path: &str,
+    proxy_url: Option<&str>,
+    settings: &crate::mpv::YtdlpSettings,
+    target: &str,
+    extra_args: &[String],
+    flat: bool,
+    use_cookies: bool,
+) -> Result<Value, String> {
+    let mut command = crate::mpv::ytdlp_base_command(ytdl_path);
     command.arg("--dump-single-json");
     if flat {
         command.arg("--flat-playlist");
@@ -183,10 +221,12 @@ fn run_json(
         command.arg("--no-playlist");
     }
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    if let Some(proxy_url) = proxy_url.as_deref() {
+    if let Some(proxy_url) = proxy_url {
         command.arg("--proxy").arg(proxy_url);
     }
-    settings.cookies.apply(&mut command);
+    if use_cookies {
+        settings.cookies.apply(&mut command);
+    }
     for arg in extra_args {
         command.arg(arg);
     }

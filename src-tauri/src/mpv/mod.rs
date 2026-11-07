@@ -23,6 +23,7 @@ pub(crate) use thumbnails::generate_thumbnails;
 pub(crate) use ffi::SoiaUtils;
 pub(crate) use handle::MpvHandle;
 pub(crate) use ytdlp_resolver::forget_resolution;
+pub(crate) use ytdlp_resolver::is_authentication_required_error;
 pub(crate) use ytdlp_resolver::try_resolve as try_resolve_with_ytdlp;
 pub(crate) use ytdlp_resolver::try_resolve_reporting as try_resolve_with_ytdlp_reporting;
 pub(crate) use ytdlp_resolver::ytdlp_base_command;
