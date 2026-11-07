@@ -271,8 +271,10 @@ notes** — so your history is self-documenting.
 
 ## 7. Framing & Window
 
-- **Aspect ratio** (`E`) — cycle Default / 16:9 / 4:3 / 21:9 / 2.35:1, remembered
-  per file; the window auto-fits to remove letterboxing.
+- **Aspect ratio** (`E`) — cycle Default / 16:9 / 4:3 / 21:9 / 2.35:1, or pick
+  any custom ratio (**Video → Aspect Ratio → Custom Aspect Ratio…**, e.g.
+  `16:10`, `1.85:1`, `2.39:1`, `9:16`), remembered per file; the window
+  auto-fits to remove letterboxing.
 - **Crop** — **Auto-Crop Black Bars** (`C`) uses mpv `cropdetect`; the detected
   crop is remembered per file. **Clear Crop** with `Shift+C`. A black-level
   threshold is available for noisy/analog sources.
@@ -368,8 +370,8 @@ no external tools). **Open Export Folder** (`Ctrl+Shift+E`) reveals the results.
 **Media → Convert…** converts the currently playing local file into another
 container format (**MP4**, **MKV**, **MOV**, **WEBM**, **AVI**, or **TS**),
 with or without re-encoding and with an optional display aspect ratio change
-(**Keep Original**, **16:9**, **4:3**, **21:9**, **2.35:1** — pre-selected if
-you already cycled aspect ratio while watching). When the source codecs fit the
+(**Keep Original**, **16:9**, **4:3**, **21:9**, **2.35:1**, or **Custom** —
+pre-selected if you already changed aspect ratio while watching). When the source codecs fit the
 target container (for example, `.ts` → `.mp4` or `.mkv`), Lumo copies the audio
 and video streams **losslessly** without re-encoding.
 

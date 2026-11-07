@@ -64,6 +64,7 @@ export type CommandRegistryOptions = {
     autoEnhance: () => void;
     resetVideoSettings: () => void;
     cycleAspectRatio: () => void;
+    openCustomAspectRatio: () => void;
     autoCropNow: () => void;
     clearCrop: () => void;
 
@@ -186,6 +187,7 @@ export const useCommandRegistry = (options: CommandRegistryOptions) => {
         action("video.autoEnhance", "Auto Enhance", "Video", options.autoEnhance);
         action("video.resetSettings", "Reset video settings", "Video", options.resetVideoSettings);
         action("video.cycleAspect", "Cycle aspect ratio", "Video", options.cycleAspectRatio);
+        action("video.customAspect", "Custom aspect ratio…", "Video", options.openCustomAspectRatio);
         action("video.autoCrop", "Auto-crop now", "Video", options.autoCropNow);
         action("video.clearCrop", "Clear crop", "Video", options.clearCrop);
         action("video.denoiseToggle", "Toggle denoise", "Video",

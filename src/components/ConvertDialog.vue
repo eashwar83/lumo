@@ -2,6 +2,7 @@
 import { ref, computed, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { parseCustomAspectRatio } from "../composables/useVideoGeometry";
 
 // Convert the currently playing local media file to another container format,
 // with or without re-encoding and with an optional display aspect ratio change.
@@ -49,10 +50,17 @@ const ASPECT_OPTIONS: { label: string; value: string; matchLabel: string }[] = [
 
 const format = ref<TargetFormat>("mp4");
 const aspect = ref<string>("-1");
+const customAspect = ref<string>("");
 const reencodeChoice = ref(false);
 const inspect = ref<ConvertInspect | null>(null);
 const busy = ref(false);
 const statusText = ref("");
+
+const parsedCustomAspect = computed(() => {
+    const parsed = parseCustomAspectRatio(customAspect.value);
+    if (!parsed || parsed.value === "-1") return null;
+    return parsed;
+});
 
 const fileName = (path: string) => path.split(/[\\/]/).pop() || path;
 const folderOf = (path: string) => {
@@ -88,7 +96,16 @@ const initialise = () => {
     const matched = ASPECT_OPTIONS.find(
         (opt) => opt.matchLabel === props.currentAspectLabel,
     );
-    aspect.value = matched ? matched.value : "-1";
+    if (matched) {
+        aspect.value = matched.value;
+        customAspect.value = "";
+    } else if (props.currentAspectLabel && props.currentAspectLabel !== "Default") {
+        aspect.value = "custom";
+        customAspect.value = props.currentAspectLabel;
+    } else {
+        aspect.value = "-1";
+        customAspect.value = "";
+    }
     reencodeChoice.value = false;
     inspect.value = null;
     statusText.value = "";
@@ -170,7 +187,20 @@ const willReencode = computed(() => {
     return reencodeChoice.value;
 });
 
-const canConvert = computed(() => !busy.value && !!props.currentPath);
+const canConvert = computed(
+    () =>
+        !busy.value &&
+        !!props.currentPath &&
+        (aspect.value !== "custom" || !!parsedCustomAspect.value),
+);
+
+const effectiveAspect = computed<string | null>(() => {
+    if (aspect.value === "-1") return null;
+    if (aspect.value === "custom") {
+        return parsedCustomAspect.value?.value ?? null;
+    }
+    return aspect.value;
+});
 
 const runConvert = async () => {
     if (!canConvert.value) return;
@@ -201,7 +231,7 @@ const runConvert = async () => {
             output,
             format: targetFmt,
             reencode: willReencode.value,
-            aspect: aspect.value === "-1" ? null : aspect.value,
+            aspect: effectiveAspect.value,
         });
         emit("notify", `Converted → ${fileName(saved)}`);
         emit("close");
@@ -270,6 +300,39 @@ const runConvert = async () => {
                         >
                             {{ opt.label }}
                         </button>
+                        <button
+                            class="convert__pill"
+                            :class="{ 'convert__pill--active': aspect === 'custom' }"
+                            type="button"
+                            :disabled="busy"
+                            @click="aspect = 'custom'"
+                        >
+                            Custom
+                        </button>
+                    </div>
+                    <div v-if="aspect === 'custom'" class="convert__custom-aspect">
+                        <input
+                            v-model="customAspect"
+                            class="convert__input"
+                            type="text"
+                            :disabled="busy"
+                            placeholder="e.g. 16:10, 1.85:1, 2.39, 9:16"
+                            @keydown.stop
+                        />
+                        <span
+                            v-if="customAspect.trim() && !parsedCustomAspect"
+                            class="convert__custom-hint convert__custom-hint--warn"
+                        >
+                            Invalid ratio
+                        </span>
+                        <span
+                            v-else-if="parsedCustomAspect"
+                            class="convert__custom-hint"
+                        >
+                            {{ parsedCustomAspect.label }} ({{
+                                parsedCustomAspect.numericRatio.toFixed(2)
+                            }}:1)
+                        </span>
                     </div>
                 </div>
 
@@ -424,6 +487,35 @@ const runConvert = async () => {
 .convert__pill:disabled {
     opacity: 0.45;
     cursor: default;
+}
+.convert__custom-aspect {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 8px;
+}
+.convert__input {
+    flex: 1;
+    min-width: 0;
+    padding: 7px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 7px;
+    background: rgba(0, 0, 0, 0.28);
+    color: #fff;
+    font-size: 12.5px;
+    font-family: inherit;
+    outline: none;
+}
+.convert__input:focus {
+    border-color: rgba(196, 160, 255, 0.65);
+}
+.convert__custom-hint {
+    font-size: 11.5px;
+    color: rgba(255, 255, 255, 0.6);
+    white-space: nowrap;
+}
+.convert__custom-hint--warn {
+    color: #ffb454;
 }
 .convert__checkbox {
     display: inline-flex;

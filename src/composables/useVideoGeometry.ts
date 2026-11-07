@@ -15,7 +15,7 @@ export type PerFileVideo = {
 type StoredPerFileVideo = Record<string, PerFileVideo>;
 
 // mpv `video-aspect-override` values. "-1" restores the container's own aspect.
-const ASPECT_PRESETS: { label: string; value: string }[] = [
+export const ASPECT_PRESETS: { label: string; value: string }[] = [
     { label: "Default", value: "-1" },
     { label: "16:9", value: "16:9" },
     { label: "4:3", value: "4:3" },
@@ -23,11 +23,117 @@ const ASPECT_PRESETS: { label: string; value: string }[] = [
     { label: "2.35:1", value: "2.35" },
 ];
 
+export type ParsedAspectRatio = {
+    /** Value passed to mpv `video-aspect-override` and ffmpeg `convert_file`. */
+    value: string;
+    /** Human-readable label shown in menus and OSD. */
+    label: string;
+    /** Numeric width / height ratio (0 for Default). */
+    numericRatio: number;
+};
+
+const cleanNumber = (n: number): string =>
+    Number.isInteger(n) ? String(n) : String(Math.round(n * 1000) / 1000);
+
+/**
+ * Parses a preset or custom aspect ratio string (e.g. "16:10", "16/10",
+ * "1.85:1", "2.39", "9:16", "-1", "Default") into a normalised value + label.
+ * Returns null when the input is not a valid positive aspect ratio.
+ */
+export const parseCustomAspectRatio = (raw: string): ParsedAspectRatio | null => {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    const lower = trimmed.toLowerCase();
+    if (lower === "-1" || lower === "default" || lower === "keep" || lower === "original") {
+        return { value: "-1", label: "Default", numericRatio: 0 };
+    }
+
+    const presetDirect = ASPECT_PRESETS.find(
+        (p) => p.value.toLowerCase() === lower || p.label.toLowerCase() === lower,
+    );
+    if (presetDirect) {
+        if (presetDirect.value === "-1") {
+            return { value: "-1", label: "Default", numericRatio: 0 };
+        }
+        const parts = presetDirect.value.split(":");
+        const ratio =
+            parts.length === 2
+                ? Number(parts[0]) / Number(parts[1])
+                : Number(presetDirect.value);
+        return {
+            value: presetDirect.value,
+            label: presetDirect.label,
+            numericRatio: ratio,
+        };
+    }
+
+    const sepMatch = trimmed.match(/^([0-9]+(?:\.[0-9]+)?)\s*[:/]\s*([0-9]+(?:\.[0-9]+)?)$/);
+    if (sepMatch) {
+        const w = Number.parseFloat(sepMatch[1]);
+        const h = Number.parseFloat(sepMatch[2]);
+        if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+            return null;
+        }
+        const ratio = w / h;
+        if (ratio < 0.1 || ratio > 10) return null;
+        const wStr = cleanNumber(w);
+        const hStr = cleanNumber(h);
+        const candidateColon = `${wStr}:${hStr}`;
+        const presetMatch = ASPECT_PRESETS.find(
+            (p) =>
+                p.value === candidateColon ||
+                p.label === candidateColon ||
+                (h === 1 && p.value === wStr),
+        );
+        if (presetMatch) {
+            return {
+                value: presetMatch.value,
+                label: presetMatch.label,
+                numericRatio: ratio,
+            };
+        }
+        if (h === 1 && !Number.isInteger(w)) {
+            return {
+                value: wStr,
+                label: `${wStr}:1`,
+                numericRatio: ratio,
+            };
+        }
+        return {
+            value: candidateColon,
+            label: candidateColon,
+            numericRatio: ratio,
+        };
+    }
+
+    if (/^[0-9]+(?:\.[0-9]+)?$/.test(trimmed)) {
+        const val = Number.parseFloat(trimmed);
+        if (!Number.isFinite(val) || val < 0.1 || val > 10) return null;
+        const valStr = cleanNumber(val);
+        const presetMatch = ASPECT_PRESETS.find((p) => p.value === valStr);
+        if (presetMatch) {
+            return {
+                value: presetMatch.value,
+                label: presetMatch.label,
+                numericRatio: val,
+            };
+        }
+        return {
+            value: valStr,
+            label: `${valStr}:1`,
+            numericRatio: val,
+        };
+    }
+
+    return null;
+};
+
 const MAX_ENTRIES = 300;
 
 export const useVideoGeometry = () => {
     const entries = new Map<string, PerFileVideo>();
     const persistedSaver = createDebouncedUiStateSaver(300);
+    const currentAspectValue = ref("-1");
     const currentAspectLabel = ref("Default");
 
     let currentKey = "";
@@ -61,41 +167,54 @@ export const useVideoGeometry = () => {
         }
     };
 
-    const aspectIndexForValue = (value?: string): number => {
-        if (!value) return 0;
-        const index = ASPECT_PRESETS.findIndex((preset) => preset.value === value);
-        return index >= 0 ? index : 0;
+    const resolveSavedAspect = (value?: string): { value: string; label: string } => {
+        if (!value) return ASPECT_PRESETS[0];
+        const parsed = parseCustomAspectRatio(value);
+        return parsed ? { value: parsed.value, label: parsed.label } : ASPECT_PRESETS[0];
     };
 
     const applyAspectForMedia = async (key: string) => {
         currentKey = normalizeKey(key);
         const saved = entries.get(currentKey)?.aspect;
-        const index = aspectIndexForValue(saved);
-        currentAspectLabel.value = ASPECT_PRESETS[index].label;
+        const resolved = resolveSavedAspect(saved);
+        currentAspectValue.value = resolved.value;
+        currentAspectLabel.value = resolved.label;
         // Always set the override explicitly so a previous file's aspect never
         // leaks into a file that has no saved preference ("-1" = container).
-        await setProp("video-aspect-override", ASPECT_PRESETS[index].value);
+        await setProp("video-aspect-override", resolved.value);
+    };
+
+    // Apply an explicit preset or custom aspect ratio, remember it per-file, and
+    // return the OSD label for the caller to surface.
+    const setAspect = async (rawValue: string): Promise<string> => {
+        const resolved = resolveSavedAspect(rawValue);
+        currentAspectValue.value = resolved.value;
+        currentAspectLabel.value = resolved.label;
+        await setProp("video-aspect-override", resolved.value);
+        if (currentKey) {
+            const existing = entries.get(currentKey) ?? {};
+            const nextAspect = resolved.value === "-1" ? undefined : resolved.value;
+            if (!nextAspect && !existing.crop && !existing.fitWindow) {
+                entries.delete(currentKey);
+            } else {
+                touch(currentKey, {
+                    ...existing,
+                    aspect: nextAspect,
+                });
+            }
+            persist();
+        }
+        return resolved.label;
     };
 
     // Advance to the next aspect preset, apply it, remember it. Returns the OSD
     // label for the caller to surface.
     const cycleAspect = async (): Promise<string> => {
-        const current = aspectIndexForValue(entries.get(currentKey)?.aspect);
-        const next = (current + 1) % ASPECT_PRESETS.length;
+        const saved = entries.get(currentKey)?.aspect ?? currentAspectValue.value;
+        const currentIndex = ASPECT_PRESETS.findIndex((preset) => preset.value === saved);
+        const next = currentIndex >= 0 ? (currentIndex + 1) % ASPECT_PRESETS.length : 0;
         const preset = ASPECT_PRESETS[next];
-        currentAspectLabel.value = preset.label;
-        await setProp("video-aspect-override", preset.value);
-        if (currentKey) {
-            const existing = entries.get(currentKey) ?? {};
-            // "Default" is the natural state — store undefined so we don't keep
-            // a redundant entry around.
-            touch(currentKey, {
-                ...existing,
-                aspect: preset.value === "-1" ? undefined : preset.value,
-            });
-            persist();
-        }
-        return preset.label;
+        return setAspect(preset.value);
     };
 
     const getCrop = (key: string): string | null => {
@@ -152,8 +271,10 @@ export const useVideoGeometry = () => {
     });
 
     return {
+        currentAspectValue,
         currentAspectLabel,
         applyAspectForMedia,
+        setAspect,
         cycleAspect,
         getCrop,
         setCrop,

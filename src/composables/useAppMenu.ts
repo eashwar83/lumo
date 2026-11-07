@@ -16,6 +16,7 @@ import type {
     VideoEnhancementsController,
 } from "./useVideoEnhancements";
 import type { VideoPresetsController } from "./useVideoPresets";
+import { ASPECT_PRESETS } from "./useVideoGeometry";
 
 // Builds the application menu tree. Everything here is a thin wrapper over
 // actions that already exist elsewhere — the menu is an additional route to
@@ -46,6 +47,7 @@ export type AppMenuOptions = {
     isDualSubEnabled: () => boolean;
     currentSpeed: () => number;
     playbackRates: () => number[];
+    aspectValue: () => string;
     aspectLabel: () => string;
     hasAbRange: () => boolean;
     /** Range exports: local files, and YouTube (the range is fetched first). */
@@ -105,6 +107,8 @@ export type AppMenuOptions = {
     toggleFullscreen: () => void;
     toggleAlwaysOnTop: () => void;
     cycleAspectRatio: () => void;
+    setAspectRatio: (value: string) => void;
+    openCustomAspectRatio: () => void;
     autoCropNow: () => void;
     clearCrop: () => void;
     fitWindowToVideo: () => void;
@@ -700,11 +704,43 @@ export const useAppMenu = (options: AppMenuOptions) => {
             },
             sep,
             {
-                kind: "action",
+                kind: "submenu",
                 label: `Aspect Ratio · ${options.aspectLabel()}`,
-                shortcut: key("cycleAspectRatio"),
                 disabled: !loaded,
-                run: options.cycleAspectRatio,
+                children: [
+                    {
+                        kind: "action",
+                        label: "Cycle Aspect Ratio",
+                        shortcut: key("cycleAspectRatio"),
+                        run: options.cycleAspectRatio,
+                    },
+                    sep,
+                    ...ASPECT_PRESETS.map((preset) => ({
+                        kind: "action" as const,
+                        label: preset.label,
+                        checked: options.aspectValue() === preset.value,
+                        run: () => options.setAspectRatio(preset.value),
+                    })),
+                    ...(!ASPECT_PRESETS.some(
+                        (preset) => preset.value === options.aspectValue(),
+                    )
+                        ? [
+                              {
+                                  kind: "action" as const,
+                                  label: options.aspectLabel(),
+                                  checked: true,
+                                  run: () =>
+                                      options.setAspectRatio(options.aspectValue()),
+                              },
+                          ]
+                        : []),
+                    sep,
+                    {
+                        kind: "action",
+                        label: "Custom Aspect Ratio…",
+                        run: options.openCustomAspectRatio,
+                    },
+                ],
             },
             {
                 kind: "submenu",

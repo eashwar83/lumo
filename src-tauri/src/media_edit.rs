@@ -770,10 +770,14 @@ fn parse_aspect_spec(raw: Option<&str>) -> Option<AspectSpec> {
     {
         return None;
     }
-    if let Some((l, r)) = text.split_once(':') {
+    if let Some((l, r)) = text.split_once(':').or_else(|| text.split_once('/')) {
         let num = l.trim().parse::<f64>().ok()?;
         let den = r.trim().parse::<f64>().ok()?;
-        if !(num > 0.0 && den > 0.0) {
+        if !(num > 0.0 && den > 0.0 && num.is_finite() && den.is_finite()) {
+            return None;
+        }
+        let ratio = num / den;
+        if !(0.1..=10.0).contains(&ratio) {
             return None;
         }
         let scaled_num = (num * 1000.0).round() as u64;
@@ -788,7 +792,7 @@ fn parse_aspect_spec(raw: Option<&str>) -> Option<AspectSpec> {
         });
     }
     let val = text.parse::<f64>().ok()?;
-    if !(val > 0.0) {
+    if !(val > 0.0 && val.is_finite() && (0.1..=10.0).contains(&val)) {
         return None;
     }
     let scaled_num = (val * 1000.0).round() as u64;
@@ -1113,6 +1117,30 @@ mod tests {
                 dar_num: 47,
                 dar_den: 20,
                 ffmpeg_arg: "47:20".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_aspect_spec(Some("16:10")),
+            Some(AspectSpec {
+                dar_num: 8,
+                dar_den: 5,
+                ffmpeg_arg: "8:5".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_aspect_spec(Some("16/10")),
+            Some(AspectSpec {
+                dar_num: 8,
+                dar_den: 5,
+                ffmpeg_arg: "8:5".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_aspect_spec(Some("1.85:1")),
+            Some(AspectSpec {
+                dar_num: 37,
+                dar_den: 20,
+                ffmpeg_arg: "37:20".to_string(),
             })
         );
     }

@@ -34,6 +34,7 @@ import ConfirmDialog from "./components/ConfirmDialog.vue";
 import ContextMenu from "./components/ContextMenu.vue";
 import OnlineSubtitleDialog from "./components/OnlineSubtitleDialog.vue";
 import ConvertDialog from "./components/ConvertDialog.vue";
+import CustomAspectDialog from "./components/CustomAspectDialog.vue";
 import MergeDialog from "./components/MergeDialog.vue";
 import SplitDialog from "./components/SplitDialog.vue";
 import SubtitleAiDialog from "./components/SubtitleAiDialog.vue";
@@ -1287,10 +1288,23 @@ const onFitWindowToVideo = async () => {
     showMessageOverlay("Fit to window");
 };
 
+const customAspectOpen = ref(false);
+
 const onCycleAspectRatio = async () => {
     const label = await geometry.cycleAspect();
     await fitWindowToVideoDisplay();
     showMessageOverlay(`Aspect: ${label}`);
+};
+
+const onSetAspectRatio = async (value: string) => {
+    const label = await geometry.setAspect(value);
+    await fitWindowToVideoDisplay();
+    showMessageOverlay(`Aspect: ${label}`);
+};
+
+const onOpenCustomAspectRatio = () => {
+    if (!player.state.media.isFileLoaded) return;
+    customAspectOpen.value = true;
 };
 
 // Auto Enhance: sample the current frame in Rust, then apply the suggested
@@ -2305,6 +2319,7 @@ const commandRegistry = useCommandRegistry({
     autoEnhance: () => void onAutoEnhance(),
     resetVideoSettings: () => void onResetVideoSettings(),
     cycleAspectRatio: () => void onCycleAspectRatio(),
+    openCustomAspectRatio: onOpenCustomAspectRatio,
     autoCropNow: () => void autoCrop.detectNow(),
     clearCrop: () => void autoCrop.clear(),
 
@@ -2343,6 +2358,7 @@ const { menus: appMenus } = useAppMenu({
     isDualSubEnabled: () => tracks.dualSubEnabled.value,
     currentSpeed: () => player.state.playback.speed,
     playbackRates: () => [...speed.playbackRates],
+    aspectValue: () => geometry.currentAspectValue.value,
     aspectLabel: () => geometry.currentAspectLabel.value,
     hasAbRange: () => abRange.hasRange.value,
     canExportRange: () => canExportRange.value,
@@ -2407,6 +2423,8 @@ const { menus: appMenus } = useAppMenu({
     toggleFullscreen: () => void onToggleFullscreen(),
     toggleAlwaysOnTop: () => void toggleAlwaysOnTop(),
     cycleAspectRatio: () => void onCycleAspectRatio(),
+    setAspectRatio: (value) => void onSetAspectRatio(value),
+    openCustomAspectRatio: onOpenCustomAspectRatio,
     autoCropNow: () => void autoCrop.detectNow(),
     clearCrop: () => void autoCrop.clear(),
     fitWindowToVideo: () => void onFitWindowToVideo(),
@@ -2488,6 +2506,10 @@ const closeTopOverlay = (): boolean => {
     }
     if (settingsExportPrompt.value) {
         resolveSettingsExport(null);
+        return true;
+    }
+    if (customAspectOpen.value) {
+        customAspectOpen.value = false;
         return true;
     }
     if (convertOpen.value) {
@@ -2968,6 +2990,14 @@ useAppStartupBindings({
             @close="tracks.closeOnlineSubtitleDialog"
             @provider-change="tracks.setOnlineSubtitleProvider"
             @select="tracks.addSelectedOnlineSubtitleTrack"
+        />
+
+        <CustomAspectDialog
+            :open="customAspectOpen"
+            :current-value="geometry.currentAspectValue.value"
+            :current-label="geometry.currentAspectLabel.value"
+            @close="customAspectOpen = false"
+            @apply="onSetAspectRatio"
         />
 
         <ConvertDialog
